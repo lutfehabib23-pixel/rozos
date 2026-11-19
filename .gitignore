@@ -4,3 +4,4 @@ limine/
 *.img
 *.o
 *.d
+limine-protocol/
