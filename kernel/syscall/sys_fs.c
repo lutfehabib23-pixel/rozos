@@ -9,11 +9,18 @@
 #include <rozos/syscall.h>
 #include <rozos/proc.h>
 #include <rozos/vfs.h>
+#include <rozos/devfs.h>
 #include <rozos/uaccess.h>
 #include <rozos/heap.h>
 #include <rozos/errno.h>
 #include <rozos/string.h>
 #include <rozos/console.h>
+#include <rozos/sched.h>
+#include <rozos/fbdev.h>
+#include <rozos/pty.h>
+#include <rozos/ttyctl.h>
+#include <rozos/timer.h>
+#include <arch/x86_64/cpu.h>
 
 #define IO_CHUNK (64 * 1024)
 
@@ -39,6 +46,7 @@ typedef char linux_stat_size_check[(sizeof(struct linux_stat) == 144) ? 1 : -1];
 
 #define S_IFCHR 0020000
 #define S_IFSOCK 0140000
+#define S_IFIFO 0010000
 #define S_IFDIR 0040000
 #define S_IFREG 0100000
 
@@ -46,13 +54,23 @@ typedef char linux_stat_size_check[(sizeof(struct linux_stat) == 144) ? 1 : -1];
 #define DT_DIR 4
 #define DT_REG 8
 
-#define TCGETS     0x5401
-#define TIOCGWINSZ 0x5413
-#define TIOCSWINSZ 0x5414
+/* ধাপ ১২: rozOS-এর নিজস্ব — serial টার্মিনালের মাপ জিজ্ঞেস করে কনসোলের মাপ বসানো।
+ * DETECT: হাতে (stty ROWS COLS) বসানো থাকলে সেটাই রাখে; DETECT_FORCE: সবসময় জিজ্ঞেস করে */
+#define TIOCROZDETECT       0x54F0
+#define TIOCROZDETECT_FORCE 0x54F1
+#define TIOCROZSETFONT      0x54F2   /* ধাপ ১৩: struct rozos_font_req (setfont) */
+
+struct rozos_font_req {
+    uint32_t width, height;          /* পিক্সেল; width ≤ 16, height ≤ 32 */
+    uint32_t flags;                  /* 1 = বুটের ফন্টে ফেরা (data লাগে না) */
+    uint32_t pad;
+    uint64_t data;                   /* 256 গ্লিফ, প্রতিটা height × ((width+7)/8) বাইট */
+};
 
 /* ধাপ ৭: কনসোলের মাপ। 0 = স্ক্রিনের মাপ (ফ্রেমবাফার/VGA), স্ক্রিন না থাকলে 80x24।
  * serial টার্মিনালের মাপ আলাদা হলে `stty <rows> <cols>` (TIOCSWINSZ) দিয়ে বদলানো যায়। */
 static uint16_t console_rows, console_cols;
+static int console_manual;               /* ধাপ ১২: stty ROWS COLS দিয়ে বসানো */
 
 static int user_path(uint64_t upath, char *out)
 {
@@ -220,6 +238,101 @@ static int64_t sys_dup2(struct interrupt_frame *f, uint64_t oldfd, uint64_t newf
     return vfs_dup2((int)oldfd, (int)newfd);
 }
 
+/* ---------- ধাপ ১৩: pipe, poll ---------- */
+
+static int64_t sys_pipe2(struct interrupt_frame *f, uint64_t ufds, uint64_t flags, uint64_t a3,
+                         uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    int fds[2], r;
+    (void)f; (void)flags; (void)a3; (void)a4; (void)a5; (void)a6;   /* O_CLOEXEC/O_NONBLOCK এখনো নয় */
+    r = vfs_pipe(fds);
+    if (r < 0) return r;
+    if (copy_to_user((void *)(uintptr_t)ufds, fds, sizeof(fds)) < 0) {
+        vfs_close(fds[0]);
+        vfs_close(fds[1]);
+        return -EFAULT;
+    }
+    return 0;
+}
+
+static int64_t sys_pipe(struct interrupt_frame *f, uint64_t ufds, uint64_t a2, uint64_t a3,
+                        uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    (void)a2; (void)a6;
+    return sys_pipe2(f, ufds, 0, a3, a4, a5, 0);
+}
+
+/* ধাপ ১৪ */
+static int64_t sys_openpty(struct interrupt_frame *f, uint64_t ufds, uint64_t a2, uint64_t a3,
+                           uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    int fds[2], r;
+    (void)f; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+    r = pty_open(fds);
+    if (r < 0) return r;
+    if (copy_to_user((void *)(uintptr_t)ufds, fds, sizeof(fds)) < 0) {
+        vfs_close(fds[0]);
+        vfs_close(fds[1]);
+        return -EFAULT;
+    }
+    return 0;
+}
+
+struct k_pollfd {
+    int32_t fd;
+    int16_t events, revents;
+};
+
+#define POLL_MAX_FDS 256
+
+/* poll(fds, nfds, timeout_ms): timeout < 0 = চিরকাল, 0 = শুধু দেখা।
+ * অপেক্ষা sched_relax() দিয়ে (devfs/pipe-এর মতো), প্রতিবার সব fd আবার দেখা। */
+static int64_t sys_poll(struct interrupt_frame *f, uint64_t ufds, uint64_t nfds, uint64_t timeout,
+                        uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    struct k_pollfd *k;
+    int64_t tmo = (int64_t)(int32_t)timeout;
+    uint64_t end = 0;
+    int ready;
+    size_t i, bytes;
+    (void)f; (void)a4; (void)a5; (void)a6;
+    if (nfds > POLL_MAX_FDS) return -EINVAL;
+    bytes = nfds * sizeof(*k);
+    k = (struct k_pollfd *)kmalloc(bytes ? bytes : 1);
+    if (!k) return -ENOMEM;
+    if (bytes && copy_from_user(k, (const void *)(uintptr_t)ufds, bytes) < 0) {
+        kfree(k);
+        return -EFAULT;
+    }
+    if (tmo > 0) end = timer_uptime_ms() + (uint64_t)tmo;
+    for (;;) {
+        ready = 0;
+        for (i = 0; i < nfds; i++) {
+            int ev, want;
+            k[i].revents = 0;
+            if (k[i].fd < 0) continue;
+            want = (uint16_t)k[i].events | VFS_POLLERR | VFS_POLLHUP | VFS_POLLNVAL;
+            ev = vfs_poll_fd(k[i].fd, k[i].events);
+            k[i].revents = (int16_t)(ev & want);
+            if (k[i].revents) ready++;
+        }
+        if (ready || tmo == 0 || (tmo > 0 && timer_uptime_ms() >= end)) break;
+        cpu_cli();
+        if (sched_should_abort()) {
+            cpu_sti();
+            kfree(k);
+            return -EINTR;
+        }
+        sched_relax();                                  /* IF = 1 করে ফেরে */
+    }
+    if (bytes && copy_to_user((void *)(uintptr_t)ufds, k, bytes) < 0) {
+        kfree(k);
+        return -EFAULT;
+    }
+    kfree(k);
+    return ready;
+}
+
 static int fill_linux_stat(const struct vfs_stat *st, uint64_t ust)
 {
     struct linux_stat ls;
@@ -229,7 +342,7 @@ static int fill_linux_stat(const struct vfs_stat *st, uint64_t ust)
     ls.st_nlink = st->nlink;
     ls.st_mode = (st->mode & 07777) |
                  (st->type == VNODE_DIR ? S_IFDIR : st->type == VNODE_CHARDEV ? S_IFCHR :
-                  st->type == VNODE_SOCKET ? S_IFSOCK : S_IFREG);
+                  st->type == VNODE_SOCKET ? S_IFSOCK : st->type == VNODE_FIFO ? S_IFIFO : S_IFREG);
     ls.st_size = (int64_t)st->size;
     ls.st_blksize = 4096;
     ls.st_blocks = (int64_t)((st->size + 511) / 512);
@@ -429,6 +542,29 @@ static int64_t sys_ioctl(struct interrupt_frame *f, uint64_t fd, uint64_t req, u
     if (st.type != VNODE_CHARDEV) {
         return -ENOTTY;
     }
+    {
+        /* ধাপ ১৩: /dev/fb0-এর নিজস্ব ioctl; ধাপ ১৪: PTY, কনসোলের pgrp/termios */
+        struct vnode *vn = vfs_fd_vnode((int)fd);
+        if (vn && fbdev_is_vnode(vn)) {
+            int r = fbdev_ioctl(vn, req, arg, copy_to_user);
+            vnode_unref(vn);
+            return r;
+        }
+        if (vn && pty_is_vnode(vn)) {
+            int r = pty_ioctl(vn, req, arg, copy_from_user, copy_to_user);
+            vnode_unref(vn);
+            return r;
+        }
+        if (vn) {
+            const char *nm = devfs_vnode_name(vn);
+            vnode_unref(vn);
+            if (nm && (!strcmp(nm, "console") || !strcmp(nm, "serial0"))) {
+                int r = ttyctl_ioctl(!strcmp(nm, "console") ? console_ttyctl() : serial_ttyctl(),
+                                     req, arg, copy_from_user, copy_to_user);
+                if (r != -ENOTTY) return r;
+            }
+        }
+    }
     if (req == TIOCGWINSZ) {
         uint16_t ws[4];
         ws[0] = console_rows ? console_rows : (tty_rows() ? (uint16_t)tty_rows() : 24);
@@ -446,7 +582,56 @@ static int64_t sys_ioctl(struct interrupt_frame *f, uint64_t fd, uint64_t req, u
         }
         console_rows = ws[0];                    /* 0 = আবার স্ক্রিনের মাপ */
         console_cols = ws[1];
+        console_manual = ws[0] != 0;
         return 0;
+    }
+    if (req == TIOCROZSETFONT) {
+        struct rozos_font_req fr;
+        uint8_t *buf;
+        size_t bytes;
+        int r;
+        if (copy_from_user(&fr, (const void *)(uintptr_t)arg, sizeof(fr)) < 0) return -EFAULT;
+        if (fr.flags & 1) {
+            font_reset();
+            tty_font_changed();
+            return 0;
+        }
+        if (fr.width == 0 || fr.width > 16 || fr.height == 0 || fr.height > 32) return -EINVAL;
+        bytes = (size_t)256 * fr.height * ((fr.width + 7) / 8);
+        buf = (uint8_t *)kmalloc(bytes);
+        if (!buf) return -ENOMEM;
+        if (copy_from_user(buf, (const void *)(uintptr_t)fr.data, bytes) < 0) {
+            kfree(buf);
+            return -EFAULT;
+        }
+        r = font_set(buf, fr.width, fr.height);
+        kfree(buf);
+        if (r < 0) return -EINVAL;
+        tty_font_changed();
+        console_rows = console_cols = 0;     /* টেক্সট মাপ বদলেছে */
+        console_manual = 0;
+        return 0;
+    }
+    if (req == TIOCROZDETECT || req == TIOCROZDETECT_FORCE) {
+        uint16_t ws[4];
+        uint32_t r, c;
+        if (req == TIOCROZDETECT_FORCE || !console_manual) {
+            if (console_query_size(&r, &c) == 0) {
+                /* স্ক্রিন (ফ্রেমবাফার) থাকলে দুটোর ছোটটা — দুই জায়গাতেই ঠিক দেখায় */
+                if (tty_rows() && r > tty_rows()) r = tty_rows();
+                if (tty_cols() && c > tty_cols()) c = tty_cols();
+                console_rows = (uint16_t)r;
+                console_cols = (uint16_t)c;
+                console_manual = 0;
+            } else if (req == TIOCROZDETECT_FORCE) {
+                console_rows = console_cols = 0;  /* উত্তর নেই: স্ক্রিনের মাপ */
+                console_manual = 0;
+            }
+        }
+        ws[0] = console_rows ? console_rows : (tty_rows() ? (uint16_t)tty_rows() : 24);
+        ws[1] = console_cols ? console_cols : (tty_cols() ? (uint16_t)tty_cols() : 80);
+        ws[2] = ws[3] = 0;
+        return arg ? copy_to_user((void *)(uintptr_t)arg, ws, sizeof(ws)) : 0;
     }
     if (req == TCGETS) {
         uint8_t termios[60];
@@ -476,4 +661,8 @@ void sys_fs_register(void)
     syscall_register(SYS_unlink, sys_unlink, "unlink");
     syscall_register(SYS_truncate, sys_truncate, "truncate");
     syscall_register(SYS_ioctl, sys_ioctl, "ioctl");
+    syscall_register(SYS_pipe, sys_pipe, "pipe");          /* ধাপ ১৩ */
+    syscall_register(SYS_pipe2, sys_pipe2, "pipe2");
+    syscall_register(SYS_poll, sys_poll, "poll");
+    syscall_register(SYS_rozos_openpty, sys_openpty, "openpty");   /* ধাপ ১৪ */
 }

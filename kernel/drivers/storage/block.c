@@ -76,7 +76,7 @@ int block_register(struct block_device *dev, const char *prefix)
         return -ENAMETOOLONG;
     }
     for (i = 0; i < dev_count; i++) {
-        if (!strncmp(devices[i]->name, prefix, plen)) {
+        if (!devices[i]->parent && !strncmp(devices[i]->name, prefix, plen)) {   /* partition গোনা নয় */
             n++;
         }
     }
@@ -85,6 +85,31 @@ int block_register(struct block_device *dev, const char *prefix)
     dev->name[plen + 1] = '\0';
     devices[dev_count++] = dev;
     devfs_register(dev->name, dev_file_read, dev_file_write, dev);
+    return 0;
+}
+
+int block_register_partition(struct block_device *part)
+{
+    struct block_device *disk = part->parent;
+    size_t plen;
+    if (!disk || dev_count >= BLOCK_MAX_DEVICES || part->part_number == 0 || part->part_number > 99) {
+        return -EINVAL;
+    }
+    plen = strlen(disk->name);
+    if (plen + 3 > BLOCK_NAME_MAX) {
+        return -ENAMETOOLONG;
+    }
+    memcpy(part->name, disk->name, plen);
+    if (part->part_number >= 10) {
+        part->name[plen++] = (char)('0' + part->part_number / 10);
+    }
+    part->name[plen++] = (char)('0' + part->part_number % 10);
+    part->name[plen] = '\0';
+    part->sector_size = disk->sector_size;
+    part->ops = NULL;
+    memcpy(part->model, disk->model, sizeof(part->model));
+    devices[dev_count++] = part;
+    devfs_register(part->name, dev_file_read, dev_file_write, part);
     return 0;
 }
 
@@ -201,10 +226,26 @@ static int load_chunk(struct block_device *dev, uint64_t chunk, struct cache_ent
 
 /* ---------- পড়া/লেখা ---------- */
 
+/* ধাপ ১১খ: partition-এর offset → parent ডিস্কের offset (সীমা যাচাই partition-এর মাপে) */
+static int to_disk(struct block_device **dev, uint64_t *offset, size_t len, int write)
+{
+    struct block_device *d = *dev;
+    if (*offset + len > d->sector_count * d->sector_size) {
+        return -EINVAL;
+    }
+    while (d->parent) {
+        if (write) d->writes++; else d->reads++;
+        *offset += d->start_lba * d->sector_size;
+        d = d->parent;
+    }
+    *dev = d;
+    return 0;
+}
+
 static int do_block_read_bytes(struct block_device *dev, uint64_t offset, void *buf, size_t len)
 {
     uint8_t *out = (uint8_t *)buf;
-    if (offset + len > dev->sector_count * dev->sector_size) {
+    if (to_disk(&dev, &offset, len, 0) < 0 || offset + len > dev->sector_count * dev->sector_size) {
         return -EINVAL;
     }
     while (len) {
@@ -231,7 +272,7 @@ static int do_block_read_bytes(struct block_device *dev, uint64_t offset, void *
 static int do_block_write_bytes(struct block_device *dev, uint64_t offset, const void *buf, size_t len)
 {
     const uint8_t *in_buf = (const uint8_t *)buf;
-    if (offset + len > dev->sector_count * dev->sector_size) {
+    if (to_disk(&dev, &offset, len, 1) < 0 || offset + len > dev->sector_count * dev->sector_size) {
         return -EINVAL;
     }
     while (len) {
@@ -283,8 +324,11 @@ static int do_block_sync(struct block_device *dev)
 {
     size_t i;
     int err = 0;
+    while (dev && dev->parent) {
+        dev = dev->parent;                           /* partition → তার ডিস্ক */
+    }
     for (i = 0; i < dev_count; i++) {
-        if ((!dev || devices[i] == dev) && devices[i]->ops->flush) {
+        if ((!dev || devices[i] == dev) && devices[i]->ops && devices[i]->ops->flush) {
             int e = devices[i]->ops->flush(devices[i]);
             if (e < 0) {
                 err = e;

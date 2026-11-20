@@ -4,7 +4,11 @@
  *   বাইট ০: Y overflow | X overflow | Y sign | X sign | 1 | মাঝ | ডান | বাম
  *   বাইট ১: X নড়াচড়া (sign বাইট ০-এ)
  *   বাইট ২: Y নড়াচড়া (sign বাইট ০-এ; উপরে = ধনাত্মক)
- * বাইট ০-এর বিট ৩ সবসময় 1 — এটা দিয়ে প্যাকেটের শুরু মিলিয়ে নেওয়া হয়। */
+ * বাইট ০-এর বিট ৩ সবসময় 1 — এটা দিয়ে প্যাকেটের শুরু মিলিয়ে নেওয়া হয়।
+ *
+ * ধাপ ১২: IntelliMouse (স্ক্রল-চাকা) — sample rate 200, 100, 80 পাঠিয়ে ID 3 পেলে
+ * প্যাকেট ৪ বাইট, বাইট ৩ = চাকা (signed)। প্রতিটি প্যাকেট দুটো ঘটনা-তালিকায় যায়:
+ * একটা কনসোলের (devfs → xterm মাউস-ভাষা), একটা /dev/mouse-এর। */
 
 #include <stdint.h>
 #include <stddef.h>
@@ -16,14 +20,22 @@
 
 #define MOUSE_CMD_SET_DEFAULTS   0xF6
 #define MOUSE_CMD_ENABLE_STREAM  0xF4
+#define MOUSE_CMD_SET_RATE       0xF3
+#define MOUSE_CMD_GET_ID         0xF2
+#define MOUSE_EVQ                64
 
 static int present;
 static volatile int32_t pos_x, pos_y;
 static volatile uint8_t buttons;
 static volatile uint64_t packet_count;
 static int32_t max_x = 1023, max_y = 767;
-static uint8_t packet[3];
+static uint8_t packet[4];
 static int packet_index;
+static int packet_size = 3;
+static int has_wheel;
+/* ঘটনা-তালিকা: [0] কনসোল, [1] /dev/mouse */
+static struct mouse_event evq[2][MOUSE_EVQ];
+static volatile uint32_t evq_head[2], evq_tail[2];
 
 static int mouse_command(uint8_t cmd)
 {
@@ -52,6 +64,52 @@ static void handle_packet(void)
     pos_y = clamp(pos_y - dy, 0, max_y);           /* স্ক্রিনে Y নিচের দিকে বাড়ে */
     buttons = b0 & 0x07;
     packet_count++;
+    {
+        struct mouse_event e;
+        int q;
+        e.x = pos_x;
+        e.y = pos_y;
+        e.dx = dx;
+        e.dy = -dy;
+        e.buttons = buttons;
+        e.wheel = 0;
+        if (packet_size == 4) {
+            int8_t z = (int8_t)(packet[3] << 4) >> 4;   /* নিচের ৪ বিট, signed */
+            e.wheel = z;
+        }
+        for (q = 0; q < 2; q++) {
+            uint32_t next = (evq_head[q] + 1) % MOUSE_EVQ;
+            if (next == evq_tail[q]) {
+                evq_tail[q] = (evq_tail[q] + 1) % MOUSE_EVQ;   /* পূর্ণ: সবচেয়ে পুরোনোটা বাদ */
+            }
+            evq[q][evq_head[q]] = e;
+            evq_head[q] = next;
+        }
+    }
+}
+
+int mouse_poll_event(int queue, struct mouse_event *out)
+{
+    uint64_t flags;
+    int got = 0;
+    if (queue < 0 || queue > 1) return 0;
+    flags = cpu_irq_save();
+    if (evq_tail[queue] != evq_head[queue]) {
+        *out = evq[queue][evq_tail[queue]];
+        evq_tail[queue] = (evq_tail[queue] + 1) % MOUSE_EVQ;
+        got = 1;
+    }
+    cpu_irq_restore(flags);
+    return got;
+}
+
+int mouse_has_wheel(void) { return has_wheel; }
+
+/* ধাপ ১৩: poll()-এর জন্য — queue-তে ঘটনা আছে কিনা (না সরিয়ে) */
+int mouse_event_pending(int queue)
+{
+    if (queue < 0 || queue > 1) return 0;
+    return evq_tail[queue] != evq_head[queue];
 }
 
 static void mouse_irq(uint8_t irq, struct interrupt_frame *frame)
@@ -65,7 +123,7 @@ static void mouse_irq(uint8_t irq, struct interrupt_frame *frame)
         return;                                    /* সিঙ্ক হারিয়েছে — পরের শুরু খুঁজি */
     }
     packet[packet_index++] = data;
-    if (packet_index == 3) {
+    if (packet_index == packet_size) {
         packet_index = 0;
         handle_packet();
     }
@@ -80,6 +138,19 @@ int mouse_init(void)
     ps2_flush();                                   /* আগের কোনো বাইট পড়ে না থাকে */
     if (!mouse_command(MOUSE_CMD_SET_DEFAULTS)) {
         return 0;
+    }
+    /* ধাপ ১২: চাকা চালু করার "জাদু ক্রম" */
+    {
+        static const uint8_t rates[3] = { 200, 100, 80 };
+        uint8_t id = 0;
+        int i, ok = 1;
+        for (i = 0; i < 3 && ok; i++) {
+            ok = mouse_command(MOUSE_CMD_SET_RATE) && mouse_command(rates[i]);
+        }
+        if (ok && mouse_command(MOUSE_CMD_GET_ID) && ps2_read_data(&id) && id == 3) {
+            has_wheel = 1;
+            packet_size = 4;
+        }
     }
     if (!mouse_command(MOUSE_CMD_ENABLE_STREAM)) {
         return 0;

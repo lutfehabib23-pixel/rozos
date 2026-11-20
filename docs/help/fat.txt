@@ -1,0 +1,13 @@
+# FAT - the boot partition's file system
+rozOS reads and writes FAT32 and FAT16 (kernel/fs/fat.c), mounted on
+/boot. Bootloaders and every OS understand FAT, so the kernels live
+there: Limine cannot read ext2.
+
+What works: files and directories, long names (up to 255 characters,
+stored as UTF-16 "LFN" entries beside a short 8.3 alias like
+ROZOS-~1.ELF), creating, writing, truncating and deleting.
+Not there: permissions (everything looks rwx), rename, FAT12.
+Names are case-insensitive: /boot/LIMINE.CONF is /boot/limine.conf.
+
+Details (label, serial, cluster size, free clusters, layout): `kmon`
+then `disks`. See [[partitions]], [[kinstall]].

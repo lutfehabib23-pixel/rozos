@@ -1,0 +1,17 @@
+# /dev/fb0 - the screen as pixels (phase 13)
+  `int fd = open("/dev/fb0", O_RDWR);`
+  `struct rozos_fb_info fi;  ioctl(fd, FBIO_ROZ_GETINFO, &fi);`
+  `uint32_t *px = mmap(NULL, fi.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);`
+  `px[y * (fi.pitch / 4) + x] = 0xFF0000;`    a red pixel (QEMU: 0xRRGGBB)
+fi has width, height, pitch (bytes per line), bpp (32) and where red,
+green and blue sit (red_shift ...). Header: <sys/fb.h>.
+
+When a program maps /dev/fb0 the text console stops drawing (the
+shell's text is kept). When the program ends - or crashes - the console
+comes back by itself. By hand: `ioctl(fd, KDSETMODE, KD_TEXT)` or
+KD_GRAPHICS. read/write/lseek on /dev/fb0 work on the raw bytes too.
+
+The easy way is [[rozgfx]] (double buffer, shapes, fonts, events).
+A kernel panic always switches back to text. Serial output is not
+affected - with `make run-serial` you see the text, not the picture:
+use `make run` for graphics. Kernel: kernel/drivers/console/fbdev.c.

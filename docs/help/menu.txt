@@ -1,0 +1,19 @@
+# menu - start programs from a list
+  `menu`    (the program is /bin/rozmenu)
+Programs are grouped: Development, System, Network, Packages, Tools,
+Demos, My programs ... Arrow keys choose, Enter starts; start typing
+or press `/` to search; `Esc` clears the search, `q` quits. With the
+[[mouse]]: click to choose, click again to start, wheel to scroll.
+The menu has its own screen; when you quit, the shell is back.
+Development has "New C program": the [[edit|editor]] opens FILE001.c
+in /home; Ctrl+S asks for a name, Ctrl+R compiles and runs it.
+
+== Where the entries come from ==
+Every file in /usr/share/apps ending in .app is one entry:
+  name: Calculator
+  category: Tools
+  run: /usr/local/bin/calc          (any shell command line)
+  about: a simple calculator
+  wait: yes      wait for a key at the end (to read the output)
+  confirm: yes   ask before starting (reboot ...)
+[[install]] writes these for your own programs.

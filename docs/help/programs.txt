@@ -4,10 +4,12 @@
   [[cp]]       copy files                [[mv]]      move/rename a file
   [[rm]]       delete files or trees     [[mkdir]]   make directories
   [[rmdir]]    delete an empty directory [[touch]]   create an empty file
-  [[wc]]       count lines, words, bytes
+  [[wc]]       count lines, words, bytes  ([[redirect|ls | wc -l]])
 
 == Text and development ==
   [[edit]]     the text editor           [[tcc]]     the C compiler
+  [[make]]     build from a Makefile     sh         = [[rozsh]] (for scripts)
+  [[menu]]     start programs from a list [[install]]  add your own program
 
 == System ==
   [[uname]]    system name and version   [[date]]    date and time (UTC)
@@ -15,14 +17,27 @@
   [[sleep]]    wait some seconds         [[stty]]    console size
   [[kmon]]     kernel monitor            [[rozhelp]] this help viewer
   [[init]]     process 1 (starts the shell)
+  [[kinstall]] install a kernel          [[reboot]]  reboot, poweroff
+  [[setfont]]  console font              [[fonts]]   fonts and resolution
+  mkbuildinfo  build number for the kernel Makefile ([[kinstall]])
   [[rozsh]]    the shell
 
 == Network ([[network]]) ==
   [[ifconfig]] card and address   [[ping]]     is a host answering?
   [[nslookup]] name to address    [[http-get]] download a web page
+  [[rozpkg]]   install packages
+
+== Desktop ([[desktop]]) ==
+  [[rozwm]]    the window server (starts at boot)
+  [[rozterm]]  terminal window          [[desktop|desktop, textmode]] switch
+
+== Graphics ([[graphics]]) ==
+  [[gfxdemo]]  shapes, images, fonts     [[paint]]    draw with the mouse
+  [[imgview]]  look at pictures          [[gcalc]]    calculator with buttons
+  gfxevents   show keyboard/mouse events as text ([[rozgfx]])
 
 == Tests and demos ==
-  [[systest]]  36 kernel and libc tests  [[demos|hello, spin, crash]]
+  [[systest]]  69 kernel and libc tests  [[demos|hello, spin, crash]]
 
 Every program is a normal ELF file built from userland/ in the source
 tree; you can write your own with [[c-programming|tcc]].

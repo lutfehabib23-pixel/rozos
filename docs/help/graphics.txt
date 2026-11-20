@@ -1,0 +1,18 @@
+# Graphics in rozOS (phase 13)
+Use `make run` (QEMU window) - `make run-serial` has no picture.
+Since phase 14 rozOS starts in the [[desktop]]: each program opens in
+its own window.
+Programs (also in the [[menu]], category Graphics):
+  [[gfxdemo]]   everything at once: shapes, pictures, fonts, a ball
+  [[paint]]     draw with the mouse, save as BMP
+  [[imgview]]   look at .bmp and .ppm pictures
+  [[gcalc]]     a calculator with buttons
+q (or Esc) quits each; the text console comes back.
+
+== Make your own ==
+  `cp /usr/src/gfx/gfxdemo.c ~/my.c`  then `edit my.c`
+  `tcc my.c -lrozgfx -o my` and `./my`  (or Ctrl+R in the editor,
+  which links -lrozgfx by itself)
+The library: [[rozgfx]]. Below it: [[framebuffer]] (/dev/fb0),
+[[shm]] and [[pipes]] (for the window server of phase 14).
+Fonts and screen size: [[fonts]].

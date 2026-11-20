@@ -19,6 +19,18 @@ _start:
     cli
     leaq    kernel_stack_top(%rip), %rsp    /* স্ট্যাক 16-byte aligned */
     xorq    %rbp, %rbp                      /* স্ট্যাক-ট্রেসের শেষ চিহ্ন */
+#ifdef __TINYC__
+    /* ধাপ ১১: TCC variadic ফাংশনের শুরুতে সবসময় xmm0-7 সংরক্ষণ করে (kprintf ইত্যাদি),
+     * তাই C-এর আগেই SSE চালু: CR0.EM=0, CR0.MP=1, CR4.OSFXSR|OSXMMEXCPT।
+     * (gcc বিল্ডে -mgeneral-regs-only — সেখানে sched_init-এ পরে চালু হয়, আগের মতো) */
+    movq    %cr0, %rax
+    andq    $~4, %rax
+    orq     $2, %rax
+    movq    %rax, %cr0
+    movq    %cr4, %rax
+    orq     $0x600, %rax
+    movq    %rax, %cr4
+#endif
     call    kmain                           /* kmain কখনো ফেরার কথা নয় */
 
 1:  cli

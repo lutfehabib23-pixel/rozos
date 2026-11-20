@@ -75,9 +75,19 @@ static int extended;                           /* আগের বাইট 0xE0
 static int pause_skip;                         /* Pause কী-র 0xE1 সিকোয়েন্সের বাকি বাইট */
 static int lshift, rshift, lctrl, rctrl, lalt, ralt;
 
+static int (*intr_hook)(void);            /* ধাপ ১৪: Ctrl+C → কনসোলের SIGINT (1 = কী ফেলে দাও) */
+
+void keyboard_set_intr_hook(int (*fn)(void))
+{
+    intr_hook = fn;
+}
+
 static void push_key(int key)
 {
     uint32_t next = (buf_head + 1) & (KBD_BUFFER_SIZE - 1);
+    if (key == 3 && intr_hook && intr_hook()) {
+        return;
+    }
     if (next == buf_tail) {
         return;                                /* বাফার পূর্ণ — কী হারাবে */
     }
@@ -271,6 +281,12 @@ int keyboard_try_getkey(int *key)
     *key = key_buffer[buf_tail];
     buf_tail = (buf_tail + 1) & (KBD_BUFFER_SIZE - 1);
     return 1;
+}
+
+/* ধাপ ১৩: poll()-এর জন্য — বাফারে কী আছে কিনা (না সরিয়ে) */
+int keyboard_has_key(void)
+{
+    return buf_tail != buf_head;
 }
 
 int keyboard_getkey(void)

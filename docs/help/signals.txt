@@ -1,0 +1,14 @@
+# Ctrl+C, signals and process groups (phase 14)
+Every command the shell starts (or a whole pipe `a | b`) gets its own
+process group and becomes the terminal's foreground group. Ctrl+C makes
+the terminal (console, serial line or [[pty]]) send SIGINT to that
+group - the program stops, the shell prints ^C and goes on.
+The shell ignores SIGINT itself (SIG_IGN), so at the prompt Ctrl+C just
+cancels the line. A program that wants Ctrl+C as a key (the editor:
+copy) switches it off:
+  `struct termios t; tcgetattr(0, &t); t.c_lflag &= ~ISIG; tcsetattr(0, TCSANOW, &t);`
+In C: setpgid(), getpgrp(), setsid(), tcsetpgrp(), kill(-pgrp, sig)
+or killpg(), signal(SIGINT, SIG_IGN). Own handler functions are not run
+yet - a handled signal still ends the program (like SIG_DFL).
+system() ignores Ctrl+C while the command runs (POSIX). Closing a
+terminal window sends SIGHUP to its programs. See [[processes]].

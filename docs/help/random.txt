@@ -1,0 +1,16 @@
+# Random numbers - /dev/urandom and getrandom()
+The kernel has a cryptographic random generator (ChaCha20). It is
+fed at boot (RDRAND/RDSEED when the CPU has them), with the CPU time
+stamp on every timer tick, and with network packet timings.
+
+== Use ==
+  `/dev/urandom` and `/dev/random`  read any number of random bytes
+  `getrandom(buf, n, 0)`   system call 318 (#include <sys/random.h>)
+  `getentropy(buf, n)`     the same, at most 256 bytes
+[[tls]] takes its keys from here. Writing to /dev/urandom mixes your
+bytes in. rand() in stdlib.h is NOT secure - it is a simple
+repeatable generator for games and tests.
+
+After every request the generator changes its own key, so earlier
+output cannot be worked out from a later memory dump.
+See [[kernel]].

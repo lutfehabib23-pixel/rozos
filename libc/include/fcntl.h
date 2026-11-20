@@ -20,4 +20,6 @@
 int open(const char *path, int flags, ...);
 int creat(const char *path, mode_t mode);
 
+#define AT_FDCWD (-100)        /* ধাপ ১১: *at() ফাংশনে "বর্তমান ডিরেক্টরি" */
+
 #endif

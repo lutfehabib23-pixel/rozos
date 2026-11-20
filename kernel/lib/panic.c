@@ -11,6 +11,10 @@ void kpanic(const char *fmt, ...)
     va_list ap;
 
     cpu_cli();
+    if (fb_graphics_mode()) {            /* ধাপ ১৩: গ্রাফিক্স প্রোগ্রাম চললেও বার্তা পর্দায় */
+        fb_set_graphics(0);
+        tty_refresh();
+    }
     tty_set_color(TTY_COLOR_WHITE, TTY_COLOR_RED);
     kprintf("\n*** KERNEL PANIC ***\n");
     va_start(ap, fmt);

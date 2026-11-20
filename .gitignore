@@ -7,3 +7,10 @@ limine/
 limine-protocol/
 rozos-disk.img
 ports/tcc/src/
+ports/bearssl/src/
+ports/packages/src/
+dist/
+ports/pdpmake/src/
+.build-number
+*.old-ext2
+*.before-grow

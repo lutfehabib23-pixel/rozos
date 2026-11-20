@@ -11,6 +11,12 @@ rozOS uses the Linux x86-64 numbers, for example:
  41 socket 42 connect 43 accept 44 sendto 45 recvfrom 48 shutdown
  49 bind   50 listen  54 setsockopt 55 getsockopt   ([[sockets]])
 500 rozos_kmon (rozOS only: starts [[kmon]])
+169 reboot ([[reboot]])   318 getrandom ([[random]])
 501 rozos_netinfo, 502 rozos_netconfig ([[ifconfig]])
+phase 13:   7 poll   22 pipe   293 pipe2   77 ftruncate ([[pipes]])
+503 rozos_shm_open, 504 rozos_shm_unlink ([[shm]])
+phase 14:  13 rt_sigaction (SIG_IGN only)  109 setpgid  111 getpgrp
+112 setsid  121 getpgid  124 getsid  505 rozos_openpty ([[pty]]);
+socket(AF_UNIX) through the normal socket calls ([[pty]])
 [[rozlibc]] wraps these in normal C functions (write(), fork() ...).
 The kernel checks every pointer a program passes before using it.

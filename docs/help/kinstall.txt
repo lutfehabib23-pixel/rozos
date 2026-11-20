@@ -1,0 +1,40 @@
+# kinstall - install a new kernel and keep the old ones
+After `make` in /usr/src/rozos ([[kernel-build]]):
+  `kinstall`            install build/rozos.elf, make it the default
+  `reboot`              start it (Limine's menu shows all kernels)
+  `kinstall -l`         list installed kernels (* = default)
+  `kinstall -d 42.3`    make another build the default (or: factory)
+  `kinstall -r 42.1`    remove one (never the default or factory)
+  `kinstall -m`         write the boot menu again
+  `kinstall file.elf`   install another kernel file
+  `kinstall --resolution 1920x1080`   screen size from the next boot
+  `kinstall --resolution auto`        let Limine choose again ([[fonts]])
+
+== Build numbers ==
+Every kernel has one, shown in the first boot line and `uname -a`:
+  42      built on the PC with gcc (the 42nd build there)
+  42.3    the 3rd build inside rozOS, starting from PC build 42
+kinstall reads the number from the file itself. In `kinstall -l` the
+factory kernel shows its PC build too, like `factory#42`.
+
+== After a new PC build ==
+`make disk-update` (and `make run-serial`) copies the new factory kernel
+and, when it really is a new build, makes factory the default again -
+otherwise an older kernel built inside rozOS would keep booting. A
+default you chose with `kinstall -d` stays as long as the PC kernel
+does not change.
+
+== Where kernels live ==
+The boot partition (FAT32, /dev/sda1) is mounted on /boot:
+  /boot/kernels/rozos-<build>.elf   the last 3 installed kernels
+  /boot/rozos-factory.elf           the PC's gcc kernel - never removed
+  /boot/limine.conf                 the menu, written by kinstall
+  /boot/initrd.tar                  rescue files (all kernels share it)
+Older kernels than the last 3 are removed automatically.
+
+== If a new kernel does not boot ==
+1. Restart (in QEMU: Ctrl+A then X, then `make run-serial` again).
+2. In the menu (3 seconds) use the arrow keys: pick an older build or
+   "rozOS factory", press Enter.
+3. In rozOS: `kinstall -d <that build>` so it stays the default.
+See [[boot-menu]], [[partitions]].

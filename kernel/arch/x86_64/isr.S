@@ -17,11 +17,18 @@
  * interrupt_return লেবেলটা বাইরে থেকেও ব্যবহার হয়: নতুন ইউজার থ্রেড ও fork-এর
  * সন্তান কার্নেল স্ট্যাকে একটা interrupt_frame বানিয়ে এখানে লাফ দেয়। */
 
+#include <rozos/asm_compat.h>
+
     .section .text
 
     .global isr_stub_table
     .align 16
 isr_stub_table:
+#ifdef __TINYC__
+    /* ধাপ ১১: TCC-র assembler .if-এর ভেতরে ! আর || বোঝে না — একই ২৫৬টা stub
+     * (একই ক্রম, একই 16-বাইট সারি) isr_stubs_tcc.inc-এ স্পষ্ট করে লেখা */
+#include "isr_stubs_tcc.inc"
+#else
     .set vec, 0
     .rept 256
     .align 16
@@ -32,13 +39,14 @@ isr_stub_table:
     jmp     isr_common
     .set vec, vec + 1
     .endr
+#endif
 
     .align 16
     .type isr_common, @function
 isr_common:
     testb   $3, 24(%rsp)        /* CS (vector, error, rip-এর পরে) */
     jz      1f
-    swapgs
+    SWAPGS
 1:
     cld                         /* SysV ABI: direction flag শূন্য */
     pushq   %rax
@@ -81,7 +89,7 @@ interrupt_return:
     addq    $16, %rsp           /* vector + error code */
     testb   $3, 8(%rsp)         /* ফেরার CS */
     jz      2f
-    swapgs
+    SWAPGS
 2:
     iretq
     .size isr_common, . - isr_common

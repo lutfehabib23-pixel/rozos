@@ -6,7 +6,12 @@
  *
  * ধাপ ৭: স্ক্রিনের জন্য ছোট ANSI/VT100 escape-পার্সার (shell ও এডিটরের জন্য) —
  * কার্সর সরানো (H f A B C D G), মোছা (J K), রঙ (m), কার্সর লুকানো (?25l/h)।
- * serial-এ বাইটগুলো যেমন আছে তেমনই যায়, তাই হোস্টের টার্মিনাল নিজেই বোঝে। */
+ * serial-এ বাইটগুলো যেমন আছে তেমনই যায়, তাই হোস্টের টার্মিনাল নিজেই বোঝে।
+ *
+ * ধাপ ১২: alternate screen (ESC[?1049h/l, ?1047, ?47) — এডিটর আলাদা পর্দায় খোলে, বন্ধ
+ * হলে আগের পর্দা হুবহু ফেরে; ESC 7 / ESC 8 আর CSI s / u (কার্সর রাখা/ফেরানো);
+ * মাউস-মোড (?1000 ?1002 ?1003 ?1006) মনে রাখা — devfs PS/2 মাউসের ঘটনা তখন
+ * xterm-এর SGR ভাষায় পাঠায়; ফ্রেমবাফারে মাউস-কার্সর (উল্টো রঙের ঘর)। */
 
 #include <stdint.h>
 #include <stddef.h>
@@ -34,16 +39,31 @@ static uint8_t  cur_fg = TTY_COLOR_LIGHT_GREY;
 static uint8_t  cur_bg = TTY_COLOR_BLACK;
 static int      cursor_hidden;            /* ধাপ ৭: ESC[?25l */
 static int      reverse_video;            /* ধাপ ৭: ESC[7m */
+/* ধাপ ১২ */
+static struct tty_cell alt_saved[TTY_MAX_COLS * TTY_MAX_ROWS];
+static int      alt_active;
+static uint32_t alt_col, alt_row;
+static uint8_t  alt_fg, alt_bg;
+static uint32_t saved_col, saved_row;     /* ESC 7 / CSI s */
+static int      mouse_mode;               /* TTY_MOUSE_* বিট */
+static int      ptr_visible;
+static uint32_t ptr_col, ptr_row;
 
 /* ---------- ব্যাকএন্ড-নিরপেক্ষ আঁকা ---------- */
 
 static void draw_cell(uint32_t col, uint32_t row)
 {
     const struct tty_cell *c = &grid[row * n_cols + col];
+    uint8_t fg = c->fg, bg = c->bg;
+    if (ptr_visible && col == ptr_col && row == ptr_row) {
+        fg = c->bg ^ 0x0F;                       /* ধাপ ১২: মাউস-কার্সরের ঘর উল্টো রঙে */
+        bg = (uint8_t)(c->fg == c->bg ? TTY_COLOR_WHITE : c->fg);
+        if (fg == bg) fg = TTY_COLOR_BLACK;
+    }
     if (backend == TTY_BACKEND_FB) {
-        fb_put_cell(col, row, c->ch, c->fg, c->bg);
+        fb_put_cell(col, row, c->ch, fg, bg);
     } else if (backend == TTY_BACKEND_VGA) {
-        vga_put_cell(col, row, c->ch, c->fg, c->bg);
+        vga_put_cell(col, row, c->ch, fg, bg);
     }
 }
 
@@ -93,6 +113,25 @@ static void use_backend(enum tty_backend b, uint32_t cols, uint32_t rows)
 }
 
 /* ---------- পাবলিক ইন্টারফেস ---------- */
+
+/* ধাপ ১৩: setfont-এর পর — নতুন কলাম/সারি, পর্দা মুছে নতুন করে */
+void tty_font_changed(void)
+{
+    if (backend == TTY_BACKEND_FB && fb_relayout()) {
+        alt_active = 0;                       /* পুরোনো মাপের সংরক্ষিত পর্দা আর চলে না */
+        fb_clear(cur_bg);
+        use_backend(TTY_BACKEND_FB, fb_cols(), fb_rows());
+    }
+}
+
+/* ধাপ ১৩: গ্রাফিক্স প্রোগ্রাম শেষ হলে টেক্সট কনসোল ফেরত */
+void tty_refresh(void)
+{
+    if (backend == TTY_BACKEND_FB) {
+        fb_clear(cur_bg);
+    }
+    redraw_all();
+}
 
 void tty_init(void)
 {
@@ -233,6 +272,33 @@ static void clear_cells(uint32_t from, uint32_t to)   /* গ্রিডের �
     draw_cursor();
 }
 
+/* ধাপ ১২: alternate screen — on: পর্দা (আর save_cursor হলে কার্সর) জমা রেখে খালি পর্দা;
+ * off: জমা রাখা পর্দা হুবহু ফেরানো */
+static void set_alt_screen(int on, int save_cursor)
+{
+    if (backend == TTY_BACKEND_NONE || on == alt_active) {
+        return;
+    }
+    if (on) {
+        memcpy(alt_saved, grid, (size_t)n_cols * n_rows * sizeof(grid[0]));
+        alt_col = cur_col;
+        alt_row = cur_row;
+        alt_fg = cur_fg;
+        alt_bg = cur_bg;
+        alt_active = 1;
+        clear_cells(0, n_cols * n_rows);
+        (void)save_cursor;
+    } else {
+        memcpy(grid, alt_saved, (size_t)n_cols * n_rows * sizeof(grid[0]));
+        alt_active = 0;
+        cur_fg = alt_fg;
+        cur_bg = alt_bg;
+        cur_col = alt_col < n_cols ? alt_col : n_cols - 1;
+        cur_row = alt_row < n_rows ? alt_row : n_rows - 1;
+        redraw_all();
+    }
+}
+
 static int param(int i, int def)
 {
     return (i < ansi_nparams && ansi_params[i] > 0) ? ansi_params[i] : def;
@@ -282,10 +348,25 @@ static void csi_command(char c)
     uint32_t pos = cur_row * n_cols + cur_col;
 
     if (ansi_private) {
-        if (param(0, 0) == 25 && (c == 'l' || c == 'h')) {
-            cursor_hidden = (c == 'l');
-            draw_cell(cur_col, cur_row);
-            draw_cursor();
+        int i;
+        if (c != 'l' && c != 'h') return;
+        for (i = 0; i < (ansi_nparams ? ansi_nparams : 1); i++) {
+            int p = ansi_params[i];
+            if (p == 25) {
+                cursor_hidden = (c == 'l');
+                draw_cell(cur_col, cur_row);
+                draw_cursor();
+            } else if (p == 1049 || p == 1047 || p == 47) {
+                set_alt_screen(c == 'h', p == 1049);
+            } else if (p == 1000) {
+                mouse_mode = c == 'h' ? (mouse_mode | TTY_MOUSE_CLICKS) : (mouse_mode & ~TTY_MOUSE_CLICKS);
+            } else if (p == 1002) {
+                mouse_mode = c == 'h' ? (mouse_mode | TTY_MOUSE_DRAG) : (mouse_mode & ~TTY_MOUSE_DRAG);
+            } else if (p == 1003) {
+                mouse_mode = c == 'h' ? (mouse_mode | TTY_MOUSE_MOTION) : (mouse_mode & ~TTY_MOUSE_MOTION);
+            } else if (p == 1006) {
+                mouse_mode = c == 'h' ? (mouse_mode | TTY_MOUSE_SGR) : (mouse_mode & ~TTY_MOUSE_SGR);
+            }
         }
         return;
     }
@@ -330,6 +411,16 @@ static void csi_command(char c)
     case 'm':
         apply_sgr();
         break;
+    case 's':                                     /* ধাপ ১২: কার্সর রাখা/ফেরানো */
+        saved_col = cur_col;
+        saved_row = cur_row;
+        break;
+    case 'u':
+        move_cursor(saved_col, saved_row);
+        break;
+    case 'd':                                     /* সারিতে যাওয়া (VPA) */
+        move_cursor(cur_col, (uint32_t)param(0, 1) - 1);
+        break;
     default:
         break;                                    /* অজানা — উপেক্ষা */
     }
@@ -351,6 +442,13 @@ static void ansi_feed(char c)
             ansi_nparams = 0;
             ansi_private = 0;
             memset(ansi_params, 0, sizeof(ansi_params));
+        } else if (c == '7') {                    /* ধাপ ১২: DECSC / DECRC */
+            saved_col = cur_col;
+            saved_row = cur_row;
+            ansi_state = ANSI_NORMAL;
+        } else if (c == '8') {
+            move_cursor(saved_col, saved_row);
+            ansi_state = ANSI_NORMAL;
         } else {
             ansi_state = ANSI_NORMAL;             /* ESC + অন্য কিছু: উপেক্ষা */
         }
@@ -392,6 +490,31 @@ void tty_write(const char *s, size_t n)
 {
     while (n--) {
         tty_putc(*s++);
+    }
+}
+
+/* ---------- ধাপ ১২: মাউস ---------- */
+
+int tty_mouse_mode(void) { return mouse_mode; }
+
+void tty_mouse_pointer(int visible, uint32_t col, uint32_t row)
+{
+    uint32_t oc = ptr_col, orow = ptr_row;
+    int was = ptr_visible;
+    if (backend != TTY_BACKEND_FB || n_cols == 0) {
+        return;
+    }
+    if (col >= n_cols) col = n_cols - 1;
+    if (row >= n_rows) row = n_rows - 1;
+    ptr_visible = visible;
+    ptr_col = col;
+    ptr_row = row;
+    if (was && (oc != col || orow != row || !visible) && orow < n_rows && oc < n_cols) {
+        draw_cell(oc, orow);
+        if (oc == cur_col && orow == cur_row) draw_cursor();
+    }
+    if (visible) {
+        draw_cell(col, row);
     }
 }
 

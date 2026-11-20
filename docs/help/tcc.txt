@@ -7,6 +7,8 @@ TCC (TinyCC, mob branch) runs inside rozOS and makes rozOS programs.
   `tcc file.o -o prog`        link object files
   `tcc -I dir -L dir -lname`  extra include / library directories
   `tcc -lm ...`               math (it is in libc anyway, libm.a is a stub)
+  `tcc ... -lrozhttp -lbearssl`  http/https ([[rozhttp]])
+  `tcc ... -lcjson`           after `rozpkg install cjson` ([[cjson]])
   `tcc -run file.c args`      compile in memory and run at once
   `tcc -E file.c`             only run the preprocessor
   `tcc -Wall -g -O`           warnings, debug info (no real optimizer)

@@ -1,0 +1,24 @@
+# make - build programs from a Makefile
+/bin/make is pdpmake 2.0.4 (Ron Yorston, public domain), a POSIX make
+with common extensions. It reads `Makefile` in the current directory.
+  `make`              build the first target
+  `make clean`        run the "clean" target
+  `make -n`           only show the commands, run nothing
+  `make -f file`      use another makefile
+  `make CC=tcc X=y`   set macros on the command line
+
+== A small Makefile ==
+  CC = tcc
+  hello: hello.o
+  	$(CC) -o hello hello.o
+  hello.o: hello.c
+  	$(CC) -c hello.c
+Command lines start with a Tab. make rebuilds a target when one of its
+prerequisites has a newer modification time.
+
+== How commands run ==
+Every command line is run with `/bin/sh -c "..."` (sh is [[rozsh]]).
+rozsh has no pipes (|) yet, and no if/for; keep recipes simple.
+`make -t` (touch) does not work yet: rozOS cannot set file times.
+
+The big example is the kernel itself: [[kernel-build]].

@@ -1,0 +1,19 @@
+# The mouse
+== In the WSL terminal (make run-serial) ==
+Programs that want the mouse ([[edit]], [[help]], [[menu]]) switch on
+the terminal's mouse reporting; clicks, dragging and the wheel then
+reach rozOS over the serial line.
+
+== In the QEMU window (make run) or on a real PC ==
+The PS/2 mouse (with scroll wheel) moves a pointer - a cell in
+inverted colours. Click into the QEMU window to give it the mouse;
+Ctrl+Alt+G gives it back to the PC. The kernel turns the PS/2 mouse
+into the same messages the terminal sends, so programs work the same.
+
+== For programmers ==
+Text programs: write ESC[?1000h (clicks and wheel), ESC[?1002h
+(dragging) and ESC[?1006h, then read ESC[<b;x;yM (press) and
+ESC[<b;x;ym (release): b 0 left, 1 middle, 2 right, +32 moving,
+64/65 wheel up/down; x, y count from 1. Switch it off with ESC[?1000l.
+Graphics programs (phase 13) read /dev/mouse: struct mouse_event
+(x, y, dx, dy, buttons, wheel).

@@ -1,0 +1,50 @@
+# rozpkg - the package manager
+rozpkg downloads ready-made libraries and programs over [[tls|https]],
+checks them with SHA-256, and unpacks them into / .
+
+== First time ==
+  `rozpkg repo OWNER/rozos-packages`   where packages come from
+  `rozpkg update`                      download the package list
+  `rozpkg install cjson`               install a package
+Then use it: `tcc prog.c -lcjson` (see [[cjson]]).
+
+== Commands ==
+  `rozpkg update`             fetch index.txt from the repo
+  `rozpkg list`               all packages ([i] installed, [u] newer)
+  `rozpkg search WORD`        search names and descriptions
+  `rozpkg info NAME`          version, sha256, the installed files
+  `rozpkg install NAME...`    download + verify + unpack
+  `rozpkg reinstall NAME...`  the same, even if already installed
+  `rozpkg remove NAME...`     delete exactly the files it installed
+  `rozpkg upgrade`            newer versions of installed packages
+  `rozpkg installed`          what is installed
+  `rozpkg repo [SOURCE]`      show or set the repo
+  `rozpkg -r DIR install X`   unpack into DIR instead of / (for tests;
+                              the installed list stays in /var/lib/rozpkg)
+
+== The repo ==
+A repo is any https (or http) folder with an index.txt and the .tar
+files. SOURCE can be:
+  `OWNER/REPO`        GitHub, newest release: .../releases/latest/download
+  `OWNER/REPO@TAG`    GitHub, one release tag
+  `https://host/dir`  any web folder (e.g. a test server on the PC)
+It is saved in /etc/rozpkg.conf. Making your own repo: [[packages]].
+
+== Safety ==
+Every download is checked against the sha256 in the index; a
+mismatch is refused and deleted. The index itself comes over https,
+so its certificate is verified. Paths with ".." or a leading / in a
+package are refused.
+
+== Files ==
+  /etc/rozpkg.conf                    repo URL
+  /var/cache/rozpkg/                  index.txt + downloaded .tar files
+  /var/lib/rozpkg/installed/NAME.list files a package installed
+  /var/lib/rozpkg/installed/NAME.ver  its version
+A cached .tar with the right sha256 is reused (no download).
+
+== Problems ==
+  "no repo configured yet"   run `rozpkg repo ...` first
+  "HTTP 404"                 wrong OWNER/REPO, or no release yet
+  TLS errors                 see [[tls]] (often the clock: `date`)
+  "unknown host"             see [[network]] and [[nslookup]]

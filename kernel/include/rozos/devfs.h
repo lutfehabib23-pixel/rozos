@@ -21,7 +21,16 @@ typedef int64_t (*devfs_write_fn)(void *ctx, uint64_t offset, const void *buf, s
 
 int devfs_init(void);   /* ফাইলসিস্টেম নিবন্ধন + ডিফল্ট ডিভাইস */
 int devfs_register(const char *name, devfs_read_fn read, devfs_write_fn write, void *ctx);
+/* ধাপ ১৩: poll() — ডিভাইস এখন কোন ঘটনার জন্য তৈরি (VFS_POLL*); না দিলে IN|OUT ধরা হয় */
+typedef int (*devfs_poll_fn)(void *ctx, int events);
+int devfs_set_poll(const char *name, devfs_poll_fn poll);
+/* ধাপ ১৩: নাম দিয়ে ডিভাইস চেনা (ioctl/mmap-এ /dev/fb0 ধরার জন্য); না হলে NULL */
+const char *devfs_vnode_name(struct vnode *vn);
 
 extern const struct filesystem devfs_filesystem;
+
+/* ধাপ ১২: serial টার্মিনালের মাপ (ESC[6n দিয়ে জিজ্ঞেস); 0 = পাওয়া গেছে */
+#include <stdint.h>
+int console_query_size(uint32_t *rows, uint32_t *cols);
 
 #endif

@@ -5,6 +5,21 @@
 #define TCGETS     0x5401
 #define TIOCGWINSZ 0x5413
 #define TIOCSWINSZ 0x5414
+#define TIOCSCTTY  0x540E      /* ধাপ ১৪ */
+#define TIOCGPGRP  0x540F
+#define TIOCSPGRP  0x5410
+/* ধাপ ১২ (rozOS-এর নিজস্ব): serial টার্মিনালের মাপ নিজে থেকে ধরা, ফল winsize-এ।
+ * DETECT হাতে বসানো মাপ (stty ROWS COLS) রাখে; DETECT_FORCE সবসময় নতুন করে ধরে */
+#define TIOCROZDETECT       0x54F0
+#define TIOCROZDETECT_FORCE 0x54F1
+/* ধাপ ১৩: কনসোলের ফন্ট বদলানো (setfont) */
+#define TIOCROZSETFONT      0x54F2
+struct rozos_font_req {
+    unsigned int width, height;          /* width ≤ 16, height ≤ 32 */
+    unsigned int flags;                  /* 1 = বুটের ফন্টে ফেরা */
+    unsigned int pad;
+    unsigned long data;                  /* 256 গ্লিফ, প্রতিটা height × ((width+7)/8) বাইট */
+};
 
 struct winsize {
     unsigned short ws_row;

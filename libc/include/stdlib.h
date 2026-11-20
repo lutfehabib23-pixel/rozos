@@ -46,6 +46,11 @@ char  *getenv(const char *name);
 int    setenv(const char *name, const char *value, int overwrite);
 int    unsetenv(const char *name);
 int    putenv(char *s);
+int    system(const char *command);      /* ধাপ ১১: /bin/sh -c command */
 extern char **environ;
+
+/* ধাপ ১৪: প্রোগ্রামের নাম (argv[0]-এর শেষ অংশ), crt0-এর পর থেকে */
+extern char *__progname;
+extern char *program_invocation_short_name;
 
 #endif

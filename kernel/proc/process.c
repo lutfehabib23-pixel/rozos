@@ -23,6 +23,7 @@
 #include <rozos/string.h>
 #include <rozos/printf.h>
 #include <rozos/console.h>
+#include <rozos/fbdev.h>
 #include <arch/x86_64/cpu.h>
 #include <arch/x86_64/gdt.h>
 #include <arch/x86_64/idt.h>
@@ -107,6 +108,8 @@ static struct process *proc_alloc(const char *name, int ppid)
     memset(p, 0, sizeof(*p));
     p->pid = next_pid++;
     p->ppid = ppid;
+    p->pgid = p->pid;                    /* ধাপ ১৪: নিজের গ্রুপ (fork-এ মা-র গ্রুপ নেয়) */
+    p->sid = p->pid;
     p->state = PROC_ALIVE;
     p->mmap_next = USER_MMAP_BASE;
     p->start_tick = timer_ticks();
@@ -562,6 +565,9 @@ int64_t proc_fork(struct interrupt_frame *frame)
         return -EAGAIN;
     }
     strcpy(child->cwd, parent->cwd);
+    child->pgid = parent->pgid;              /* ধাপ ১৪ */
+    child->sid = parent->sid;
+    child->sigignore = parent->sigignore;
     child->brk_start = parent->brk_start;
     child->brk_end = parent->brk_end;
     child->mmap_next = parent->mmap_next;
@@ -660,6 +666,7 @@ void proc_exit(int code, int sig)
     vmm_switch(vmm_kernel_space());
     vmm_destroy_space(p->space, 1);
     p->space = NULL;
+    fbdev_proc_exit(p->pid);             /* ধাপ ১৩: গ্রাফিক্স প্রোগ্রাম শেষ → টেক্সট কনসোল */
 
     p->exit_code = code & 0xFF;
     p->term_signal = sig;
@@ -781,11 +788,30 @@ int proc_kill(int pid, int sig)
     if (sig == 0) {
         return 0;                                /* শুধু অস্তিত্ব যাচাই */
     }
+    /* ধাপ ১৪: SIG_IGN করা signal উপেক্ষা (SIGKILL ছাড়া) */
+    if (sig != SIGKILL && sig >= 1 && sig <= 64 && (p->sigignore & (1ULL << (sig - 1)))) {
+        return 0;
+    }
     p->killed = sig;
     if (p->thread) {
         sched_wake(p->thread);                   /* ঘুম/অপেক্ষা থেকে তুলে শেষ করানো */
     }
     return 0;
+}
+
+int proc_kill_group(int pgid, int sig)
+{
+    int i, n = 0;
+    if (pgid <= 0) return -EINVAL;
+    for (i = 0; i < PROC_MAX; i++) {
+        struct process *p = procs[i];
+        if (p && p->pgid == pgid && p->state != PROC_ZOMBIE) {
+            int ignored = sig != SIGKILL && sig >= 1 && sig <= 64 && (p->sigignore & (1ULL << (sig - 1)));
+            proc_kill(p->pid, sig);
+            if (!ignored) n++;
+        }
+    }
+    return n ? n : -ESRCH;     /* কেউ পায়নি (সবাই উপেক্ষা করে বা কেউ নেই) */
 }
 
 /* ---------- ইউজার-মোডের এক্সেপশন ---------- */

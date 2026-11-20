@@ -12,6 +12,8 @@
  * ফেরা: সাধারণত sysretq (rcx = rip, r11 = rflags)। ফেরার rip non-canonical হলে
  * sysret কার্নেল-মোডেই #GP দেয় (পরিচিত নিরাপত্তা ত্রুটি) — তখন iretq পথ। */
 
+#include <rozos/asm_compat.h>
+
 #define USER_DATA_SEL  0x1B
 #define USER_CODE_SEL  0x23
 
@@ -20,7 +22,7 @@
     .global syscall_entry
     .type syscall_entry, @function
 syscall_entry:
-    swapgs
+    SWAPGS
     movq    %rsp, %gs:8
     movq    %gs:0, %rsp
 
@@ -78,11 +80,11 @@ syscall_entry:
     movq    (%rsp), %rcx        /* rip */
     movq    16(%rsp), %r11      /* rflags */
     movq    24(%rsp), %rsp      /* ইউজারের স্ট্যাক — এরপর কার্নেল স্ট্যাক ব্যবহার নয় */
-    swapgs
+    SWAPGS
     sysretq
 1:
     movq    -40(%rsp), %rcx     /* shrq-এ নষ্ট হওয়া rcx: ফ্রেমে rip-এর 5 ঘর নিচে ছিল */
-    swapgs
+    SWAPGS
     iretq
     .size syscall_entry, . - syscall_entry
 

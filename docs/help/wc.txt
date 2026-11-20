@@ -1,4 +1,6 @@
 # wc - count lines, words and bytes
-  `wc [file ...]`     with no file: counts stdin (`wc < file`)
+  `wc [-l] [-w] [-c] [file ...]`   with no file: counts stdin (`wc < file`)
+  `-l` lines only, `-w` words only, `-c` bytes only (can be combined)
+  `ls /bin | wc -l`   one number - handy in pipes ([[redirect]])
 Output columns: lines, words, bytes, name; a total line for 2+ files.
 Example: `wc /src/hello.c`   Back to [[programs]].

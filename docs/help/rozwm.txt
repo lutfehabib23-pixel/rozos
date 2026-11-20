@@ -1,0 +1,15 @@
+# rozwm - the window server (phase 14)
+rozwm owns the whole screen (/dev/fb0, see [[framebuffer]]). Programs
+connect to it over a Unix socket (/tmp/.rozwm, [[pty]]); each window
+gets a shared-memory picture ([[shm]]) the program draws into, then it
+says which part changed. rozwm puts background, windows, frames,
+panels, menus and the mouse arrow together in its own buffer and copies
+only the changed rectangles to the screen - nothing half-drawn is ever
+shown, so there is no flicker.
+  `rozwm`        start it (normally init does: `rozwm -t -k`)
+  `-t`           open a terminal at once
+  `-k`           keys only from the PS/2 keyboard (the serial line
+                 keeps its own shell)
+Programs use it through [[rozgfx]] - no extra code. The message format
+is in /usr/include/rozwm_proto.h. Source: /usr/src/gfx/rozwm.c.
+See [[desktop]].

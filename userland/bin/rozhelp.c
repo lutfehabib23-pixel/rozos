@@ -29,7 +29,9 @@
 #define HIST_MAX   32
 #define NAME_MAX_  64
 
-enum { K_UP = 1000, K_DOWN, K_LEFT, K_RIGHT, K_HOME, K_END, K_PGUP, K_PGDN, K_BTAB, K_ESC };
+enum { K_UP = 1000, K_DOWN, K_LEFT, K_RIGHT, K_HOME, K_END, K_PGUP, K_PGDN, K_BTAB, K_ESC, K_MOUSE };
+/* ধাপ ১২: শেষ মাউস-ঘটনা (xterm SGR) */
+static int mouse_b, mouse_x, mouse_y, mouse_release;
 
 /* একটা পাতা: লাইনগুলো "দেখানোর রূপে" (মার্কআপ সরানো) আর প্রতিটি অক্ষরের ধরন */
 struct link {
@@ -172,11 +174,26 @@ static int read_key(void)
     if (c != 0x1B) return c;
     c = read_byte();
     if (c != '[' && c != 'O') return K_ESC;
-    for (;;) {
-        c = read_byte();
+    c = read_byte();
+    if (c == '<') {                                /* ধাপ ১২: ESC[<b;x;yM/m */
+        int v[3] = { 0, 0, 0 }, i = 0;
+        for (;;) {
+            c = read_byte();
+            if (c < 0) return K_ESC;
+            if (isdigit(c)) { if (i < 3) v[i] = v[i] * 10 + (c - '0'); continue; }
+            if (c == ';') { i++; continue; }
+            break;
+        }
+        mouse_b = v[0];
+        mouse_x = v[1] - 1;
+        mouse_y = v[2] - 1;
+        mouse_release = (c == 'm');
+        return K_MOUSE;
+    }
+    for (;; c = read_byte()) {
         if (c < 0) return K_ESC;
         if (isdigit(c)) { num = num * 10 + (c - '0'); continue; }
-        if (c == ';') continue;
+        if (c == ';') { num = 0; continue; }       /* ESC[1;2A — modifier উপেক্ষা */
         break;
     }
     switch (c) {
@@ -280,7 +297,7 @@ static void draw(void)
         snprintf(buf, sizeof(buf), " %.*s", w - 1, status_msg);
     } else {
         snprintf(buf, sizeof(buf), " %.*s", w - 1,
-                 "Tab/Shift+Tab: pick link  Enter: open  Backspace: back  i: index  /: find  q: quit");
+                 "Tab/Shift+Tab: pick link  Enter or click: open  Backspace: back  i: index  /: find  q: quit");
     }
     outs(buf);
     outs("\x1b[K\x1b[0m");
@@ -383,11 +400,13 @@ int main(int argc, char **argv)
         print_plain();
         return 0;
     }
-    if (ioctl(1, TIOCGWINSZ, &ws) == 0 && ws.ws_row >= 5 && ws.ws_col >= 20) {
+    /* ধাপ ১২: টার্মিনালের মাপ নিজে থেকে (stty দিয়ে বসানো থাকলে সেটাই) */
+    if ((ioctl(1, TIOCROZDETECT, &ws) == 0 || ioctl(1, TIOCGWINSZ, &ws) == 0) && ws.ws_row >= 5 && ws.ws_col >= 20) {
         rows = ws.ws_row;
         cols = ws.ws_col;
     }
-    outs("\x1b[0m\x1b[2J");
+    /* ধাপ ১২: আলাদা পর্দা (বন্ধ করলে আগেরটা ফেরে) আর মাউস (ক্লিক, চাকা) */
+    outs("\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[0m\x1b[2J");
     for (;;) {
         int k;
         clamp_top();
@@ -396,9 +415,28 @@ int main(int argc, char **argv)
         status_msg[0] = '\0';
         switch (k) {
         case 'q': case 'Q': case 3: case 17:
-            outs("\x1b[0m\x1b[2J\x1b[H\x1b[?25h");
+            outs("\x1b[0m\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l");
             flush_out();
             return 0;
+        case K_MOUSE:
+            /* ধাপ ১২: চাকা = স্ক্রল, লিংকে ক্লিক = খোলা, নিচের লাইনে ক্লিক = ফেরা */
+            if (mouse_b & 64) {
+                top += (mouse_b & 1) ? 3 : -3;
+                clamp_top();
+                sel_follow_scroll();
+            } else if ((mouse_b & 3) == 0 && !mouse_release && !(mouse_b & 32)) {
+                int line = top + mouse_y - 1, i, hit = -1;
+                for (i = 0; i < nlinks; i++) {
+                    if (links[i].line == line && mouse_x >= links[i].col && mouse_x < links[i].col + links[i].len) hit = i;
+                }
+                if (hit >= 0) {
+                    sel = hit;
+                    go(links[hit].target);
+                } else if (mouse_y == rows - 1) {
+                    back();
+                }
+            }
+            break;
         case '\t':
             if (nlinks) { sel = (sel + 1) % nlinks; show_sel(); }
             break;

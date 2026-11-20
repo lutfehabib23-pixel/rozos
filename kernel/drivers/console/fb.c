@@ -27,6 +27,8 @@ static uint32_t fb_palette[16];           /* ফ্রেমবাফারে�
 static uint32_t cell_w, cell_h, cols, rows;
 static const struct rozos_font *fnt;
 static int fb_ready;
+static int fb_graphics;                   /* ধাপ ১৩: /dev/fb0-এর মালিক আঁকছে — কনসোল আঁকে না */
+static struct fb_info_k fb_info_v;        /* ধাপ ১৩: /dev/fb0-এর জন্য */
 
 static uint32_t pack_channel(uint32_t value8, uint8_t size, uint8_t shift)
 {
@@ -60,6 +62,16 @@ int fb_init(void)
     fb_h     = f->height;
     fb_pitch = f->pitch;
     fb_depth = f->bpp;
+    fb_info_v.virt = (uint64_t)(uintptr_t)f->address;
+    fb_info_v.phys = fb_info_v.virt - boot_hhdm_offset();
+    fb_info_v.width = (uint32_t)f->width;
+    fb_info_v.height = (uint32_t)f->height;
+    fb_info_v.pitch = (uint32_t)f->pitch;
+    fb_info_v.bpp = f->bpp;
+    fb_info_v.red_size = f->red_mask_size;     fb_info_v.red_shift = f->red_mask_shift;
+    fb_info_v.green_size = f->green_mask_size; fb_info_v.green_shift = f->green_mask_shift;
+    fb_info_v.blue_size = f->blue_mask_size;   fb_info_v.blue_shift = f->blue_mask_shift;
+    fb_info_v.size = f->pitch * f->height;
 
     for (i = 0; i < 16; i++) {
         uint32_t rgb = fb_palette_rgb[i];
@@ -68,6 +80,20 @@ int fb_init(void)
                       | pack_channel(rgb & 0xFF,         f->blue_mask_size,  f->blue_mask_shift);
     }
 
+    if (!fb_relayout()) {
+        return 0;
+    }
+    fb_ready = 1;
+    return 1;
+}
+
+/* ধাপ ১৩: ফন্ট থেকে ঘরের মাপ আর কলাম/সারি (fb_init আর setfont-এর পরে) */
+int fb_relayout(void)
+{
+    fnt = font_get();
+    if (!fnt) {
+        return 0;
+    }
     cell_w = fnt->width * fnt->scale_x + fnt->spacing;
     cell_h = fnt->height * fnt->scale_y;
     if (cell_w == 0 || cell_h == 0) {
@@ -75,15 +101,19 @@ int fb_init(void)
     }
     cols = (uint32_t)(fb_w / cell_w);
     rows = (uint32_t)(fb_h / cell_h);
-    if (cols == 0 || rows == 0) {
-        return 0;
-    }
-
-    fb_ready = 1;
-    return 1;
+    return cols != 0 && rows != 0;
 }
 
 int fb_is_ready(void)      { return fb_ready; }
+const struct fb_info_k *fb_info(void) { return fb_ready ? &fb_info_v : NULL; }
+int fb_graphics_mode(void) { return fb_graphics; }
+
+/* ধাপ ১৩: on = গ্রাফিক্স প্রোগ্রাম আঁকছে (কনসোলের আঁকা বন্ধ; অক্ষর-গ্রিড আর serial চলে),
+ * off = কনসোল ফেরত — ডাকা ফাংশন তারপর tty_refresh() দিয়ে পুরো পর্দা আবার আঁকে */
+void fb_set_graphics(int on)
+{
+    fb_graphics = on ? 1 : 0;
+}
 uint32_t fb_cols(void)     { return cols; }
 uint32_t fb_rows(void)     { return rows; }
 uint64_t fb_width(void)    { return fb_w; }
@@ -107,23 +137,23 @@ void fb_put_cell(uint32_t col, uint32_t row, char ch, uint8_t fg, uint8_t bg)
     uint32_t fgc, bgc, gy, gx, sy, sx;
     uint64_t px, py;
 
-    if (!fb_ready || col >= cols || row >= rows) {
+    if (!fb_ready || fb_graphics || col >= cols || row >= rows) {
         return;
     }
-    glyph = fnt->glyphs + (uint32_t)(uint8_t)ch * fnt->height;
+    glyph = fnt->glyphs + (uint32_t)(uint8_t)ch * fnt->height * fnt->bytes_per_row;
     fgc = fb_palette[fg & 0x0F];
     bgc = fb_palette[bg & 0x0F];
     px = (uint64_t)col * cell_w;
     py = (uint64_t)row * cell_h;
 
     for (gy = 0; gy < fnt->height; gy++) {
-        uint8_t bits = glyph[gy];
+        const uint8_t *row_bits = glyph + gy * fnt->bytes_per_row;   /* ধাপ ১৩: চওড়া ফন্টও */
         for (sy = 0; sy < fnt->scale_y; sy++) {
             volatile uint32_t *line =
                 (volatile uint32_t *)(fb_addr + (py + gy * fnt->scale_y + sy) * fb_pitch) + px;
             uint32_t x = 0;
-            for (gx = 0; gx < 8; gx++) {
-                uint32_t c = (bits & (0x80u >> gx)) ? fgc : bgc;
+            for (gx = 0; gx < fnt->width; gx++) {
+                uint32_t c = (row_bits[gx >> 3] & (0x80u >> (gx & 7))) ? fgc : bgc;
                 for (sx = 0; sx < fnt->scale_x; sx++) {
                     line[x++] = c;
                 }
@@ -138,7 +168,7 @@ void fb_put_cell(uint32_t col, uint32_t row, char ch, uint8_t fg, uint8_t bg)
 void fb_draw_cursor(uint32_t col, uint32_t row, uint8_t color)
 {
     uint32_t thickness;
-    if (!fb_ready || col >= cols || row >= rows) {
+    if (!fb_ready || fb_graphics || col >= cols || row >= rows) {
         return;
     }
     /* অক্ষরের নিচে আন্ডারলাইন কার্সর (উচ্চতার ১/৮, কমপক্ষে 2 পিক্সেল) */
@@ -152,7 +182,7 @@ void fb_draw_cursor(uint32_t col, uint32_t row, uint8_t color)
 
 void fb_clear(uint8_t bg)
 {
-    if (!fb_ready) {
+    if (!fb_ready || fb_graphics) {
         return;
     }
     fill_rect(0, 0, fb_w, fb_h, fb_palette[bg & 0x0F]);

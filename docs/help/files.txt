@@ -1,12 +1,18 @@
 # Files and directories
   /bin            programs ([[programs]])
+  /boot           boot partition (FAT): kernels, boot menu ([[kinstall]])
   /etc            settings: motd (boot message), hostname, hosts,
-                  resolv.conf (DNS server, written at boot)
+                  resolv.conf (DNS server, written at boot),
+                  rozpkg.conf ([[rozpkg]]), ssl/certs.pem ([[tls]])
   /home           your home directory (~), .rozshrc, .rozsh_history
   /src            sample sources (hello.c)
   /usr/include    C headers ([[rozlibc]])
-  /usr/lib        libc.a, crt1.o, tcc/ ([[tcc]])
+  /usr/lib        libc.a, crt1.o, tcc/ ([[tcc]]), librozhttp.a,
+                  libbearssl.a ([[rozhttp]]), package libraries
+  /var            rozpkg's cache and list of installed packages
   /usr/share/help these help pages
+  /usr/share/apps entries of the [[menu]]
+  /usr/local/bin  your installed programs ([[install]]); also ~/bin
   /usr/src/tcc    TCC source ([[self-hosting]])
   /tmp            temporary files in RAM - empty after every boot
   /dev            devices ([[disks]])

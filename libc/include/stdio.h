@@ -33,6 +33,8 @@ FILE  *fopen(const char *path, const char *mode);
 FILE  *fdopen(int fd, const char *mode);
 FILE  *freopen(const char *path, const char *mode, FILE *f);
 int    fclose(FILE *f);
+FILE  *popen(const char *command, const char *mode);  /* ধাপ ১১: pipe নেই, /tmp-এর ফাইল দিয়ে */
+int    pclose(FILE *f);
 int    fflush(FILE *f);
 int    fileno(FILE *f);
 int    setvbuf(FILE *f, char *buf, int mode, size_t size);
@@ -70,6 +72,12 @@ int    vdprintf(int fd, const char *fmt, va_list ap);
 int    vsprintf(char *buf, const char *fmt, va_list ap);
 int    vsnprintf(char *buf, size_t size, const char *fmt, va_list ap);
 int    sscanf(const char *s, const char *fmt, ...);
+/* ধাপ ১২: পুরো scanf পরিবার — %d %i %u %o %x %f %e %g %s %c %[...] %n %p, '*', প্রস্থ, h/hh/l/ll/z */
+int    scanf(const char *fmt, ...);
+int    fscanf(FILE *f, const char *fmt, ...);
+int    vscanf(const char *fmt, va_list ap);
+int    vsscanf(const char *s, const char *fmt, va_list ap);
+int    vfscanf(FILE *f, const char *fmt, va_list ap);
 
 void   perror(const char *msg);
 int    remove(const char *path);

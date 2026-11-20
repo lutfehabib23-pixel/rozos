@@ -20,6 +20,10 @@ static uint8_t font_copy[256 * FONT_MAX_HEIGHT];
 
 static struct rozos_font font;
 static int font_ready;
+/* ধাপ ১৩: setfont-এর ফন্ট — 256 গ্লিফ × 32 লাইন × 2 বাইট */
+#define FONT_USER_MAX (256 * 32 * 2)
+static uint8_t font_user[FONT_USER_MAX];
+static struct rozos_font boot_font;     /* Limine-এর (font_reset-এর জন্য) */
 
 int font_init(void)
 {
@@ -44,8 +48,36 @@ int font_init(void)
     font.scale_x = p->font_scale_x ? (uint32_t)p->font_scale_x : 1;
     font.scale_y = p->font_scale_y ? (uint32_t)p->font_scale_y : 1;
     font.spacing = (uint32_t)p->font_spacing;
+    font.bytes_per_row = 1;
+    boot_font = font;
     font_ready = 1;
     return 1;
+}
+
+int font_set(const uint8_t *glyphs, uint32_t width, uint32_t height)
+{
+    uint32_t bpr = (width + 7) / 8;
+    if (width == 0 || width > 16 || height == 0 || height > 32) {
+        return -1;
+    }
+    memcpy(font_user, glyphs, (size_t)256 * height * bpr);
+    font.glyphs = font_user;
+    font.width = width;
+    font.height = height;
+    font.scale_x = 1;
+    font.scale_y = 1;
+    font.spacing = 0;
+    font.bytes_per_row = bpr;
+    font_ready = 1;
+    return 0;
+}
+
+void font_reset(void)
+{
+    if (boot_font.glyphs) {
+        font = boot_font;
+        font_ready = 1;
+    }
 }
 
 const struct rozos_font *font_get(void)

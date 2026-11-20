@@ -1,0 +1,11 @@
+# rozui - the 3D look (phase 14)
+  `#include <rozui.h>`    link: `tcc app.c -lrozui -lrozgfx`
+Colours of the desktop theme (dark, like the wallpaper the desktop was
+designed from; raised and sunken 3D edges): `ui_theme_get()`.
+  ui_bevel(s, x, y, w, h, raised)       two-step 3D edge
+  ui_panel / ui_sunken                  filled raised / sunken box
+  ui_button(s, x, y, w, h, "OK", UI_NORMAL|UI_HOVER|UI_DOWN|UI_DISABLED)
+  ui_label, ui_label_center, ui_menu_item, ui_separator
+  ui_icon(s, x, y, 't', color)          small 16x16 symbols
+Phase 14b adds text fields, lists, scroll bars and file dialogs (for
+the graphical editor and the file manager). See [[rozgfx]].

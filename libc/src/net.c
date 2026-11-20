@@ -367,3 +367,21 @@ const char *gai_strerror(int err)
     }
     return "unknown error";
 }
+
+/* ---------- ধাপ ১০: র‍্যান্ডম ---------- */
+
+#include <sys/random.h>
+
+ssize_t getrandom(void *buf, size_t len, unsigned flags)
+{
+    return __syscall_ret(__syscall3(318, buf, len, flags));
+}
+
+int getentropy(void *buf, size_t len)
+{
+    if (len > 256) {
+        errno = EIO;
+        return -1;
+    }
+    return getrandom(buf, len, 0) == (ssize_t)len ? 0 : -1;
+}

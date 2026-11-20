@@ -32,6 +32,10 @@
 #define SIGILL   4
 #define SIGFPE   8
 #define SIGKILL  9
+#define SIGINT   2                  /* ধাপ ১৪: Ctrl+C */
+#define SIGQUIT  3
+#define SIGPIPE  13
+#define SIGHUP   1
 #define SIGSEGV  11
 #define SIGTERM  15
 
@@ -52,6 +56,9 @@ struct process {
     int exit_code;                  /* exit() মান (0-255) */
     int term_signal;                /* signal-এ মারা গেলে তার নম্বর, নইলে 0 */
     int killed;                     /* kill করা হয়েছে (signal নম্বর) — পরের ইউজার-ফেরায় শেষ */
+    int pgid;                       /* ধাপ ১৪: process group (Ctrl+C পুরো গ্রুপে) */
+    int sid;                        /* ধাপ ১৪: session (setsid) */
+    uint64_t sigignore;             /* ধাপ ১৪: SIG_IGN করা signal (বিট n-1); SIGKILL কখনো নয় */
     int waiting;                    /* wait4()-এ ঘুমিয়ে আছে */
     int autoreap;                   /* কেউ wait করবে না — শেষ হলে নিজেই মুছে যায় */
     struct thread *kwaiter;         /* কার্নেলের কোনো থ্রেড এই প্রসেসের জন্য অপেক্ষায় */
@@ -75,6 +82,8 @@ int proc_spawn(const char *path, const char *const *argv, int autoreap);
 int proc_wait_kernel(int pid, int *status, uint64_t timeout_ms);
 
 int  proc_kill(int pid, int sig);
+/* ধাপ ১৪: গ্রুপের সবাইকে (ফেরত: কয়জন সত্যিই পেল — উপেক্ষা করা বাদে; কেউ না হলে -ESRCH) */
+int  proc_kill_group(int pgid, int sig);
 /* zombie প্রসেসের struct মুক্ত করা (sched.c-র reaper ও wait ডাকে) */
 void proc_free(struct process *p);
 struct process *proc_current(void);

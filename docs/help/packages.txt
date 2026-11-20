@@ -1,0 +1,26 @@
+# Making packages for rozpkg
+A package is a USTAR .tar whose paths are relative to / , for example
+usr/lib/libcjson.a and usr/include/cjson/cJSON.h. The repo's index.txt
+has one line per package:
+  name version sha256 size filename description...
+
+== On the build PC ==
+  `./ports/packages/build-cjson.sh`   build the cjson package
+  `ports/packages/mkpkg.sh NAME VERSION DIR "description"`
+       any folder DIR -> dist/packages/NAME-VERSION.tar + index.txt
+Libraries are built with the same cross compiler and flags as rozOS
+programs, against rozlibc (see build-cjson.sh as an example).
+
+== Publishing on GitHub (once) ==
+  `gh repo create rozos-packages --public`
+  `gh release create packages -R YOU/rozos-packages dist/packages/*`
+Later, after adding or updating packages:
+  `gh release upload packages -R YOU/rozos-packages --clobber dist/packages/*`
+In rozOS: `rozpkg repo YOU/rozos-packages` then `rozpkg update`.
+The same can be done on the GitHub web page: Releases -> new
+release, then drag index.txt and the .tar files into it.
+
+== Testing without GitHub ==
+On the PC, in dist/packages: `python3 -m http.server 8000`, then in
+rozOS `rozpkg repo http://10.0.2.2:8000` and `rozpkg update`.
+See [[rozpkg]].

@@ -5,6 +5,8 @@
  * void tss_load(uint16_t sel)
  *   di = sel */
 
+#include <rozos/asm_compat.h>
+
     .section .text
 
     .global gdt_load
@@ -26,7 +28,7 @@ gdt_load:
     pushq   %rsi
     leaq    1f(%rip), %rax
     pushq   %rax
-    lretq
+    LRETQ
 1:
     ret
     .size gdt_load, . - gdt_load

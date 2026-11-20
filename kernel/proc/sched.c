@@ -57,6 +57,19 @@ static uint8_t fpu_initial[512] ROZ_ALIGNED(16);
 
 /* ---------- FPU / SSE ---------- */
 
+#ifdef __TINYC__
+/* ধাপ ১১: TCC-র assembler fxsave64/fxrstor64 চেনে না — একই নির্দেশ বাইটে
+ * (REX.W 0F AE /0 আর /1, ঠিকানা rdi-তে) */
+static inline void fxsave(uint8_t *area)
+{
+    __asm__ __volatile__(".byte 0x48, 0x0f, 0xae, 0x07" : : "D"(area) : "memory");
+}
+
+static inline void fxrstor(const uint8_t *area)
+{
+    __asm__ __volatile__(".byte 0x48, 0x0f, 0xae, 0x0f" : : "D"(area) : "memory");
+}
+#else
 static inline void fxsave(uint8_t *area)
 {
     __asm__ __volatile__("fxsave64 (%0)" : : "r"(area) : "memory");
@@ -66,6 +79,7 @@ static inline void fxrstor(const uint8_t *area)
 {
     __asm__ __volatile__("fxrstor64 (%0)" : : "r"(area) : "memory");
 }
+#endif
 
 static void write_cr0(uint64_t v) { __asm__ __volatile__("mov %0, %%cr0" : : "r"(v) : "memory"); }
 static void write_cr4(uint64_t v) { __asm__ __volatile__("mov %0, %%cr4" : : "r"(v) : "memory"); }

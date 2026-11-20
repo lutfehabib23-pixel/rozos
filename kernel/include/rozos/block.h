@@ -5,14 +5,16 @@
  *   - নাম (sda, sdb ...) আর /dev-এ কাঁচা ডিভাইস ফাইল
  *   - বাইট-ভিত্তিক পড়া/লেখা (block_read_bytes) — sector-এর মাঝখান থেকেও
  *   - 4 KiB-এর write-through cache: পড়া দ্রুত, আর প্রতিটি লেখা সাথে সাথে ডিস্কে যায়
- *     (বিদ্যুৎ চলে গেলেও ফাইলসিস্টেম নষ্ট হওয়ার ঝুঁকি কম) */
+ *     (বিদ্যুৎ চলে গেলেও ফাইলসিস্টেম নষ্ট হওয়ার ঝুঁকি কম)
+ *   - ধাপ ১১খ: partition (sda1, sda2 ...) — নিজস্ব ড্রাইভার নেই, parent ডিস্কের একটা
+ *     অংশ; পড়া/লেখা parent-এর cache দিয়েই যায়, তাই /dev/sda আর /dev/sda2 সবসময় এক। */
 #ifndef ROZOS_BLOCK_H
 #define ROZOS_BLOCK_H
 
 #include <stdint.h>
 #include <stddef.h>
 
-#define BLOCK_MAX_DEVICES 8
+#define BLOCK_MAX_DEVICES 32      /* ধাপ ১১খ: ডিস্ক + partition (আগে 8) */
 #define BLOCK_NAME_MAX    16
 
 struct block_device;
@@ -33,10 +35,24 @@ struct block_device {
     void    *driver_data;
     /* পরিসংখ্যান */
     uint64_t reads, writes, cache_hits, cache_misses;
+    /* ধাপ ১১খ: partition হলে parent != NULL, ops == NULL */
+    struct block_device *parent;
+    uint64_t start_lba;                              /* parent-এর sector-এ */
+    uint32_t part_number;                            /* 1, 2 ... */
+    char     part_type[24];                          /* "EFI System", "Linux data", "FAT32" ... */
+    char     part_label[40];                         /* GPT-র নাম (ASCII) */
+    /* ডিস্কের জন্য: partition table ("gpt", "mbr", "" = নেই) আর কয়টা partition */
+    char     table[8];
+    uint32_t partitions;
 };
 
 /* ড্রাইভার নিবন্ধন: নাম নিজে দেয় ("sd" + a, b, c ...), /dev-এও যোগ করে */
 int block_register(struct block_device *dev, const char *prefix);
+/* ধাপ ১১খ: partition নিবন্ধন — part->parent, start_lba, sector_count, part_number আগে বসানো;
+ * নাম = parent-এর নাম + নম্বর ("sda2"), /dev-এও যোগ হয় */
+int block_register_partition(struct block_device *part);
+/* ধাপ ১১খ: ডিস্কের GPT বা MBR পড়ে partition-গুলো নিবন্ধন; ফেরত: কয়টা পাওয়া গেল */
+int partition_scan(struct block_device *disk);
 size_t block_device_count(void);
 struct block_device *block_device_at(size_t index);
 struct block_device *block_find(const char *name);

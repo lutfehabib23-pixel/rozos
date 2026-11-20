@@ -1,0 +1,7 @@
+# reboot, poweroff
+  `reboot`        restart the computer
+  `poweroff`      switch off (ACPI); in QEMU this also closes QEMU
+  `poweroff -h`   only stop (halt)
+The kernel writes everything to the disk first. After `reboot` the
+boot menu appears ([[boot-menu]]) - that is how a new kernel from
+[[kinstall]] is started. In C: #include <sys/reboot.h>, reboot(RB_AUTOBOOT).

@@ -1,0 +1,14 @@
+# rozterm - terminal window (phase 14)
+  `rozterm`              a shell in a window (Start > Terminal)
+  `rozterm -e 'cmd'`     run cmd; the window closes when it ends
+  `rozterm -w -e 'cmd'`  ... waits for a key first (menu "wait: yes")
+Inside is a [[pty]]: rozsh, edit, help, make work exactly as on the
+console (colours, cursor, the editor's own screen, its mouse).
+  mouse wheel, Shift+PgUp/PgDn   scroll back (1000 lines)
+  drag with the left button      select, copied when you let go
+  right click                    paste  (clipboard: /tmp/.clipboard,
+                                 shared by all terminals)
+  Ctrl+C                         stop the running program ([[signals]])
+Resize the window and the terminal gets more rows/columns (programs
+see it with TIOCGWINSZ; in the editor press Ctrl+L).
+Source: /usr/src/gfx/rozterm.c. See [[desktop]].

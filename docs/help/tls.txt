@@ -1,0 +1,37 @@
+# TLS and https - encrypted, verified connections
+https:// addresses use TLS: the connection is encrypted, and the server
+proves with a certificate that it really is the name you asked for.
+rozOS uses BearSSL 0.6 (TLS 1.0 - 1.2) inside [[rozhttp]], so
+[[http-get]], [[rozpkg]] and your own programs all speak https.
+
+== Try ==
+  `http-get -h https://example.com/`   headers over TLS
+  `http-get -v https://github.com/`    show connect, TLS and redirects
+
+== How a server is checked ==
+1. The server sends its certificate chain.
+2. BearSSL follows the chain up to a CA it trusts. The trusted CAs
+   are in `/etc/ssl/certs.pem` (Mozilla's list, copied from the build
+   PC at `make` time); they are read on the first https connection.
+3. The name in the certificate must match the host name (SNI).
+4. The dates must be valid today - this uses the rozOS clock, so a
+   wrong `date` makes every certificate look expired.
+The random numbers TLS needs come from [[random|/dev/urandom]].
+
+== Error messages ==
+  "certificate expired or not yet valid"  check `date` (UTC)
+  "not signed by a trusted CA"   the CA is missing from certs.pem
+  "for a different host name"    e.g. https://1.2.3.4/ - use the name
+  "server does not speak TLS 1.0-1.2"   TLS 1.3-only servers (rare)
+  "connection closed during the handshake"   the server gave up
+
+== Your own CA ==
+On the PC: `make CA_EXTRA=myca.pem disk-update` adds a PEM file to
+certs.pem (for a test server with a self-signed CA). `CA_BUNDLE=file`
+replaces the Mozilla list. Without the PC's ca-certificates package
+the build warns and https verification fails.
+
+== Programming ==
+  `tcc prog.c -lrozhttp -lbearssl`   see [[rozhttp]]
+BearSSL's own API (bearssl.h, in /usr/include) is there too.
+See also [[network]], [[rozpkg]].

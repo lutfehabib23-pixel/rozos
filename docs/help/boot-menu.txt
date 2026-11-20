@@ -1,0 +1,24 @@
+# The boot menu (Limine)
+For 3 seconds after power-on, Limine shows a list of kernels:
+  rozOS build 42.3 (tcc, ...) - default   newest installed kernels
+  rozOS build 42.2 (tcc, ...)
+  rozOS factory (build 42, gcc)            from the PC, always there
+  rozOS factory (no init: kernel monitor)  starts [[kmon]] directly
+Arrow keys choose, Enter boots; without a key the default starts.
+
+If a new kernel crashes at once, QEMU restarts again and again. Quit
+with Ctrl+A then X, run `make run-serial` again and press an arrow key
+in the menu within 3 seconds to pick an older kernel (`make run`
+shows the menu in the QEMU window, which is easier).
+The menu is /boot/limine.conf, written by [[kinstall]].
+"rozOS factory (text mode, no desktop)" boots without the desktop
+(kernel command line word `text`), see [[desktop]].
+Screen resolution (phase 13): `kinstall --resolution 1024x768` adds a
+"resolution:" line to every entry (`auto` removes it) - see [[fonts]].
+
+== Disk or CD ==
+`make run-serial` / `make run` / `make run-uefi` boot from the disk
+(Limine is installed on it). The CD image is a rescue copy:
+  `make run-iso`   boot from rozos.iso instead (same factory kernel)
+Limine cannot read ext2, which is why the kernels are on the FAT
+boot partition - see [[partitions]].

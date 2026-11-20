@@ -2,6 +2,8 @@
   `ls [-l] [-a] [path ...]`
   `-l`   long form: type+permissions, links, size, date (UTC), name
   `-a`   also show names starting with "." (like .rozshrc)
+  `-1`   one name per line - automatic when the output is not the
+         console (a pipe or a file): `ls /bin | wc -l`
 Directories are blue and end in "/", programs green, devices yellow.
 Examples: `ls`, `ls -l /bin`, `ls -a ~`, `ls /usr/include /usr/lib`
 Colours are only used when the output is the console.

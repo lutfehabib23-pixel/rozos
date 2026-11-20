@@ -30,4 +30,10 @@ typedef long ssize_t;
 #define LWIP_PLATFORM_DIAG(x)   do { kprintf x; } while (0)
 #define LWIP_PLATFORM_ASSERT(x) kpanic("lwIP assertion: %s (%s:%d)", (x), __FILE__, __LINE__)
 
+/* ধাপ ১১: TCC __GNUC__ দেয় না, তাই lwIP-এর arch.h packed struct বন্ধ রাখত
+ * (init.c-র "Struct packing not implemented" assert) — TCC attribute বোঝে */
+#ifdef __TINYC__
+#define PACK_STRUCT_STRUCT __attribute__((packed))
+#endif
+
 #endif

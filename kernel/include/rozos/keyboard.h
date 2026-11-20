@@ -34,6 +34,8 @@ enum key_special {
 
 int      keyboard_init(void);          /* PS/2 কন্ট্রোলার না থাকলে 0 */
 int      keyboard_try_getkey(int *key); /* বাফারে কী থাকলে 1 */
+int      keyboard_has_key(void);        /* ধাপ ১৩: না সরিয়ে দেখা (poll) */
+void     keyboard_set_intr_hook(int (*fn)(void));   /* ধাপ ১৪: Ctrl+C চাপলেই (IRQ থেকে) */
 int      keyboard_getkey(void);         /* কী আসা পর্যন্ত অপেক্ষা (ইন্টারাপ্ট চালু থাকতে হবে) */
 uint8_t  keyboard_modifiers(void);
 uint8_t  keyboard_last_scancode(void);  /* ডিবাগিং */

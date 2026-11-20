@@ -18,6 +18,9 @@ struct sockaddr_storage {
 };
 
 #define AF_UNSPEC 0
+#define AF_UNIX   1                  /* ধাপ ১৪: একই কম্পিউটারের প্রোগ্রামের মধ্যে (<sys/un.h>) */
+#define AF_LOCAL  AF_UNIX
+#define PF_UNIX   AF_UNIX
 #define AF_INET   2
 #define PF_INET   AF_INET
 #define PF_UNSPEC AF_UNSPEC

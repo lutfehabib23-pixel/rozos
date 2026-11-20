@@ -1,0 +1,20 @@
+# Shared memory (phase 13)
+Two processes see the same memory - what one writes, the other reads at
+once. The window server of phase 14 gives every window such a buffer.
+
+  `int fd = shm_open("/picture", O_CREAT | O_RDWR, 0600);`
+  `ftruncate(fd, 640 * 480 * 4);`              set the size
+  `uint32_t *p = mmap(NULL, 640*480*4, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);`
+Another program does `shm_open("/picture", O_RDWR, 0)` and the same mmap.
+  `shm_unlink("/picture");`   remove the name; the memory is freed when
+                              the last mapping and fd are gone
+The name lives until shm_unlink, even when the programs end.
+
+== Without a name ==
+  `p = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);`
+After fork(), parent and child share these pages (normal memory is
+copied at fork). [[systest]] tests both ways.
+
+kmon's `shm` lists the objects. Headers: sys/mman.h, fcntl.h, unistd.h.
+Kernel: kernel/mm/shm.c (pages marked "shared" are not freed by munmap
+or exit, and fork maps the same frame). See [[pipes]], [[rozlibc]].

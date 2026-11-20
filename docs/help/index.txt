@@ -6,7 +6,7 @@ Type [[help|how to use this viewer]] if you are new here.
 == Getting started ==
   [[quickstart]]      your first five minutes in rozOS
   [[keys]]            every special key, in one place
-  [[qemu]]            running rozOS on your PC (make run, quitting QEMU)
+  [[qemu]]            running rozOS on your PC (make run, KVM, RAM, disk size)
 
 == The shell (rozsh) ==
   [[rozsh]]           what the shell does and how a command runs
@@ -17,25 +17,53 @@ Type [[help|how to use this viewer]] if you are new here.
 
 == Programs in /bin ==
   [[programs]]        the full list, one line each
+  [[menu]]            start programs from a list; [[install]] your own
+  [[mouse]]           the mouse in the terminal and the QEMU window
   [[edit]]            the text editor
   [[tcc]]             the C compiler - build programs inside rozOS
+  [[make]]            build from a Makefile (pdpmake)
   [[kmon]]            the kernel monitor (debugging)
-  [[systest]]         the self-test (43 checks)
+  [[systest]]         the self-test (50 checks)
 
 == Writing software ==
   [[c-programming]]   write, compile and run a C program, step by step
   [[rozlibc]]         the C library: headers and what is in them
+  [[scanf]]           reading input: scanf, fscanf, sscanf
   [[self-hosting]]    rebuilding TCC with TCC, and the road ahead
+  [[kernel-build]]    build the rozOS kernel inside rozOS
+  [[kinstall]]        install it, keep old kernels, the boot menu
+
+== Desktop (phase 14) ==
+  [[desktop]]         the desktop: windows, Start menu, text mode and back
+  [[rozterm]]         terminal windows    [[rozwm]] the window server
+  [[signals]]         Ctrl+C, process groups    [[pty]] PTYs and Unix sockets
+  [[rozui]]           the 3D look for your own programs
+
+== Graphics (phase 13) ==
+  [[graphics]]        the graphics programs, and how to write your own
+  [[rozgfx]]          the graphics library (shapes, pictures, fonts, mouse)
+  [[fonts]]           console fonts (setfont) and screen resolution
+  [[framebuffer]]     /dev/fb0      [[shm]] shared memory   [[pipes]] pipe(), poll()
 
 == Network ==
   [[network]]         how rozOS talks TCP/IP (lwIP, DHCP, DNS)
   [[ifconfig]] [[ping]] [[nslookup]] [[http-get]]   the network programs
+  [[tls]]             https: encryption and certificates (BearSSL)
   [[sockets]]         network programming in C
+  [[rozhttp]]         http/https in your own C programs
+
+== Packages ==
+  [[rozpkg]]          install libraries from the internet
+  [[cjson]]           the first package: JSON for C
+  [[packages]]        make and publish your own packages
 
 == How rozOS works ==
   [[files]]           the directory layout (/bin, /usr, /tmp, /dev ...)
   [[disks]]           ext2 on disk, tmpfs in RAM, devfs, the initrd
+  [[partitions]]      GPT, the boot partition ([[fat]]) and the root
+  [[boot-menu]]       choosing a kernel at power-on; [[reboot]]
   [[processes]]       fork, exec, wait, kill, signals, ring 3
   [[syscalls]]        how programs talk to the kernel
+  [[random]]          /dev/urandom and getrandom()
   [[kernel]]          the big picture: boot, memory, scheduler, drivers
   [[boot]]            what happens from power-on to the shell prompt

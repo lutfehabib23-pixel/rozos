@@ -1,0 +1,7 @@
+# paint - draw with the mouse
+  `paint`            new picture, saved as /home/drawing.bmp
+  `paint pic.bmp`    open a picture and draw on it
+Left button draws, right button erases. Top bar: colours, brush size
+[ ] (or the wheel), fill (bucket), clear, save. Keys: 1-9 colour,
+[ ] brush, f fill, c clear, s save, q quit. Look at the result with
+[[imgview]]. Source: /usr/src/gfx/paint.c. See [[graphics]].

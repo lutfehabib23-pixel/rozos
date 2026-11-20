@@ -42,4 +42,10 @@ int mkdir(const char *path, mode_t mode);
 mode_t umask(mode_t mask);
 int chmod(const char *path, mode_t mode);
 
+/* ধাপ ১১: সময় বদলানো — কার্নেলে এখনো নেই, ENOSYS দেয় */
+#define UTIME_NOW  ((1l << 30) - 1l)
+#define UTIME_OMIT ((1l << 30) - 2l)
+struct timespec;
+int utimensat(int dirfd, const char *path, const struct timespec times[2], int flags);
+
 #endif

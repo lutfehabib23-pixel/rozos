@@ -10,6 +10,7 @@
 #define EAGAIN       11
 #define ENOMEM       12
 #define EACCES       13
+#define ENXIO         6      /* ধাপ ১৩ */
 #define EBUSY        16
 #define EEXIST       17
 #define EXDEV        18
@@ -22,6 +23,7 @@
 #define EFBIG        27
 #define ENOSPC       28
 #define ESPIPE       29
+#define EPIPE        32      /* ধাপ ১৩: pipe-এর পাঠক নেই */
 #define EROFS        30
 #define ENAMETOOLONG 36
 #define ENOSYS       38

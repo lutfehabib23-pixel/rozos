@@ -1,0 +1,3 @@
+# textmode - leave the desktop
+See [[desktop]]: `textmode` (text console), `textmode -r` (restart),
+`textmode -p` (switch off). Back to the desktop: `desktop`.

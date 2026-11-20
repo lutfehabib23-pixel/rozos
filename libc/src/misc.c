@@ -38,6 +38,7 @@ char *strerror(int err)
     case ENOTDIR:      return "not a directory";
     case EISDIR:       return "is a directory";
     case EINVAL:       return "invalid argument";
+    case EPIPE:        return "broken pipe";
     case ENFILE:       return "too many open files in system";
     case EMFILE:       return "too many open files";
     case ENOTTY:       return "not a terminal";

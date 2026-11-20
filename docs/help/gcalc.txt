@@ -1,0 +1,4 @@
+# gcalc - calculator
+Click the buttons or type: 0-9 . + - * / ( ) %, Enter or = for the
+result, Backspace deletes one, c or Esc clears, q quits. Brackets and
+* / before + - work like in maths. Source: /usr/src/gfx/gcalc.c. See [[graphics]].

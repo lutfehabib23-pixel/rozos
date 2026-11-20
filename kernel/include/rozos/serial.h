@@ -15,5 +15,6 @@ void serial_putc(char c);
 void serial_write(const char *s, size_t n);
 /* ইনপুট: ডেটা থাকলে 1 ফেরত দিয়ে *c-তে বসায় (non-blocking) */
 int  serial_try_getc(char *c);
+int  serial_rx_ready(void);      /* ধাপ ১৩: poll */
 
 #endif

@@ -28,6 +28,9 @@
 #define SYS_sched_yield     24
 #define SYS_dup             32
 #define SYS_dup2            33
+#define SYS_pipe            22      /* ধাপ ১৩ */
+#define SYS_pipe2           293     /* ধাপ ১৩ */
+#define SYS_poll            7       /* ধাপ ১৩ */
 /* ধাপ ৯: নেটওয়ার্ক */
 #define SYS_socket          41
 #define SYS_connect         42
@@ -42,6 +45,8 @@
 #define SYS_setsockopt      54
 #define SYS_getsockopt      55
 #define SYS_accept4         288
+#define SYS_getrandom       318     /* ধাপ ১০ */
+#define SYS_reboot          169     /* ধাপ ১১খ */
 #define SYS_nanosleep       35
 #define SYS_getpid          39
 #define SYS_fork            57
@@ -57,6 +62,12 @@
 #define SYS_rmdir           84
 #define SYS_unlink          87
 #define SYS_getppid         110
+#define SYS_rt_sigaction    13      /* ধাপ ১৪: শুধু SIG_IGN / SIG_DFL মানে রাখে */
+#define SYS_setpgid         109     /* ধাপ ১৪ */
+#define SYS_getpgrp         111
+#define SYS_setsid          112
+#define SYS_getpgid         121
+#define SYS_getsid          124
 #define SYS_arch_prctl      158
 #define SYS_getdents64      217
 #define SYS_clock_gettime   228
@@ -65,6 +76,10 @@
 /* rozOS-এর নিজস্ব (Linux-এর সংখ্যার অনেক ওপরে, যাতে কখনো না মেলে) — ধাপ ৭ */
 #define SYS_rozos_kmon      500     /* কার্নেল মনিটর চালানো, "exit" পর্যন্ত অপেক্ষা */
 #define SYS_rozos_netinfo   501     /* ধাপ ৯: interface-এর তথ্য (struct rozos_netinfo) */
+#define SYS_rozos_shm_open  503     /* ধাপ ১৩: (name, flags, mode) → fd */
+#define SYS_rozos_shm_unlink 504    /* ধাপ ১৩ */
+#define SYS_rozos_openpty   505     /* ধাপ ১৪: (int fds[2]) master, slave */
+#define SYS_ftruncate       77      /* ধাপ ১৩ */
 #define SYS_rozos_netconfig 502     /* ধাপ ৯: হাতে IP বসানো / আবার DHCP */
 
 #define SYSCALL_MAX         512

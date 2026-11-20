@@ -10,6 +10,9 @@
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <sys/utsname.h>
+#include <poll.h>
+#include <termios.h>
+#include <pty.h>
 #include <sys/time.h>
 #include <signal.h>
 #include <time.h>
@@ -29,6 +32,9 @@
 #define SYS_ioctl           16
 #define SYS_dup             32
 #define SYS_dup2            33
+#define SYS_pipe            22      /* ধাপ ১৩ */
+#define SYS_pipe2           293
+#define SYS_poll            7
 #define SYS_nanosleep       35
 #define SYS_getpid          39
 #define SYS_fork            57
@@ -36,8 +42,18 @@
 #define SYS_exit            60
 #define SYS_wait4           61
 #define SYS_kill            62
+#define SYS_rt_sigaction    13      /* ধাপ ১৪ */
+#define SYS_setpgid         109
+#define SYS_getpgrp         111
+#define SYS_setsid          112
+#define SYS_getpgid         121
+#define SYS_getsid          124
+#define SYS_rozos_openpty   505
 #define SYS_uname           63
 #define SYS_truncate        76
+#define SYS_ftruncate       77      /* ধাপ ১৩ */
+#define SYS_rozos_shm_open  503
+#define SYS_rozos_shm_unlink 504
 #define SYS_getcwd          79
 #define SYS_chdir           80
 #define SYS_mkdir           83
@@ -85,10 +101,16 @@ int     close(int fd)                            { return (int)SC3(SYS_close, fd
 off_t   lseek(int fd, off_t off, int whence)     { return SC3(SYS_lseek, fd, off, whence); }
 int     dup(int fd)                              { return (int)SC3(SYS_dup, fd, 0, 0); }
 int     dup2(int a, int b)                       { return (int)SC3(SYS_dup2, a, b, 0); }
+int     pipe(int fds[2])                         { return (int)SC3(SYS_pipe, fds, 0, 0); }
+int     pipe2(int fds[2], int flags)             { return (int)SC3(SYS_pipe2, fds, flags, 0); }
+int     poll(struct pollfd *fds, nfds_t n, int timeout) { return (int)SC3(SYS_poll, fds, n, timeout); }
 int     unlink(const char *p)                    { return (int)SC3(SYS_unlink, p, 0, 0); }
 int     rmdir(const char *p)                     { return (int)SC3(SYS_rmdir, p, 0, 0); }
 int     chdir(const char *p)                     { return (int)SC3(SYS_chdir, p, 0, 0); }
 int     truncate(const char *p, off_t len)       { return (int)SC3(SYS_truncate, p, len, 0); }
+int     ftruncate(int fd, off_t len)             { return (int)SC3(SYS_ftruncate, fd, len, 0); }
+int     shm_open(const char *name, int oflag, mode_t mode) { return (int)SC3(SYS_rozos_shm_open, name, oflag, mode); }
+int     shm_unlink(const char *name)             { return (int)SC3(SYS_rozos_shm_unlink, name, 0, 0); }
 int     mkdir(const char *p, mode_t m)           { return (int)SC3(SYS_mkdir, p, m, 0); }
 int     stat(const char *p, struct stat *st)     { return (int)SC3(SYS_stat, p, st, 0); }
 int     lstat(const char *p, struct stat *st)    { return stat(p, st); }
@@ -97,6 +119,47 @@ pid_t   fork(void)                               { return (pid_t)SC3(SYS_fork, 0
 pid_t   getpid(void)                             { return (pid_t)SC3(SYS_getpid, 0, 0, 0); }
 pid_t   getppid(void)                            { return (pid_t)SC3(SYS_getppid, 0, 0, 0); }
 int     kill(pid_t pid, int sig)                 { return (int)SC3(SYS_kill, pid, sig, 0); }
+/* ধাপ ১৪: process group, session, PTY, termios */
+int     setpgid(pid_t pid, pid_t pg)             { return (int)SC3(SYS_setpgid, pid, pg, 0); }
+pid_t   getpgid(pid_t pid)                       { return (pid_t)SC3(SYS_getpgid, pid, 0, 0); }
+pid_t   getpgrp(void)                            { return (pid_t)SC3(SYS_getpgrp, 0, 0, 0); }
+pid_t   setsid(void)                             { return (pid_t)SC3(SYS_setsid, 0, 0, 0); }
+pid_t   getsid(pid_t pid)                        { return (pid_t)SC3(SYS_getsid, pid, 0, 0); }
+int     killpg(pid_t pg, int sig)                { return kill(-pg, sig); }
+pid_t   tcgetpgrp(int fd)
+{
+    int pg;
+    if (ioctl(fd, 0x540F, &pg) < 0) return -1;
+    return (pid_t)pg;
+}
+int     tcsetpgrp(int fd, pid_t pg)
+{
+    int v = (int)pg;
+    return ioctl(fd, 0x5410, &v);
+}
+int     tcgetattr(int fd, struct termios *t)     { return ioctl(fd, 0x5401, t); }
+int     tcsetattr(int fd, int act, const struct termios *t)
+{
+    (void)act;
+    return ioctl(fd, 0x5402, (void *)t);
+}
+void    cfmakeraw(struct termios *t)
+{
+    t->c_iflag = 0;
+    t->c_oflag = 0;
+    t->c_lflag &= ~(ISIG | ICANON | ECHO | ECHOE | ECHOK | ECHONL | IEXTEN);
+}
+int     openpty(int *master, int *slave, char *name, const struct termios *tp, const struct winsize *wp)
+{
+    int fds[2];
+    if ((int)SC3(SYS_rozos_openpty, fds, 0, 0) < 0) return -1;
+    *master = fds[0];
+    *slave = fds[1];
+    if (name) name[0] = '\0';
+    if (tp) tcsetattr(fds[1], 0, tp);
+    if (wp) ioctl(fds[0], TIOCSWINSZ, (void *)wp);
+    return 0;
+}
 int     uname(struct utsname *u)                 { return (int)SC3(SYS_uname, u, 0, 0); }
 int     munmap(void *a, size_t len)              { return (int)SC3(SYS_munmap, a, len, 0); }
 int     mprotect(void *a, size_t len, int prot)  { return (int)SC3(SYS_mprotect, a, len, prot); }
@@ -313,6 +376,12 @@ sighandler_t signal(int sig, sighandler_t h)
     }
     old = handlers[sig];
     handlers[sig] = h;
+    /* ধাপ ১৪: কার্নেলকে জানানো — SIG_IGN মানলে signal উপেক্ষা (যেমন shell-এ Ctrl+C);
+     * নিজের handler কার্নেল এখনো চালায় না, তাই সেটা ডিফল্টের মতো */
+    {
+        unsigned long act[4] = { h == SIG_IGN ? 1UL : 0UL, 0, 0, 0 };
+        SC3(SYS_rt_sigaction, sig, act, 0);
+    }
     return old;
 }
 

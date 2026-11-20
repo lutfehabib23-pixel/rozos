@@ -1,0 +1,5 @@
+# mkbuildinfo - build number for a kernel built inside rozOS
+The kernel Makefile in /usr/src/rozos runs it at the link step:
+  `mkbuildinfo . > build/buildinfo.c`
+It reads .build-base (the PC build) and adds one to .build-self, so the
+kernel is called for example 42.3. See [[kinstall]], [[kernel-build]].

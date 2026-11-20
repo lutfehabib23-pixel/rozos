@@ -3,9 +3,15 @@
  * ধাপ ৭ থেকে init shell চালায়, তাই টেস্টগুলো এখানে সরানো — shell থেকে `systest`।
  * syscall দুই পথে, brk, mmap, স্ট্যাক বাড়া, ফাইল, getdents64, fork/execve/wait,
  * ভুল করা প্রসেস শেষ হওয়া, preemption ও FPU অবস্থা, sleep, kill। শেষে exit (ব্যর্থ টেস্টের সংখ্যা)।
- * ধাপ ৭: rozlibc দিয়ে লেখা (আগে ছোট rozsys.h ছিল), সাথে কয়েকটা libc-টেস্ট। */
+ * ধাপ ৭: rozlibc দিয়ে লেখা (আগে ছোট rozsys.h ছিল), সাথে কয়েকটা libc-টেস্ট।
+ * ধাপ ১০: getrandom, /dev/urandom, sscanf-এর double, rozhttp-এর SHA-256।
+ * ধাপ ১২: sscanf %[...] ও %n, fscanf। */
 
 #include <stdio.h>
+#include <poll.h>
+#include <pty.h>
+#include <sys/un.h>
+#include <sys/ioctl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -20,7 +26,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/random.h>
 #include <rozos.h>
+#include "rozhttp.h"
 
 #define SYS_getpid 39
 
@@ -312,6 +320,214 @@ static void test_net(void)
     }
 }
 
+/* ধাপ ১০ */
+static void test_phase10(void)
+{
+    unsigned char a[32], b[32];
+    double d = 0;
+    int x = 0, fd, n;
+    struct rozhttp_sha256 h;
+    char hex[65];
+
+    memset(a, 0, sizeof(a));
+    memset(b, 0, sizeof(b));
+    check(getrandom(a, sizeof(a), 0) == 32 && getrandom(b, sizeof(b), 0) == 32 && memcmp(a, b, 32) != 0,
+          "getrandom gives fresh bytes each time");
+    fd = open("/dev/urandom", O_RDONLY);
+    n = fd >= 0 ? (int)read(fd, a, sizeof(a)) : -1;
+    if (fd >= 0) close(fd);
+    check(n == 32 && memcmp(a, b, 32) != 0, "/dev/urandom reads");
+    check(sscanf("HTTP/1.1 404 x 2.5e3", "HTTP/%*d.%*d %d x %lg", &x, &d) == 2 && x == 404 && d == 2500.0,
+          "sscanf %*d and %lg");
+    rozhttp_sha256_init(&h);
+    rozhttp_sha256_update(&h, "abc", 3);
+    rozhttp_sha256_hex(&h, hex);
+    check(!strcmp(hex, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"), "SHA-256 (rozhttp)");
+}
+
+/* ধাপ ১২: scanf পরিবার */
+static void test_phase12(void)
+{
+    char a[32], b[32];
+    int x = 0, y = 0, n = 0;
+    FILE *f;
+    check(sscanf("name: rozOS v12\n", "name: %[^\n]%n", a, &n) == 1 && !strcmp(a, "rozOS v12") && n == 15,
+          "sscanf %[^\\n] and %n");
+    check(sscanf("abc123 0x1f", "%[a-z]%d %i", b, &x, &y) == 3 && !strcmp(b, "abc") && x == 123 && y == 31,
+          "sscanf %[a-z], %d, %i with 0x");
+    f = fopen("/tmp/systest-scanf.txt", "w");
+    if (f) {
+        fprintf(f, "42 3.5 word\n");
+        fclose(f);
+    }
+    f = fopen("/tmp/systest-scanf.txt", "r");
+    {
+        double d = 0;
+        int r = f ? fscanf(f, "%d %lf %31s", &x, &d, a) : -1;
+        check(r == 3 && x == 42 && d == 3.5 && !strcmp(a, "word") && fscanf(f, "%d", &y) == EOF, "fscanf from a file, EOF at the end");
+    }
+    if (f) fclose(f);
+    unlink("/tmp/systest-scanf.txt");
+}
+
+/* ধাপ ১৩: pipe, poll, shared memory */
+static void test_phase13(void)
+{
+    int fds[2], st = 0;
+    char buf[64];
+    struct pollfd pf;
+    pid_t pid;
+
+    check(pipe(fds) == 0, "pipe() gives two fds");
+    check(write(fds[1], "hello", 5) == 5 && read(fds[0], buf, sizeof(buf)) == 5 && !memcmp(buf, "hello", 5),
+          "pipe: bytes written come out of the read end");
+    pf.fd = fds[0]; pf.events = POLLIN; pf.revents = 0;
+    check(poll(&pf, 1, 0) == 0, "poll: empty pipe is not readable");
+    write(fds[1], "x", 1);
+    pf.revents = 0;
+    check(poll(&pf, 1, 100) == 1 && (pf.revents & POLLIN), "poll: pipe with data is readable");
+    read(fds[0], buf, 1);
+    close(fds[1]);
+    check(read(fds[0], buf, sizeof(buf)) == 0, "pipe: EOF when the writer is closed");
+    close(fds[0]);
+
+    /* fork + pipe: সন্তান লেখে, মা পড়ে */
+    if (pipe(fds) == 0) {
+        pid = fork();
+        if (pid == 0) {
+            close(fds[0]);
+            write(fds[1], "from child", 10);
+            _exit(0);
+        }
+        close(fds[1]);
+        memset(buf, 0, sizeof(buf));
+        {
+            ssize_t n = read(fds[0], buf, sizeof(buf));
+            waitpid(pid, &st, 0);
+            check(n == 10 && !strcmp(buf, "from child"), "pipe between parent and child (fork)");
+        }
+        close(fds[0]);
+    }
+    if (pipe(fds) == 0) {
+        close(fds[0]);
+        check(write(fds[1], "x", 1) < 0 && errno == EPIPE, "pipe: write without a reader fails (EPIPE)");
+        close(fds[1]);
+    }
+
+    /* shared memory: নাম দিয়ে, তারপর fork-এ MAP_SHARED|MAP_ANONYMOUS */
+    {
+        int fd = shm_open("/systest", O_CREAT | O_RDWR, 0600);
+        char *p = MAP_FAILED, *q = MAP_FAILED;
+        int fd2;
+        if (fd >= 0 && ftruncate(fd, 8192) == 0) {
+            p = (char *)mmap(NULL, 8192, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        }
+        fd2 = shm_open("/systest", O_RDWR, 0);
+        if (fd2 >= 0) q = (char *)mmap(NULL, 8192, PROT_READ | PROT_WRITE, MAP_SHARED, fd2, 0);
+        if (p != MAP_FAILED) strcpy(p + 4096, "shared!");
+        check(p != MAP_FAILED && q != MAP_FAILED && p != q && !strcmp(q + 4096, "shared!"),
+              "shm_open + mmap(MAP_SHARED): two mappings, same memory");
+        if (p != MAP_FAILED) munmap(p, 8192);
+        if (q != MAP_FAILED) munmap(q, 8192);
+        if (fd >= 0) close(fd);
+        if (fd2 >= 0) close(fd2);
+        check(shm_unlink("/systest") == 0 && shm_open("/systest", O_RDWR, 0) < 0 && errno == ENOENT,
+              "shm_unlink removes the name");
+    }
+    {
+        volatile int *shared = (volatile int *)mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+                                                    MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        if (shared != MAP_FAILED) {
+            *shared = 1;
+            pid = fork();
+            if (pid == 0) {
+                *shared = 42;
+                _exit(0);
+            }
+            waitpid(pid, &st, 0);
+        }
+        check(shared != MAP_FAILED && *shared == 42, "MAP_SHARED|MAP_ANONYMOUS: child's write seen by parent");
+        if (shared != MAP_FAILED) munmap((void *)shared, 4096);
+    }
+}
+
+/* ধাপ ১৪: PTY, AF_UNIX socket, process group আর SIGINT */
+static void test_phase14(void)
+{
+    int m = -1, sl = -1, st = 0;
+    char buf[64];
+    pid_t pid;
+    struct winsize ws;
+
+    check(openpty(&m, &sl, NULL, NULL, NULL) == 0 && isatty(sl), "openpty: slave is a terminal");
+    if (m >= 0) {
+        ssize_t n;
+        write(sl, "out", 3);
+        n = read(m, buf, sizeof(buf));
+        check(n == 3 && !memcmp(buf, "out", 3), "pty: slave output arrives at the master");
+        write(m, "key", 3);
+        n = read(sl, buf, sizeof(buf));
+        check(n == 3 && !memcmp(buf, "key", 3), "pty: master input arrives at the slave");
+        ws.ws_row = 33; ws.ws_col = 77; ws.ws_xpixel = ws.ws_ypixel = 0;
+        ioctl(m, TIOCSWINSZ, &ws);
+        memset(&ws, 0, sizeof(ws));
+        check(ioctl(sl, TIOCGWINSZ, &ws) == 0 && ws.ws_row == 33 && ws.ws_col == 77, "pty: window size set and read");
+        close(sl);
+        check(read(m, buf, sizeof(buf)) == 0, "pty: master reads EOF when the slave is closed");
+        close(m);
+    }
+
+    {
+        int srv = socket(AF_UNIX, SOCK_STREAM, 0), c;
+        struct sockaddr_un a;
+        memset(&a, 0, sizeof(a));
+        a.sun_family = AF_UNIX;
+        strcpy(a.sun_path, "/tmp/.systest-unix");
+        check(srv >= 0 && bind(srv, (struct sockaddr *)&a, sizeof(a)) == 0 && listen(srv, 4) == 0,
+              "AF_UNIX: socket, bind, listen");
+        pid = fork();
+        if (pid == 0) {
+            int cs = socket(AF_UNIX, SOCK_STREAM, 0);
+            if (cs < 0 || connect(cs, (struct sockaddr *)&a, sizeof(a)) < 0) _exit(1);
+            write(cs, "hello unix", 10);
+            if (read(cs, buf, sizeof(buf)) != 4) _exit(2);
+            _exit(memcmp(buf, "pong", 4) ? 3 : 0);
+        }
+        c = accept(srv, NULL, NULL);
+        memset(buf, 0, sizeof(buf));
+        if (c >= 0) {
+            read(c, buf, sizeof(buf));
+            write(c, "pong", 4);
+        }
+        waitpid(pid, &st, 0);
+        check(c >= 0 && !strcmp(buf, "hello unix") && WIFEXITED(st) && WEXITSTATUS(st) == 0,
+              "AF_UNIX: connect, accept, talk both ways");
+        if (c >= 0) close(c);
+        close(srv);
+        {
+            int t = socket(AF_UNIX, SOCK_STREAM, 0);
+            check(t >= 0 && connect(t, (struct sockaddr *)&a, sizeof(a)) < 0 && errno == ECONNREFUSED,
+                  "AF_UNIX: name is gone after the server closes");
+            if (t >= 0) close(t);
+        }
+    }
+
+    pid = fork();
+    if (pid == 0) {
+        signal(SIGINT, SIG_IGN);
+        setpgid(0, 0);
+        sleep(5);
+        _exit(7);
+    }
+    setpgid(pid, pid);
+    usleep(100000);
+    kill(-pid, SIGINT);                  /* উপেক্ষা করে */
+    usleep(100000);
+    kill(pid, SIGTERM);
+    waitpid(pid, &st, 0);
+    check(WIFSIGNALED(st) && WTERMSIG(st) == SIGTERM, "SIG_IGN ignores SIGINT to a process group, SIGTERM still works");
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -322,6 +538,10 @@ int main(int argc, char **argv)
     test_processes();
     test_libc();
     test_net();
+    test_phase10();
+    test_phase12();
+    test_phase13();
+    test_phase14();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

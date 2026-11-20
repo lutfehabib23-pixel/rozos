@@ -1,23 +1,45 @@
 # edit - the text editor
-  `edit [file]`   open (or create) a file; without a name it cannot save
+  `edit [file]`   open (or create) a file
+  `edit`          no name yet: the first Ctrl+S asks for one
+  `edit --new`    a new C program: FILE001.c (FILE002.c if that exists ...)
+                  filled from /usr/share/templates/new.c; the first
+                  Ctrl+S asks for the real name. The [[menu]] has it as
+                  "New C program" (Development).
+It opens on its own screen; when you quit, the shell screen comes
+back exactly as it was. It finds the terminal size by itself ([[stty]]).
 
 == Screen ==
-Top line: file name and [modified]. Bottom: messages, line:column and
-how far into the file you are, then the key reminder.
+Top line: file name, [new - not saved yet] for `edit --new`, and
+[modified]. Right edge: a scroll bar. Bottom:
+messages, line:column and how far into the file you are, then the
+key reminder. `<` and `>` at the edges mean the line goes on there.
 
-== Keys ==
-  arrows, `Home` `End` `PgUp` `PgDn`   move
+== Keys (like Notepad) ==
+  arrows, `Home` `End` `PgUp` `PgDn`   move   (`Ctrl+Home/End`: file start/end)
+  `Shift` + those keys    select text     `Ctrl+A`   select everything
+  `Ctrl+C` copy   `Ctrl+X` cut   `Ctrl+V` paste   (whole lines too)
+  `Ctrl+Z` undo   `Ctrl+Y` redo   (typing a word is one undo step)
   `Enter`        new line (keeps the indentation of the line above)
-  `Backspace` `Delete`   delete; at a line edge they join lines
+  `Backspace` `Delete`   delete; with a selection they delete it
   `Tab`          a tab character (shown as spaces, tab stop 4)
-  `Ctrl+S`       save           `Ctrl+Q` or `Ctrl+X`   quit
-  `Ctrl+F`       find; press Ctrl+F then Enter again for the next match
+  `Ctrl+S`       save           `Ctrl+Q`   quit (asks if not saved)
+  `Ctrl+W`       save as (a new name; asks before replacing a file)
+  `Ctrl+R`       C files: save, compile with [[tcc]] (+ -lrozgfx, so
+                 graphics programs work too) and run; the program
+                 runs on the normal screen, Enter brings the editor back
+  `Ctrl+F`       find (the match is selected); Ctrl+F, Enter = next
   `Ctrl+G`       go to a line number
   `Ctrl+K`       cut the current line   `Ctrl+U`   paste it above
-  `Ctrl+L`       redraw (after `stty`)
-Quitting with unsaved changes asks: `y` save, `n` throw away, `Esc` stay.
+  `Ctrl+N`       line numbers on/off    `Ctrl+L`   redraw (new size)
+Typing while text is selected replaces it. Quitting with unsaved
+changes asks: `y` save, `n` throw away, `Esc` stay.
+
+== Mouse ([[mouse]]) ==
+Click to put the cursor there, drag to select, the wheel scrolls,
+a click on the scroll bar jumps there. Works in the WSL terminal and
+in the QEMU window.
 
 == Good to know ==
 Saving rewrites the whole file. Only changed screen lines are sent, so
-it is quick even over the serial line. If the screen looks cut off, set
-the size with [[stty]]. See also [[c-programming]] and [[keys]].
+it is quick even over the serial line. Ctrl+X used to quit; now it
+cuts (Ctrl+Q quits). See also [[c-programming]] and [[keys]].

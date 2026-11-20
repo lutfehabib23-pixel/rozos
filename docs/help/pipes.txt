@@ -1,0 +1,21 @@
+# Pipes and poll (phase 13)
+In the shell: `ls /bin | wc -l` - see [[redirect]]. In C:
+
+  `int fd[2]; pipe(fd);`      fd[0] = read end, fd[1] = write end
+  `write(fd[1], "hi", 2);  read(fd[0], buf, 64);`
+After fork() both processes have both ends: each closes the end it does
+not use. read() waits for data; it returns 0 (end) when every write end
+is closed. write() fails with EPIPE when nobody can read any more.
+The kernel keeps 64 KiB per pipe; writes up to 4096 bytes never mix
+with other writers (PIPE_BUF).
+
+== poll(): wait for several things ==
+  `#include <poll.h>`
+  `struct pollfd p[2] = { { 0, POLLIN, 0 }, { mfd, POLLIN, 0 } };`
+  `int n = poll(p, 2, 500);`    up to 500 ms; -1 = forever, 0 = just look
+  `if (p[0].revents & POLLIN) ...`   the keyboard has something
+Works on /dev/console, /dev/kbd, /dev/mouse, /dev/serial0, pipes and
+sockets (POLLIN, POLLOUT, POLLHUP, POLLERR). Ordinary files are always
+ready. The graphics library uses it for its events ([[rozgfx]]).
+Kernel: kernel/fs/pipe.c, sys_poll in kernel/syscall/sys_fs.c.
+See also [[shm]] for memory shared between processes.

@@ -15,8 +15,19 @@ Several can be combined:  `wc < /etc/motd > /tmp/count.txt 2>&1`
 == Several commands on one line ==
   `mkdir /tmp/a ; cd /tmp/a ; pwd`
 The commands run one after another, whatever the result.
+  `make && kinstall`        the second only if the first worked (exit 0)
+  `cd /x || echo no /x`     the second only if the first failed
+`true` and `false` are built in, for tests like that.
+
+== Pipes ==
+  `ls /bin | wc -l`                  count the programs
+  `cat /src/hello.c | wc -w`         the output of one is the input of the next
+  `cat big.txt | cat | wc -c > n.txt`   up to 16 commands, redirections too
+Every command of a pipe runs at the same time as its own process; data
+flows through a kernel pipe (64 KiB) - see [[pipes]].
 
 == How it works ==
 The shell opens the file, then uses dup2() to put it on fd 0, 1 or 2 in
 the child process before exec(). See [[processes]] and [[syscalls]].
-Pipes (cmd1 | cmd2) are not there yet.
+For a pipe the shell first makes a pipe() and gives its two ends to the
+two children as fd 1 and fd 0.

@@ -2,9 +2,11 @@
  *
  * সুবিধা:
  *   - কমান্ড চালানো: PATH (ডিফল্ট /bin) থেকে খুঁজে fork + execve + wait
- *   - built-in: cd, pwd, exit, history, export, unset, env, echo, help, source (.), time
+ *   - built-in: cd, pwd, exit, history, export, unset, env, echo, help, source (.), time,
+ *     true, false, : (ধাপ ১৩), exec (ধাপ ১৪)
  *   - help [topic]: /bin/rozhelp থাকলে লিংকসহ সাহায্য-দর্শক খোলে (ধাপ ৮)
  *   - রিডাইরেকশন: < file, > file, >> file, 2> file, 2>&1; কমান্ড আলাদা করা: ;
+ *   - ধাপ ১৩: পাইপ cmd1 | cmd2 | ... (কার্নেলের pipe()), শর্ত cmd1 && cmd2, cmd1 || cmd2
  *   - উদ্ধৃতি: '...', "...", \x; ভেরিয়েবল: $NAME, ${NAME}, $? (শেষ কমান্ডের ফল), $$
  *   - লাইন এডিটিং: ← → Home End Delete Backspace, ↑ ↓ ইতিহাস, Ctrl+U (লাইন মোছা),
  *     Ctrl+W (আগের শব্দ মোছা), Ctrl+L (স্ক্রিন মোছা), Ctrl+C (লাইন বাতিল), Ctrl+D (খালি লাইনে exit)
@@ -13,7 +15,9 @@
  *
  * কনসোল "raw" — কার্নেল নিজে echo বা লাইন-এডিটিং করে না, তাই সব এখানে।
  * তীর-কী আসে ANSI escape sequence হিসেবে (কার্নেল কিবোর্ডের কী-ও সেভাবেই পাঠায়)।
- * এখনো নেই (পরে): পাইপ (|), পেছনে চালানো (&), Tab-সম্পূর্ণকরণ, Ctrl+C দিয়ে চলমান প্রোগ্রাম থামানো। */
+ *   - ধাপ ১৪: job control-এর শুরু — প্রতিটা কমান্ড (বা পুরো পাইপ) নিজের process group-এ,
+ *     টার্মিনালের foreground; Ctrl+C সেই গ্রুপকে থামায় (shell নিজে SIGINT উপেক্ষা করে)
+ * এখনো নেই (পরে): পেছনে চালানো (&), Tab-সম্পূর্ণকরণ। */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,10 +29,11 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <signal.h>
 #include <rozos.h>
 
 #define LINE_MAX_LEN 1024
-#define MAX_ARGS     64
+#define MAX_ARGS     256          /* ধাপ ১১: ৬৪ থেকে বাড়ানো (make-এর লম্বা কমান্ড) */
 #define HIST_MAX     100
 #define WORD_MAX     1024
 
@@ -36,6 +41,7 @@ static char *history[HIST_MAX];
 static int hist_count;
 static int last_status;
 static int interactive;
+static int errexit;          /* ধাপ ১১: `set -e` — কোনো কমান্ড ব্যর্থ হলে লাইনের বাকিটা/স্ক্রিপ্ট থামে */
 static char hostname[65] = "rozos";
 static char prev_dir[LINE_MAX_LEN] = "";
 
@@ -275,11 +281,16 @@ struct redirect {
     int dup_from;
 };
 
+/* ধাপ ১৩: কমান্ডের পরে কী এল */
+enum { SEP_END = 0, SEP_PIPE, SEP_AND, SEP_OR };
+#define PIPE_MAX 16
+
 struct command {
     char *argv[MAX_ARGS + 1];
     int argc;
     struct redirect redir[8];
     int nredir;
+    int sep;                      /* ধাপ ১৩: SEP_* (; আর লাইনের শেষ = SEP_END) */
 };
 
 static char *dup_word(const char *s, size_t n)
@@ -346,6 +357,13 @@ static int parse_command(const char **pp, struct command *cmd)
             else if (*p == '#') p += strlen(p);
             break;
         }
+        /* ধাপ ১৩: | && || */
+        if (*p == '|' || (p[0] == '&' && p[1] == '&')) {
+            if (p[0] == '|' && p[1] == '|') { cmd->sep = SEP_OR; p += 2; }
+            else if (p[0] == '|') { cmd->sep = SEP_PIPE; p++; }
+            else { cmd->sep = SEP_AND; p += 2; }
+            break;
+        }
 
         /* রিডাইরেকশন চিহ্ন */
         if ((p[0] == '2' && p[1] == '>') || *p == '>' || *p == '<') {
@@ -370,7 +388,8 @@ static int parse_command(const char **pp, struct command *cmd)
             while (*p == ' ' || *p == '\t') p++;
         }
 
-        while (*p && *p != ' ' && *p != '\t' && *p != ';' &&
+        while (*p && *p != ' ' && *p != '\t' && *p != ';' && *p != '|' &&
+               !(p[0] == '&' && p[1] == '&') &&
                !(*p == '>' || *p == '<') && wl + 1 < WORD_MAX) {
             if (*p == '\'') {
                 quoted = 1;
@@ -513,7 +532,8 @@ static void help_text(void)
            "  built-in : cd [dir|-], pwd, echo [-n], export [N=V], unset N, env, history,\n"
            "             source <file> (or . file), help, exit [code]\n"
            "  redirect : cmd < in, cmd > out, cmd >> out, cmd 2> err, cmd 2>&1\n"
-           "  separate : cmd1 ; cmd2      variables: $NAME ${NAME} $? $$   quotes: '' \"\" \\\n"
+           "  separate : cmd1 ; cmd2   pipe: cmd1 | cmd2   if: cmd1 && cmd2, cmd1 || cmd2\n"
+           "  variables: $NAME ${NAME} $? $$   quotes: '' \"\" \\\n"
            "  keys     : arrows, Home/End, Delete, Up/Down = history, Ctrl+U/W/L/C, Ctrl+D = exit\n"
            "  programs : ls /bin   (edit = text editor, kmon = kernel monitor, systest = tests)\n"
            "  time cmd : how long a command took\n");
@@ -551,6 +571,24 @@ static int run_builtin(int argc, char **argv)
     int i;
 
     if (!strcmp(c, "cd")) return builtin_cd(argc, argv);
+    if (!strcmp(c, "set")) {
+        /* ধাপ ১১: set -e / set +e (make-এর রেসিপির জন্য) */
+        for (i = 1; i < argc; i++) {
+            if (!strcmp(argv[i], "-e")) errexit = 1;
+            else if (!strcmp(argv[i], "+e")) errexit = 0;
+            else { fprintf(stderr, "set: only -e and +e are supported\n"); return 2; }
+        }
+        return 0;
+    }
+    if (!strcmp(c, "true") || !strcmp(c, ":")) return 0;      /* ধাপ ১৩ */
+    if (!strcmp(c, "exec")) {                                   /* ধাপ ১৪: shell-এর জায়গায় প্রোগ্রাম */
+        if (argc < 2) return 0;
+        fflush(stdout);
+        execvp(argv[1], argv + 1);
+        fprintf(stderr, "rozsh: exec: %s: %s\n", argv[1], strerror(errno));
+        return 127;
+    }
+    if (!strcmp(c, "false")) return 1;
     if (!strcmp(c, "pwd")) {
         char buf[LINE_MAX_LEN];
         if (!getcwd(buf, sizeof(buf))) { perror("pwd"); return 1; }
@@ -609,6 +647,31 @@ static int run_builtin(int argc, char **argv)
     return -1;
 }
 
+/* ---------- ধাপ ১৪: foreground কাজ ---------- */
+
+static int job_control;           /* interactive shell টার্মিনালের মালিক */
+
+/* সন্তানে: নিজের গ্রুপ, Ctrl+C আবার ডিফল্ট (shell-এর SIG_IGN উত্তরাধিকার নয়) */
+static void child_job_setup(pid_t pgid)
+{
+    if (job_control) setpgid(0, pgid);
+    signal(SIGINT, SIG_DFL);
+    signal(SIGQUIT, SIG_DFL);
+}
+
+static void job_foreground(pid_t pgid)
+{
+    if (job_control) {
+        setpgid(pgid, pgid);
+        tcsetpgrp(0, pgid);
+    }
+}
+
+static void job_done(void)
+{
+    if (job_control) tcsetpgrp(0, getpgrp());
+}
+
 /* ---------- চালানো ---------- */
 
 static int run_external(struct command *cmd)
@@ -623,14 +686,21 @@ static int run_external(struct command *cmd)
         return 1;
     }
     if (pid == 0) {
+        child_job_setup(0);
         if (apply_redirects(cmd, NULL) < 0) _exit(1);
         execvp(cmd->argv[0], cmd->argv);
         if (errno == ENOENT) fprintf(stderr, "rozsh: %s: command not found\n", cmd->argv[0]);
         else fprintf(stderr, "rozsh: %s: %s\n", cmd->argv[0], strerror(errno));
         _exit(errno == ENOENT ? 127 : 126);
     }
+    job_foreground(pid);
     while (waitpid(pid, &status, 0) < 0) {
-        if (errno != EINTR) return 1;
+        if (errno != EINTR) { job_done(); return 1; }
+    }
+    job_done();
+    if (WIFSIGNALED(status) && WTERMSIG(status) == SIGINT) {
+        fprintf(stderr, "^C\n");                /* ধাপ ১৪: Ctrl+C দিয়ে থামানো */
+        return 128 + SIGINT;
     }
     if (WIFSIGNALED(status)) {
         int sig = WTERMSIG(status);
@@ -642,14 +712,126 @@ static int run_external(struct command *cmd)
     return WEXITSTATUS(status);
 }
 
+/* ধাপ ১৩: cmd[0] | cmd[1] | ... — প্রতিটা আলাদা প্রসেস (built-in হলেও, সন্তান প্রসেসে),
+ * মাঝে pipe; ফল = শেষ কমান্ডের status (sh-এর মতো) */
+static int run_pipeline(struct command *cmds, int n)
+{
+    pid_t pids[PIPE_MAX];
+    int i, in_fd = -1, status = 0, result = 0;
+
+    fflush(stdout);
+    fflush(stderr);
+    for (i = 0; i < n; i++) {
+        int fds[2] = { -1, -1 };
+        if (i < n - 1 && pipe(fds) < 0) {
+            fprintf(stderr, "rozsh: pipe: %s\n", strerror(errno));
+            if (in_fd >= 0) close(in_fd);
+            n = i;
+            result = 1;
+            break;
+        }
+        pids[i] = fork();
+        if (pids[i] < 0) {
+            fprintf(stderr, "rozsh: fork: %s\n", strerror(errno));
+            if (fds[0] >= 0) { close(fds[0]); close(fds[1]); }
+            if (in_fd >= 0) close(in_fd);
+            n = i;
+            result = 1;
+            break;
+        }
+        if (pids[i] == 0) {
+            int r;
+            child_job_setup(i == 0 ? 0 : pids[0]);
+            if (in_fd >= 0) { dup2(in_fd, 0); close(in_fd); }
+            if (fds[1] >= 0) { dup2(fds[1], 1); close(fds[1]); close(fds[0]); }
+            if (apply_redirects(&cmds[i], NULL) < 0) _exit(1);
+            if (cmds[i].argc == 0) _exit(0);
+            r = run_builtin(cmds[i].argc, cmds[i].argv);
+            if (r >= 0) {
+                fflush(stdout);
+                fflush(stderr);
+                _exit(r);
+            }
+            execvp(cmds[i].argv[0], cmds[i].argv);
+            if (errno == ENOENT) fprintf(stderr, "rozsh: %s: command not found\n", cmds[i].argv[0]);
+            else fprintf(stderr, "rozsh: %s: %s\n", cmds[i].argv[0], strerror(errno));
+            _exit(errno == ENOENT ? 127 : 126);
+        }
+        if (job_control) setpgid(pids[i], pids[0]);
+        if (i == 0) job_foreground(pids[0]);
+        if (in_fd >= 0) close(in_fd);
+        if (fds[1] >= 0) close(fds[1]);
+        in_fd = fds[0];
+    }
+    for (i = 0; i < n; i++) {
+        while (waitpid(pids[i], &status, 0) < 0) {
+            if (errno != EINTR) break;
+        }
+        if (i == n - 1 && !result) {
+            if (WIFSIGNALED(status)) {
+                int sig = WTERMSIG(status);
+                if (sig == SIGINT) fprintf(stderr, "^C\n");
+                else if (sig != 13) fprintf(stderr, "%s: terminated (signal %d)\n", cmds[i].argv[0] ? cmds[i].argv[0] : "?", sig);
+                result = 128 + sig;
+            } else {
+                result = WEXITSTATUS(status);
+            }
+        }
+    }
+    job_done();
+    return result;
+}
+
 static void run_line(const char *line)
 {
     const char *p = line;
+    int skip = 0;                 /* ধাপ ১৩: && / || — পরের অংশ বাদ */
     while (*p) {
         struct command cmd;
         if (parse_command(&p, &cmd) < 0) {
             last_status = 2;
             return;
+        }
+        /* ধাপ ১৩: পাইপ — পুরো a | b | c একসাথে তুলে চালানো */
+        if (cmd.sep == SEP_PIPE) {
+            struct command cmds[PIPE_MAX];
+            int n = 0, i, bad = 0;
+            cmds[n++] = cmd;
+            while (cmds[n - 1].sep == SEP_PIPE) {
+                if (n == PIPE_MAX) {
+                    fprintf(stderr, "rozsh: too many commands in a pipe (max %d)\n", PIPE_MAX);
+                    bad = 1;
+                    break;
+                }
+                if (!*p || parse_command(&p, &cmds[n]) < 0) {
+                    if (!*p) fprintf(stderr, "rozsh: missing command after |\n");
+                    bad = 1;
+                    break;
+                }
+                if (cmds[n].argc == 0 && cmds[n].nredir == 0) {
+                    fprintf(stderr, "rozsh: missing command after |\n");
+                    free_command(&cmds[n]);
+                    bad = 1;
+                    break;
+                }
+                n++;
+            }
+            if (bad) {
+                for (i = 0; i < n; i++) free_command(&cmds[i]);
+                last_status = 2;
+                return;
+            }
+            if (!skip) last_status = run_pipeline(cmds, n);
+            cmd.sep = cmds[n - 1].sep;
+            for (i = 0; i < n; i++) free_command(&cmds[i]);
+            skip = (cmd.sep == SEP_AND && last_status != 0) || (cmd.sep == SEP_OR && last_status == 0);
+            if (errexit && last_status != 0 && cmd.sep == SEP_END) return;
+            continue;
+        }
+        if (skip) {
+            free_command(&cmd);
+            skip = (cmd.sep == SEP_AND && last_status != 0) || (cmd.sep == SEP_OR && last_status == 0);
+            continue;
         }
         if (cmd.argc > 1 && !strcmp(cmd.argv[0], "time")) {
             /* time cmd args...: কমান্ড চালিয়ে সময় দেখানো */
@@ -695,6 +877,9 @@ static void run_line(const char *line)
             restore_fds(save);
         }
         free_command(&cmd);
+        skip = (cmd.sep == SEP_AND && last_status != 0) || (cmd.sep == SEP_OR && last_status == 0);
+        /* set -e: && / ||-এর বাঁ দিকের ব্যর্থতায় থামে না (sh-এর মতো) */
+        if (errexit && last_status != 0 && cmd.sep != SEP_AND && cmd.sep != SEP_OR) return;
     }
 }
 
@@ -709,6 +894,7 @@ static int run_script(const char *path)
     while (fgets(line, sizeof(line), f)) {
         line[strcspn(line, "\n")] = '\0';
         run_line(line);
+        if (errexit && last_status != 0) break;
     }
     fclose(f);
     return last_status;
@@ -735,15 +921,30 @@ int main(int argc, char **argv)
     struct utsname u;
     int login = argc > 1 && !strcmp(argv[1], "-l");
 
+    if (argc > 2 && !strcmp(argv[1], "-c")) {
+        /* ধাপ ১১: rozsh -c "command; command" — system() আর make এভাবে চালায় */
+        interactive = 0;
+        if (!getenv("PATH")) setenv("PATH", "/bin:/usr/local/bin:/home/bin", 1);
+        run_line(argv[2]);
+        return last_status;
+    }
     if (argc > 1 && !login) {
         interactive = 0;
         return run_script(argv[1]);
     }
     interactive = isatty(0);
+    if (interactive) {
+        /* ধাপ ১৪: নিজের গ্রুপ, টার্মিনালের foreground; Ctrl+C-তে shell মরে না
+         * (বাইটটা read_line পায় আর লাইন বাতিল করে) */
+        signal(SIGINT, SIG_IGN);
+        signal(SIGQUIT, SIG_IGN);
+        setpgid(0, 0);
+        job_control = tcsetpgrp(0, getpgrp()) == 0;
+    }
     if (uname(&u) == 0 && u.nodename[0]) {
         strncpy(hostname, u.nodename, sizeof(hostname) - 1);
     }
-    if (!getenv("PATH")) setenv("PATH", "/bin", 1);
+    if (!getenv("PATH")) setenv("PATH", "/bin:/usr/local/bin:/home/bin", 1);
     if (!getenv("HOME")) setenv("HOME", "/home", 1);
     if (interactive) {
         history_load();

@@ -254,7 +254,8 @@ static const struct vnode_ops tmpfs_ops = {
     tmpfs_create,
     tmpfs_unlink,
     tmpfs_readdir,
-    tmpfs_release
+    tmpfs_release,
+    NULL
 };
 
 /* ---------- mount ---------- */
@@ -287,4 +288,4 @@ static int tmpfs_statfs(struct vnode *r, struct vfs_statfs *out)
     return 0;
 }
 
-const struct filesystem tmpfs_filesystem = { "tmpfs", tmpfs_mount, tmpfs_statfs };
+const struct filesystem tmpfs_filesystem = { "tmpfs", tmpfs_mount, tmpfs_statfs, NULL };

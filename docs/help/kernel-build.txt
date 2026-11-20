@@ -1,0 +1,29 @@
+# Building the rozOS kernel inside rozOS
+The kernel source is in /usr/src/rozos, with a Makefile for [[make]]
+and [[tcc]]. This is the heart of [[self-hosting]].
+
+== Build ==
+  `cd /usr/src/rozos`
+  `time make`           about 80 files; result build/rozos.elf
+  `make clean`          start again from nothing
+Change a file with [[edit]] (for example a message in kernel/main.c)
+and run `make` again: only what changed is compiled. If you change a
+header (.h), everything is compiled again.
+
+== Boot the new kernel ==
+  `kinstall`    put it on the boot partition and make it the default
+  `reboot`      the boot menu starts it ([[kinstall]], [[boot-menu]])
+The first line then says "kernel built inside rozOS with TCC" and
+"build 42.3, tcc on rozOS". Run `systest` to check it. The older
+kernels stay in the menu in case the new one does not boot.
+(From the PC also possible: `make run-self` copies the kernel out of
+the disk into rozos-self.iso and boots that.)
+
+== Differences from the PC build (gcc) ==
+  - no C++ part (kernel/cxx): TCC compiles only C
+  - TCC's own linker instead of kernel/linker.ld; the kernel maps its
+    parts by reading its own ELF program headers
+  - a few instructions TCC's assembler does not know are written as
+    bytes (rozos/asm_compat.h), and SSE is enabled at the very start
+All of this is under `#ifdef __TINYC__`; the gcc build is unchanged.
+See [[kernel]], [[boot]].

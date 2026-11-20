@@ -35,9 +35,20 @@ static void run_array(void (**a)(void), void (**e)(void), int argc, char **argv,
 
 void __libc_start(int argc, char **argv, char **envp) __attribute__((noreturn));
 
+/* ধাপ ১৪: প্রোগ্রামের নাম (argv[0]-এর শেষ অংশ) — উইন্ডোর শিরোনাম, বার্তার জন্য */
+char *__progname = (char *)"";
+char *program_invocation_name = (char *)"";
+char *program_invocation_short_name = (char *)"";
+
 void __libc_start(int argc, char **argv, char **envp)
 {
     environ = envp;
+    if (argc > 0 && argv[0]) {
+        char *p = argv[0], *q;
+        for (q = p; *q; q++) if (*q == '/') p = q + 1;
+        __progname = program_invocation_short_name = p;
+        program_invocation_name = argv[0];
+    }
     __stdio_init();
     run_array(__preinit_array_start, __preinit_array_end, argc, argv, envp);
     run_array(__init_array_start, __init_array_end, argc, argv, envp);   /* C/C++ constructor */

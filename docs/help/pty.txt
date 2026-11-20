@@ -1,0 +1,19 @@
+# PTYs and Unix domain sockets (phase 14)
+== PTY (pseudo-terminal) ==
+  `#include <pty.h>`   `int m, s; openpty(&m, &s, NULL, NULL, NULL);`
+The slave end (s) looks like the console: give it to a child as fd
+0/1/2 (after setsid()) and run a shell. Read the master (m) to get what
+the programs print, write the master to type for them. Window size:
+ioctl(m, TIOCSWINSZ, &ws). Ctrl+C written to the master stops the
+foreground program ([[signals]]). [[rozterm]] is built like this.
+When the slave side is closed, read(m) returns 0.
+
+== Unix domain sockets ==
+  `#include <sys/un.h>`
+  `int fd = socket(AF_UNIX, SOCK_STREAM, 0);`
+  server: bind(fd, (struct sockaddr *)&addr, sizeof addr), listen, accept
+  client: connect(fd, ...) - then read/write, send/recv, poll
+addr.sun_family = AF_UNIX, addr.sun_path = "/tmp/name". Names live in
+the kernel (no file on disk) and vanish when the server closes.
+send(..., MSG_DONTWAIT) never waits (EAGAIN). The desktop ([[rozwm]])
+talks to every program this way. See [[sockets]], [[pipes]], [[shm]].

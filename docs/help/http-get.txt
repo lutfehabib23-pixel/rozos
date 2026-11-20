@@ -1,13 +1,19 @@
 # http-get - download a web page
   `http-get http://example.com/`          print the page
+  `http-get https://example.com/`         the same over [[tls]]
   `http-get -h http://example.com/`       only the response headers
   `http-get -o page.html http://host/x`   save the page to a file
   `http-get http://10.0.2.2:8000/file`    another port
+  `http-get -q URL`    quiet: only the body (no headers, no summary)
+  `http-get -q -v URL` quiet, but still show connecting and redirects
+  `http-get -n URL`    do not follow redirects (show the 301/302)
 
-It connects with TCP, sends an HTTP/1.0 GET request and copies the
-answer: headers go to the screen (stderr), the body to the output.
-At the end it prints the size and the time taken.
-https:// addresses need TLS, which comes in phase 10.
+It sends an HTTP/1.1 GET with [[rozhttp]]: "connecting to ...", the
+redirects and the headers go to the screen (stderr), the body to the output. Redirects (Location:) are followed
+up to 5 times, chunked answers are decoded. With -o a KiB counter
+runs while it downloads. At the end it prints the size and the time
+taken; with -h it prints the status instead. An answer that is not
+2xx (e.g. 404) prints the body and ends with an error.
 
 Tip: on the PC, `python3 -m http.server 8000` in a folder makes it
 reachable from rozOS as http://10.0.2.2:8000/ .

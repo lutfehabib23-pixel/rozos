@@ -1,0 +1,16 @@
+# scanf - reading formatted input in C
+  int age; char name[32];
+  printf("name and age: ");
+  scanf("%31s %d", name, &age);
+`scanf` reads the keyboard, `fscanf(f, ...)` a file, `sscanf(s, ...)`
+a string. They return how many values were stored (EOF at the end).
+
+  %d %i %u %o %x   whole numbers (%i also 0x1f and 017)
+  %f %lf %e %g     floating point: float* or double* (with l)
+  %s               one word        %c   one character (no skipping)
+  %[a-z] %[^\n]    characters from a set / up to a newline
+  %n               how many characters were read so far
+  %*d              read but do not store       %%   a percent sign
+  %10s             at most 10 characters (use it with %s and %[!)
+A space in the format skips any amount of spaces and newlines.
+See [[rozlibc]], [[c-programming]].

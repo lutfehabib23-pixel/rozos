@@ -4,7 +4,8 @@ Headers are in /usr/include, the library in /usr/lib/libc.a.
 
 == Headers ==
   `stdio.h`    printf family (%d %s %x %f %e %g ...), FILE, fopen,
-               fgets, getline, fread/fwrite, fseek, sscanf, perror
+               fgets, getline, fread/fwrite, fseek, sscanf (%d %x %s
+               %f %lg %*d ...), scanf, fscanf, %[...] ([[scanf]]), perror
   `stdlib.h`   malloc/free/realloc/calloc, exit/atexit, getenv/setenv,
                strtol/strtod, atoi, qsort, bsearch, rand, realpath
   `string.h`   mem*, str*, strdup, strtok, strerror
@@ -14,6 +15,21 @@ Headers are in /usr/include, the library in /usr/lib/libc.a.
                sleep usleep sbrk getopt isatty ...
   `fcntl.h` `dirent.h` `time.h` `signal.h` `setjmp.h`
   `sys/stat.h` `sys/wait.h` `sys/mman.h` `sys/ioctl.h` `sys/utsname.h`
+  `sys/random.h` getrandom(), getentropy() ([[random]])
+  `poll.h`     poll(): wait for several fds at once ([[pipes]])
+  `unistd.h`   (phase 13) pipe(), pipe2(), ftruncate()
+  `sys/mman.h` (phase 13) shm_open(), shm_unlink(), MAP_SHARED ([[shm]])
+  `sys/fb.h`   /dev/fb0: FBIO_ROZ_GETINFO, KDSETMODE ([[framebuffer]])
+  `rozgfx.h`   the graphics library, link with -lrozgfx ([[rozgfx]])
+  phase 14:    `termios.h` (tcgetattr, ISIG), `pty.h` openpty(),
+               `sys/un.h` AF_UNIX sockets, setpgid/getpgrp/setsid,
+               tcsetpgrp, killpg, execl/execlp, `rozui.h` (-lrozui)
+               - see [[pty]], [[signals]], [[rozui]]
+  `sys/socket.h` `netinet/in.h` `arpa/inet.h` `netdb.h` ([[sockets]])
+  `libgen.h` `glob.h` `fnmatch.h` `ar.h`  (phase 11, for [[make]])
+  `system()` and `popen()`: run /bin/sh -c; popen still uses a /tmp
+               file (rozOS has pipes since phase 13); `sigaction()` records
+               the handler like signal()
   `rozos.h`    rozOS extras: rozos_now_ms(), rozos_kmon(), raw syscalls
 
 == Inside ==

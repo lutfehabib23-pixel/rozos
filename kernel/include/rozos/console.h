@@ -44,10 +44,18 @@ struct rozos_font {
     uint32_t scale_x;
     uint32_t scale_y;
     uint32_t spacing;        /* অক্ষরের মাঝে বাড়তি অনুভূমিক পিক্সেল */
+    uint32_t bytes_per_row;  /* ধাপ ১৩: প্রতি গ্লিফ-লাইনে কত বাইট ((width+7)/8) */
 };
 
 int  font_init(void);
 const struct rozos_font *font_get(void);
+/* ধাপ ১৩: নতুন ফন্ট (setfont, PSF থেকে): 256 গ্লিফ, width ≤ 16, height ≤ 32,
+ * প্রতি লাইনে (width+7)/8 বাইট; 0 = ঠিক আছে। font_reset = বুটের (Limine) ফন্ট। */
+int  font_set(const uint8_t *glyphs, uint32_t width, uint32_t height);
+void font_reset(void);
+/* ধাপ ১৩: ফন্ট বদলের পর ঘরের মাপ নতুন করে হিসাব, কনসোল নতুন মাপে (পর্দা মোছে) */
+int  fb_relayout(void);
+void tty_font_changed(void);
 
 /* ---------- ফ্রেমবাফার ব্যাকএন্ড ---------- */
 int      fb_init(void);
@@ -60,6 +68,17 @@ uint16_t fb_bpp(void);
 void     fb_put_cell(uint32_t col, uint32_t row, char ch, uint8_t fg, uint8_t bg);
 void     fb_draw_cursor(uint32_t col, uint32_t row, uint8_t color);
 void     fb_clear(uint8_t bg);
+/* ধাপ ১৩: /dev/fb0 (drivers/console/fbdev.c) */
+struct fb_info_k {
+    uint64_t phys, virt, size;
+    uint32_t width, height, pitch;
+    uint16_t bpp;
+    uint8_t  red_size, red_shift, green_size, green_shift, blue_size, blue_shift;
+};
+const struct fb_info_k *fb_info(void);   /* ফ্রেমবাফার না থাকলে NULL */
+void     fb_set_graphics(int on);
+int      fb_graphics_mode(void);
+void     tty_refresh(void);              /* পুরো পর্দা গ্রিড থেকে আবার আঁকা */
 
 /* ---------- VGA টেক্সট-মোড ব্যাকএন্ড ---------- */
 #define VGA_TEXT_PHYS 0xB8000
@@ -88,6 +107,15 @@ uint32_t tty_rows(void);
 void tty_putc(char c);
 void tty_write(const char *s, size_t n);
 void tty_set_color(uint8_t fg, uint8_t bg);
+
+/* ধাপ ১২: প্রোগ্রাম কোন মাউস-রিপোর্টিং চেয়েছে (ESC[?1000h ইত্যাদি) */
+#define TTY_MOUSE_CLICKS 0x01      /* ?1000: চাপা/ছাড়া, চাকা */
+#define TTY_MOUSE_DRAG   0x02      /* ?1002: বোতাম চেপে নড়াচড়া */
+#define TTY_MOUSE_MOTION 0x04      /* ?1003: সব নড়াচড়া */
+#define TTY_MOUSE_SGR    0x08      /* ?1006: ESC[<b;x;yM ভাষা */
+int  tty_mouse_mode(void);
+/* ফ্রেমবাফারে মাউস-কার্সর (উল্টো রঙের ঘর) দেখানো/সরানো */
+void tty_mouse_pointer(int visible, uint32_t col, uint32_t row);
 void tty_clear(void);
 
 #endif

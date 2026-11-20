@@ -1,4 +1,6 @@
-/* rozOS — ls [-l] [-a] [path...]: ডিরেক্টরির তালিকা (ডিরেক্টরি নীল, প্রোগ্রাম সবুজ) */
+/* rozOS — ls [-l] [-a] [-1] [path...]: ডিরেক্টরির তালিকা (ডিরেক্টরি নীল, প্রোগ্রাম সবুজ)
+ * ধাপ ১৩: -1 = প্রতি লাইনে একটা নাম; আউটপুট টার্মিনাল না হলে (pipe/ফাইল) নিজে থেকেই তাই,
+ * শুধু নাম (রং বা '/' ছাড়া) — যেমন ls /bin | wc -l */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +12,7 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 
-static int opt_long, opt_all, color;
+static int opt_long, opt_all, opt_one, color;
 
 static int cmp_name(const void *a, const void *b)
 {
@@ -40,6 +42,9 @@ static void print_entry(const char *dir, const char *name)
                st.st_mode & 04 ? 'r' : '-', st.st_mode & 02 ? 'w' : '-', st.st_mode & 01 ? 'x' : '-',
                (unsigned long)st.st_nlink, (long)st.st_size, when, pre, name, post,
                S_ISDIR(st.st_mode) ? "/" : "");
+    } else if (opt_one) {
+        if (color) printf("%s%s%s%s\n", pre, name, post, S_ISDIR(st.st_mode) ? "/" : "");
+        else printf("%s\n", name);
     } else {
         printf("%s%s%s%s  ", pre, name, post, S_ISDIR(st.st_mode) ? "/" : "");
     }
@@ -86,7 +91,7 @@ static int list(const char *path, int header)
         print_entry(path, names[i]);
         free(names[i]);
     }
-    if (!opt_long && n) printf("\n");
+    if (!opt_long && !opt_one && n) printf("\n");
     free(names);
     return 0;
 }
@@ -94,12 +99,14 @@ static int list(const char *path, int header)
 int main(int argc, char **argv)
 {
     int c, r = 0, i;
-    while ((c = getopt(argc, argv, "la")) != -1) {
+    while ((c = getopt(argc, argv, "la1")) != -1) {
         if (c == 'l') opt_long = 1;
         else if (c == 'a') opt_all = 1;
+        else if (c == '1') opt_one = 1;
         else return 2;
     }
     color = isatty(1);
+    if (!color) opt_one = 1;              /* ধাপ ১৩: pipe/ফাইলে প্রতি লাইনে একটা */
     if (optind >= argc) return list(".", 0);
     for (i = optind; i < argc; i++) {
         r |= list(argv[i], argc - optind > 1);

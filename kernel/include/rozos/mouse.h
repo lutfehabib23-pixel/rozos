@@ -22,4 +22,16 @@ int  mouse_present(void);
 void mouse_set_bounds(int32_t width, int32_t height);
 void mouse_get_state(struct mouse_state *out);
 
+/* ধাপ ১২: প্রতিটি প্যাকেট একটা ঘটনা। queue 0 = কনসোল (devfs), 1 = /dev/mouse */
+struct mouse_event {
+    int32_t x, y;           /* পিক্সেলে, ঘটনার পরের অবস্থান */
+    int32_t dx, dy;         /* নড়াচড়া (dy: নিচে = ধনাত্মক) */
+    uint8_t buttons;        /* MOUSE_BUTTON_* */
+    int8_t  wheel;          /* চাকা: ঋণাত্মক = ওপরে, ধনাত্মক = নিচে */
+    uint8_t pad[2];
+};
+int mouse_poll_event(int queue, struct mouse_event *out);   /* থাকলে 1 */
+int mouse_has_wheel(void);
+int mouse_event_pending(int queue);                          /* ধাপ ১৩: poll */
+
 #endif

@@ -1,0 +1,23 @@
+# Fonts and screen resolution (phase 13)
+== Console font ==
+  `setfont`                  list the fonts in /usr/share/fonts
+  `setfont rozos-mono-20`    10x20 pixels (bigger letters, fewer columns)
+  `setfont rozos-mono-16`    8x16, same grid as the boot font
+  `setfont -d`               back to the boot font (Limine's)
+Fonts: rozos-mono-16, -20, -24, -32 (made from DejaVu Sans Mono; any
+PSF1/PSF2 font up to 16x32 works). The screen is cleared on a change.
+To keep one: `echo rozos-mono-20 > /etc/console-font` - init loads it
+at every boot. Only the framebuffer console changes; the serial
+terminal uses your PC's font. See [[setfont]].
+
+== TrueType ==
+/usr/share/fonts/DejaVuSans.ttf and DejaVuSansMono.ttf, for programs
+via [[rozgfx]] (gfx_ttf_text, any size, smooth edges). Licence:
+/usr/share/fonts/LICENSE-fonts.txt.
+
+== Resolution ==
+The screen size is chosen by Limine at boot, so it changes with a
+reboot:  `kinstall --resolution 1024x768` (or 1920x1080, ...), then
+`reboot`.  `kinstall --resolution auto` = Limine chooses (1280x800 in
+QEMU). If the firmware cannot do a size, Limine picks another one.
+See [[kinstall]], [[boot-menu]].

@@ -1,0 +1,45 @@
+# librozgfx - the graphics library (phase 13)
+  `#include <rozgfx.h>`     compile: `tcc prog.c -lrozgfx -o prog`
+  `gfx_init()`  screen to graphics      `gfx_quit()`  back to text
+  `gfx_surface *s = gfx_screen();`      draw here, then `gfx_present()`
+  `gfx_width()` `gfx_height()`          colours: `GFX_RGB(r,g,b)`
+
+== Drawing (on any surface; everything is clipped) ==
+  gfx_clear  gfx_pixel  gfx_line  gfx_thick_line  gfx_rect  gfx_fill_rect
+  gfx_round_rect  gfx_fill_round_rect  gfx_circle  gfx_fill_circle
+  gfx_ellipse  gfx_fill_triangle  gfx_gradient_v  gfx_flood_fill
+  gfx_fill_rect_alpha  gfx_blend_pixel   (GFX_RGBA alpha = see-through)
+  gfx_surface_new(w, h)  gfx_blit  gfx_blit_alpha  gfx_blit_scaled
+
+== Pictures ==
+  `gfx_surface *img = gfx_load_image("/usr/share/images/rozos-sunset.bmp");`
+  .bmp .ppm, and (phase 14) .jpg .png .gif .tga (stb_image);
+  `gfx_save_bmp(s, "out.bmp")`
+
+== Windows (phase 14) ==
+When the desktop runs, `gfx_init()` opens a window instead of taking
+the whole screen - the same program works both ways.
+  `gfx_init_window("My app", 640, 480)`   title and size (0 = default)
+  `gfx_set_title("...")`  `gfx_windowed()`
+  events: GFX_EV_CLOSE (the [X] - quit!), GFX_EV_RESIZE (new
+  gfx_width/gfx_height), GFX_EV_FOCUS; ev.mods = GFX_MOD_SHIFT/ALT/CTRL
+  `gfx_event_fds()` to poll() your own fds too (see [[rozterm]])
+
+== Text ==
+  `gfx_text(s, NULL, x, y, "hello", GFX_WHITE)`   bitmap font (NULL =
+  rozos-mono-16, or gfx_font_load("x.psf")); gfx_text_bg with background
+  `gfx_ttf *t = gfx_ttf_load("/usr/share/fonts/DejaVuSans.ttf");`
+  `gfx_ttf_text(s, t, 32, x, y, "Smooth", GFX_WHITE)`  any size (pixels)
+  UTF-8 is read; Bengali needs shaping, which is not there yet.
+
+== Input ==
+  `gfx_event ev;  while (gfx_wait_event(&ev, -1)) { ... }`
+  ev.type: GFX_EV_KEY (ev.key: 'a', GFX_KEY_UP, GFX_KEY_ESC ...),
+  GFX_EV_MOUSE_MOVE / _DOWN / _UP (ev.x, ev.y, ev.button), _WHEEL
+  timeout 0 = just look (for animations), -1 = wait
+  `gfx_cursor_draw(s, x, y)` draws a mouse arrow before gfx_present
+  (nothing in a window - the desktop draws the arrow).
+Run `gfxevents` to see what your keys and mouse send.
+
+Examples with full source in /usr/src/gfx: [[gfxdemo]], [[paint]],
+[[imgview]], [[gcalc]]. More: [[graphics]], [[framebuffer]], [[fonts]].

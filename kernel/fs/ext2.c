@@ -27,6 +27,7 @@
 #include <rozos/string.h>
 #include <rozos/clock.h>
 #include <rozos/compiler.h>
+#include <rozos/printf.h>
 
 #define EXT2_MAGIC              0xEF53
 #define EXT2_ROOT_INO           2
@@ -946,7 +947,7 @@ static void ext2_release(struct vnode *vn)
 
 static const struct vnode_ops ext2_ops = {
     ext2_read, ext2_write, ext2_truncate, ext2_lookup, ext2_create,
-    ext2_unlink, ext2_readdir, ext2_release
+    ext2_unlink, ext2_readdir, ext2_release, NULL
 };
 
 /* ---------- mount / statfs ---------- */
@@ -1029,4 +1030,58 @@ static int ext2_statfs(struct vnode *root, struct vfs_statfs *out)
     return 0;
 }
 
-const struct filesystem ext2_filesystem = { "ext2", ext2_mount, ext2_statfs };
+/* ধাপ ১১খ: kmon-এর `disks`-এ বিস্তারিত (superblock থেকে) */
+static void print_time(const char *what, uint32_t t)
+{
+    char buf[40];
+    if (t == 0) {
+        kprintf("      %-15s never\n", what);
+        return;
+    }
+    clock_format((int64_t)t, buf, sizeof(buf));
+    kprintf("      %-15s %s\n", what, buf);
+}
+
+static void ext2_info(struct vnode *root)
+{
+    struct ext2_fs *fs = EV(root)->fs;
+    struct ext2_super *sb = fs->sb;
+    static const char *const os[] = { "Linux", "Hurd", "Masix", "FreeBSD", "Lites" };
+    char label[17];
+    unsigned i;
+    memcpy(label, sb->volume_name, 16);
+    label[16] = '\0';
+    kprintf("      type            ext2, revision %u.%u%s\n", (unsigned)sb->rev_level,
+            (unsigned)sb->minor_rev_level, fs->read_only ? "  (read-only: unknown features)" : "");
+    kprintf("      label           \"%s\"\n", label);
+    kprintf("      UUID            ");
+    for (i = 0; i < 16; i++) {
+        kprintf("%02x%s", (unsigned)sb->uuid[i], (i == 3 || i == 5 || i == 7 || i == 9) ? "-" : "");
+    }
+    kprintf("\n");
+    kprintf("      state           %s, errors: %s\n", (sb->state & 1) ? "clean" : "not clean",
+            sb->errors == 1 ? "continue" : sb->errors == 2 ? "remount read-only" : sb->errors == 3 ? "panic" : "?");
+    kprintf("      block size      %u bytes\n", (unsigned)fs->block_size);
+    kprintf("      blocks          %u total, %u free, %u reserved for root\n", (unsigned)sb->blocks_count,
+            (unsigned)sb->free_blocks_count, (unsigned)sb->r_blocks_count);
+    kprintf("      inodes          %u total, %u free, %u bytes each, first usable %u\n",
+            (unsigned)sb->inodes_count, (unsigned)sb->free_inodes_count, (unsigned)fs->inode_size,
+            (unsigned)sb->first_ino);
+    kprintf("      groups          %u (%u blocks, %u inodes per group), first data block %u\n",
+            (unsigned)fs->groups, (unsigned)sb->blocks_per_group, (unsigned)sb->inodes_per_group,
+            (unsigned)sb->first_data_block);
+    kprintf("      features        compat 0x%x, incompat 0x%x%s, ro_compat 0x%x%s%s%s\n",
+            (unsigned)sb->feature_compat, (unsigned)sb->feature_incompat,
+            (sb->feature_incompat & EXT2_INCOMPAT_FILETYPE) ? " (filetype)" : "",
+            (unsigned)sb->feature_ro_compat,
+            (sb->feature_ro_compat & EXT2_RO_SPARSE_SUPER) ? " (sparse_super)" : "",
+            (sb->feature_ro_compat & EXT2_RO_LARGE_FILE) ? " (large_file)" : "",
+            (sb->feature_ro_compat & EXT2_RO_BTREE_DIR) ? " (btree_dir)" : "");
+    kprintf("      mounts          %u (check after %d)\n", (unsigned)sb->mnt_count, (int)(int16_t)sb->max_mnt_count);
+    print_time("last mounted", sb->mtime);
+    print_time("last written", sb->wtime);
+    print_time("last checked", sb->lastcheck);
+    kprintf("      created by      %s\n", sb->creator_os < 5 ? os[sb->creator_os] : "?");
+}
+
+const struct filesystem ext2_filesystem = { "ext2", ext2_mount, ext2_statfs, ext2_info };

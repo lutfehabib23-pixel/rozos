@@ -1,0 +1,2 @@
+# crash - a demo program
+See [[demos]].

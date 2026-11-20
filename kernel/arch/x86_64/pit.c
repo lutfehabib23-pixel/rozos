@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <rozos/sched.h>
+#include <rozos/random.h>
 #include <rozos/timer.h>
 #include "pit.h"
 #include "pic.h"
@@ -27,6 +28,7 @@ static volatile uint64_t ticks;
 static uint32_t requested_hz;
 static uint64_t ns_per_tick_x1000;     /* প্রতি টিকে ন্যানোসেকেন্ড × 1000 (ভগ্নাংশ ধরে রাখতে) */
 static timer_tick_hook_t tick_hook;
+static timer_tick_hook_t extra_hooks[4];   /* ধাপ ১৪: অন্য অংশের টিক (যেমন serial-এ Ctrl+C) */
 static uint64_t pit_ns_per_tick_x1000; /* PIT-এর নিজের মান (pit_wait_ms-এর জন্য) */
 static volatile uint64_t pit_ticks;    /* শুধু PIT-এর টিক */
 static uint64_t base_ns;               /* উৎস বদলানোর মুহূর্তের uptime */
@@ -36,9 +38,26 @@ static const char *source_name = "PIT";
 void timer_core_tick(void)
 {
     ticks++;
+    random_add_entropy(cpu_rdtsc());     /* ধাপ ১০: প্রতি টিকের TSC jitter → entropy */
+    {
+        int i;
+        for (i = 0; i < 4; i++) if (extra_hooks[i]) extra_hooks[i](ticks);
+    }
     if (tick_hook) {
         tick_hook(ticks);
     }
+}
+
+int timer_add_tick_hook(timer_tick_hook_t hook)
+{
+    int i;
+    for (i = 0; i < 4; i++) {
+        if (!extra_hooks[i]) {
+            extra_hooks[i] = hook;
+            return 0;
+        }
+    }
+    return -1;
 }
 
 static void pit_irq(uint8_t irq, struct interrupt_frame *frame)

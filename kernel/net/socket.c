@@ -695,9 +695,34 @@ static void sock_vn_release(struct vnode *vn)
     sock_destroy((struct sock *)vn->fs_data);
 }
 
+/* ধাপ ১৩: poll() — এখনই পড়া/লেখা যাবে কিনা (আটকে না থেকে) */
+static int sock_vn_poll(struct vnode *vn, int events)
+{
+    struct sock *s = (struct sock *)vn->fs_data;
+    int r = 0;
+    (void)events;
+    if (s->err) r |= VFS_POLLERR;
+    if (s->type == SOCK_STREAM) {
+        if (s->state == SS_LISTENING) {
+            if (s->npending > 0) r |= VFS_POLLIN;
+        } else if (s->state == SS_CONNECTED) {
+            if (s->rx || s->peer_closed) r |= VFS_POLLIN;
+            if (s->peer_closed) r |= VFS_POLLHUP;
+            if (s->pcb.tcp && tcp_sndbuf(s->pcb.tcp) > 0) r |= VFS_POLLOUT;
+        } else if (s->state != SS_NEW && s->state != SS_CONNECTING) {
+            r |= VFS_POLLIN | VFS_POLLHUP;          /* বন্ধ: read() সাথে সাথে 0 দেবে */
+        }
+    } else {
+        if (s->dq_count > 0) r |= VFS_POLLIN;
+        r |= VFS_POLLOUT;
+    }
+    return r;
+}
+
 static const struct vnode_ops sock_ops = {
     sock_vn_read,
     sock_vn_write,
     NULL, NULL, NULL, NULL, NULL,
-    sock_vn_release
+    sock_vn_release,
+    sock_vn_poll
 };

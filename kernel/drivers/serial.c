@@ -73,6 +73,12 @@ void serial_write(const char *s, size_t n)
     }
 }
 
+/* ধাপ ১৩: poll — UART-এ পড়ার মতো বাইট আছে কিনা (না পড়ে) */
+int serial_rx_ready(void)
+{
+    return serial_ready && (inb(serial_port + UART_LSR) & LSR_DATA_READY);
+}
+
 int serial_try_getc(char *c)
 {
     if (!serial_ready || !(inb(serial_port + UART_LSR) & LSR_DATA_READY)) {

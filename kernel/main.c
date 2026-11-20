@@ -32,11 +32,15 @@
 #include <rozos/acpi.h>
 #include <rozos/vfs.h>
 #include <rozos/devfs.h>
+#include <rozos/fbdev.h>
+#include <rozos/shm.h>
 #include <rozos/initrd.h>
 #include <rozos/errno.h>
 #include <rozos/pci.h>
 #include <rozos/block.h>
 #include <rozos/ahci.h>
+#include <rozos/fat.h>
+#include <rozos/buildinfo.h>
 #include <rozos/ext2.h>
 #include <rozos/clock.h>
 #include <rozos/string.h>
@@ -44,6 +48,7 @@
 #include <rozos/proc.h>
 #include <rozos/syscall.h>
 #include <rozos/net.h>
+#include <rozos/random.h>
 #ifdef ROZOS_KCXX
 #include <rozos/kcxx.h>
 #endif
@@ -54,15 +59,35 @@
 #include <arch/x86_64/pit.h>
 #include <arch/x86_64/apic.h>
 
-#define ROZOS_VERSION "0.9.0-phase9"
+#define ROZOS_VERSION "0.14.0-phase14a"
 
+#ifdef __TINYC__
+/* ধাপ ১১: TCC-র লিংকারে linker.ld নেই — শুরু = Limine-এর দেওয়া virtual base,
+ * শেষ = TCC-র নিজের _end প্রতীক (.bss-এর শেষ) */
+extern char _end[];
+#define KERNEL_IMAGE_START ((uintptr_t)bootinfo()->kernel_virt)
+#define KERNEL_IMAGE_END   ((uintptr_t)_end)
+#else
 /* linker.ld থেকে */
 extern char __kernel_start[], __kernel_end[];
+#define KERNEL_IMAGE_START ((uintptr_t)__kernel_start)
+#define KERNEL_IMAGE_END   ((uintptr_t)__kernel_end)
+#endif
 
 static void print_banner(void)
 {
     tty_set_color(TTY_COLOR_LIGHT_CYAN, TTY_COLOR_BLACK);
+#ifdef __TINYC__
+    kprintf("rozOS %s (x86_64, kernel built inside rozOS with TCC)\n", ROZOS_VERSION);
+#else
     kprintf("rozOS %s (x86_64)\n", ROZOS_VERSION);
+#endif
+    /* ধাপ ১১খ: বিল্ড নম্বর */
+    kprintf("build %s, %s on %s, %s\n", rozos_build_id, rozos_build_compiler, rozos_build_where, rozos_build_date);
+    /* build tag (kinstall ফাইলে খোঁজে) ব্যবহার করা, যেন লিংকার (--gc-sections) ফেলে না দেয় */
+    if (rozos_build_tag[0] != 'R') {
+        kprintf("(build tag missing)\n");
+    }
     tty_set_color(TTY_COLOR_LIGHT_GREY, TTY_COLOR_BLACK);
     kprintf("--------------------------------------------\n");
 }
@@ -103,7 +128,7 @@ static void print_boot_info(int revision)
         kprintf("  Kernel virt    : 0x%016llx\n", (unsigned long long)bi->kernel_virt);
     }
     kprintf("  Kernel size    : %llu KiB\n",
-            (unsigned long long)((uintptr_t)__kernel_end - (uintptr_t)__kernel_start) / 1024);
+            (unsigned long long)(KERNEL_IMAGE_END - KERNEL_IMAGE_START) / 1024);
     kprintf("  Command line   : \"%s\"\n", bi->cmdline);
     kprintf("  Modules        : %llu\n", (unsigned long long)bi->module_count);
     kprintf("  ACPI RSDP      : 0x%llx (phys)\n", (unsigned long long)bi->rsdp_phys);
@@ -207,7 +232,7 @@ static void init_interrupts_and_devices(void)
             if (fb_is_ready()) {
                 mouse_set_bounds((int32_t)fb_width(), (int32_t)fb_height());
             }
-            print_ok("PS/2 mouse (IRQ12)");
+            print_ok(mouse_has_wheel() ? "PS/2 mouse with scroll wheel (IRQ12)" : "PS/2 mouse (IRQ12)");
         } else {
             print_warn("no PS/2 mouse");
         }
@@ -320,12 +345,20 @@ static void init_processes(void)
 {
     char msg[96];
 
+    random_init();
+    if (random_has_rdrand()) {
+        print_ok("Random numbers: ChaCha20 CSPRNG seeded from RDRAND/RDSEED + timer jitter");
+    } else {
+        print_ok("Random numbers: ChaCha20 CSPRNG seeded from timer jitter (no RDRAND on this CPU)");
+    }
+
     sched_init();
     ksnprintf(msg, sizeof(msg), "Scheduler: round-robin, %u ms slices, %u KiB kernel stacks, SSE on",
               (unsigned)SCHED_SLICE_MS, (unsigned)(SCHED_KSTACK_SIZE / 1024));
     print_ok(msg);
 
     proc_init();
+    shm_init();                              /* ধাপ ১৩: shared memory-র vmm hook */
     syscall_init();
     print_ok("Syscalls: syscall/sysret (fast) and int 0x80, Linux x86-64 numbers");
 }
@@ -350,7 +383,10 @@ static int cmdline_has(const char *word)
  * আসে (shell থেকে kmon চাইলে /bin/kmon)। */
 static void start_init(void)
 {
-    static const char *const argv[] = { "/bin/init", NULL };
+    /* ধাপ ১৪: কমান্ড লাইনে "text" থাকলে init ডেস্কটপ নয়, টেক্সট মোড চালায় */
+    static const char *const argv_desktop[] = { "/bin/init", NULL };
+    static const char *const argv_text[] = { "/bin/init", "text", NULL };
+    const char *const *argv = cmdline_has("text") ? argv_text : argv_desktop;
     struct vfs_stat st;
     char msg[96];
     int pid, status, r;
@@ -432,16 +468,31 @@ static void init_storage(void)
                   (unsigned)ai.command_slots, ai.supports_64bit ? "64-bit" : "32-bit");
         print_ok(msg);
     }
-    for (i = 0; i < block_device_count(); i++) {
-        struct block_device *d = block_device_at(i);
-        ksnprintf(msg, sizeof(msg), "/dev/%s: %llu MiB, %u-byte sectors, \"%s\"",
-                  d->name, (unsigned long long)(d->sector_count * d->sector_size / (1024 * 1024)),
-                  (unsigned)d->sector_size, d->model);
-        print_ok(msg);
+    {
+        size_t disks = block_device_count();          /* partition যোগ হওয়ার আগের সংখ্যা */
+        for (i = 0; i < disks; i++) {
+            struct block_device *d = block_device_at(i);
+            size_t first = block_device_count(), k;
+            int parts;
+            ksnprintf(msg, sizeof(msg), "/dev/%s: %llu MiB, %u-byte sectors, \"%s\"",
+                      d->name, (unsigned long long)(d->sector_count * d->sector_size / (1024 * 1024)),
+                      (unsigned)d->sector_size, d->model);
+            print_ok(msg);
+            /* ধাপ ১১খ: GPT/MBR partition */
+            parts = partition_scan(d);
+            for (k = first; parts > 0 && k < block_device_count(); k++) {
+                struct block_device *p = block_device_at(k);
+                ksnprintf(msg, sizeof(msg), "  /dev/%s: %s partition, %llu MiB%s%s%s", p->name, p->part_type,
+                          (unsigned long long)(p->sector_count * p->sector_size / (1024 * 1024)),
+                          p->part_label[0] ? " \"" : "", p->part_label, p->part_label[0] ? "\"" : "");
+                print_ok(msg);
+            }
+        }
     }
 }
 
-/* ext2 পাওয়া প্রথম ডিস্ক "/"-এ; সফল হলে 1 */
+/* ext2 পাওয়া প্রথম ডিস্ক "/"-এ; সফল হলে 1
+ * (ধাপ ১১খ: partition থাকা ডিস্কে পুরো ডিস্ক নয়, partition-গুলোই দেখা হয়) */
 static int mount_disk_root(void)
 {
     char msg[128];
@@ -449,6 +500,9 @@ static int mount_disk_root(void)
     for (i = 0; i < block_device_count(); i++) {
         struct block_device *d = block_device_at(i);
         struct vfs_statfs sf;
+        if (!d->parent && d->partitions) {
+            continue;
+        }
         if (vfs_mount("/", "ext2", d->name) == 0) {
             vfs_statfs("/", &sf);
             ksnprintf(msg, sizeof(msg), "ext2 on /dev/%s mounted on / (%llu MiB, %llu MiB free%s)",
@@ -463,6 +517,33 @@ static int mount_disk_root(void)
     return 0;
 }
 
+/* ধাপ ১১খ: boot partition (FAT, Limine আর kernel-গুলো) → /boot। প্রথমে "EFI System"
+ * partition, না থাকলে FAT দেখায় এমন প্রথম partition। */
+static void mount_boot_partition(void)
+{
+    char msg[128];
+    size_t i;
+    int pass;
+    for (pass = 0; pass < 2; pass++) {
+        for (i = 0; i < block_device_count(); i++) {
+            struct block_device *d = block_device_at(i);
+            struct vfs_statfs sf;
+            if (!d->parent || (pass == 0 && strcmp(d->part_type, "EFI System"))) {
+                continue;
+            }
+            vfs_mkdir_p("/boot");
+            if (vfs_mount("/boot", "fat", d->name) == 0) {
+                vfs_statfs("/boot", &sf);
+                ksnprintf(msg, sizeof(msg), "FAT on /dev/%s mounted on /boot (%llu MiB, %llu MiB free)", d->name,
+                          (unsigned long long)(sf.total_blocks * sf.block_size / (1024 * 1024)),
+                          (unsigned long long)(sf.free_blocks * sf.block_size / (1024 * 1024)));
+                print_ok(msg);
+                return;
+            }
+        }
+    }
+}
+
 /* ধাপ ৪-৫: ফাইলসিস্টেম। initrd মডিউলের ডেটা executable_and_modules অঞ্চলে থাকে
  * (reclaim হয় না), আর এর তথ্য bootinfo-তে কপি করা — তাই এটা reclaim-এর আগে বা পরে
  * যেকোনো সময় চলতে পারে। */
@@ -474,6 +555,7 @@ static void init_vfs(void)
 
     vfs_register_filesystem(&tmpfs_filesystem);
     vfs_register_filesystem(&ext2_filesystem);
+    vfs_register_filesystem(&fat_filesystem);        /* ধাপ ১১খ */
 
     disk_root = mount_disk_root();
     if (disk_root) {
@@ -489,6 +571,7 @@ static void init_vfs(void)
         } else {
             print_ok("tmpfs mounted on /tmp");
         }
+        mount_boot_partition();
     } else {
         err = vfs_mount("/", "tmpfs", NULL);
         if (err < 0) {
@@ -524,6 +607,7 @@ static void init_vfs(void)
         print_warn(msg);
     } else {
         print_ok("devfs mounted on /dev");
+        fbdev_init();                        /* ধাপ ১৩: /dev/fb0 */
     }
 }
 
@@ -600,7 +684,7 @@ void kmain(void)
     }
 
     tty_set_color(TTY_COLOR_LIGHT_GREEN, TTY_COLOR_BLACK);
-    kprintf("\nrozOS booted. Phase 9: e1000 network card, lwIP TCP/IP and sockets.\n");
+    kprintf("\nrozOS booted. Phase 14a: desktop (rozwm), terminal windows, PTY, Unix sockets, Ctrl+C.\n");
     tty_set_color(TTY_COLOR_LIGHT_GREY, TTY_COLOR_BLACK);
 
     /* /etc/motd থাকলে দেখানো — initrd থেকে আসা প্রথম "ফাইল" */

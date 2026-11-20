@@ -1,0 +1,4 @@
+# sh - the shell for scripts
+/bin/sh is a copy of [[rozsh]], so Makefiles ([[make]]) and `sh -c "..."`
+work. `sh -c 'set -e; tcc a.c -o a; ./a'` stops at the first error.
+See [[rozsh]], [[builtins]], [[redirect]].

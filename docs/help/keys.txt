@@ -10,17 +10,33 @@
   `Ctrl+D`           on an empty line: exit the shell (init starts a new one)
 
 == In the editor ([[edit]]) ==
-  `Ctrl+S` save  `Ctrl+Q` or `Ctrl+X` quit  `Ctrl+F` find  `Ctrl+G` go to line
+  `Ctrl+S` save  `Ctrl+Q` quit  `Ctrl+F` find  `Ctrl+G` go to line
+  `Shift`+arrows select  `Ctrl+A` all  `Ctrl+C` copy  `Ctrl+X` cut  `Ctrl+V` paste
+  `Ctrl+Z` undo  `Ctrl+Y` redo  `Ctrl+N` line numbers
   `Ctrl+K` cut line  `Ctrl+U` paste line  `Ctrl+L` redraw
+  `Ctrl+W` save as  `Ctrl+R` compile & run a .c file
 
 == In the help viewer ([[help]]) ==
-  `Tab` next link, `Enter` open, `Backspace` back, `q` quit
+  `Tab` next link, `Enter` open, `Backspace` back, `q` quit; click a link
+
+== In the menu ([[menu]]) ==
+  arrows choose, `Enter` start, type to search, `q` quit; [[mouse]] too
 
 == In QEMU on the host ([[qemu]]) ==
   `Ctrl+A` then `X`    quit QEMU (serial terminal)
   `Ctrl+A` `Ctrl+A`    send one Ctrl+A to rozOS
 
+== Stopping a program ==
+`Ctrl+C` stops the program running in the shell (phase 14): the
+terminal sends SIGINT to its process group, see [[signals]]. The shell
+itself only cancels the line. The editor keeps Ctrl+C for copy.
+
+== On the desktop ([[desktop]]) ==
+  click a title to bring a window to the front, drag the title to move,
+  drag the bottom-right corner to resize, double-click the title = full
+  size; [_] [□] [X] on the title bar; Esc closes the Start menu
+  in a terminal: mouse wheel or Shift+PgUp/PgDn scroll back, drag =
+  copy, right click = paste ([[rozterm]])
+
 == Not yet ==
-Ctrl+C does not stop a running program yet (no signals for that); use
-`kmon` and its `kill <pid>` from another moment, see [[processes]].
 Ctrl+K as a shortcut to [[kmon]] is planned.

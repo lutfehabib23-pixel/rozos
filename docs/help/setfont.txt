@@ -1,0 +1,2 @@
+# setfont - change the console font
+See [[fonts]]: `setfont`, `setfont rozos-mono-20`, `setfont -d`.

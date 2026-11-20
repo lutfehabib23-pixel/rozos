@@ -1,0 +1,3 @@
+# rozmenu - the program menu
+/bin/rozmenu is the [[menu]] program; `menu` is the same file.
+See [[menu]] and [[install]].

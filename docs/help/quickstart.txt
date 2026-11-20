@@ -12,7 +12,8 @@ After boot you are in [[rozsh]], the shell. The prompt looks like
   `./hello`               run it
   `echo hi > /tmp/a.txt`  redirect output to a file ([[redirect]])
   `history`               commands you typed ([[history]])
-  `systest`               run the 43 self-tests ([[systest]])
+  `systest`               run the 69 self-tests ([[systest]])
+  `menu`                  all programs in a list ([[menu]])
   `ping google.com`       test the network ([[network]])
   `kmon`                  kernel monitor; `exit` returns ([[kmon]])
 

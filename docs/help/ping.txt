@@ -11,4 +11,10 @@ means the name could not be found (see [[nslookup]]).
 ping uses a raw ICMP socket: it sends an ICMP echo request and waits
 for the echo reply with the same id and sequence number.
 Note: in QEMU, pinging the internet works only if your PC allows it.
+On WSL/Linux the PC must let normal users open ICMP sockets, or
+every ping says "Request timeout". Run on the PC (not in rozOS):
+  `sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"`
+To keep it after a restart, put this line into a file on the PC:
+  /etc/sysctl.d/99-ping.conf:  net.ipv4.ping_group_range = 0 2147483647
+TCP (http-get, https) works without this.
 Back to [[network]].

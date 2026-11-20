@@ -23,9 +23,12 @@ starts it at boot and starts a new one if it exits.
 == Scripts ==
 `rozsh file.sh` or `source file.sh` runs commands from a file, one per
 line; # starts a comment. At login ~/.rozshrc is run (it sets EDITOR).
+`rozsh -c "cmd; cmd"` runs one line and exits - /bin/sh is a copy of
+rozsh, so system() and [[make]] use this.
 
 == Line editing ==
 See [[keys]] and [[history]].
 
 == Not yet ==
-Pipes (|), background jobs (&), && and ||, Tab completion, globbing (*).
+Background jobs (&), Tab completion, globbing (*). Pipes (|), && and || work
+since phase 13 ([[redirect]]).

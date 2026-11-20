@@ -1,0 +1,18 @@
+# install - add your own program to rozOS
+  `tcc calc.c -o calc`
+  `install -t Calculator -c Tools -a "adds numbers" -w calc`
+Now `calc` works from any directory, and the [[menu]] shows it.
+  `install calc`      copy to /usr/local/bin and add a menu entry
+  `install -h calc`   into ~/bin (/home/bin) instead
+  `install -n calc`   no menu entry
+  `install -l`        what is installed
+  `install -u calc`   remove it again (program and menu entry)
+Options: `-t` title in the menu, `-c` category, `-a` one line about
+it, `-w` the menu waits for a key when it ends (for programs that
+print something).
+
+== Where programs live ==
+  /bin             rozOS's own programs
+  /usr/local/bin   programs you install (for everybody)
+  /home/bin        your personal programs (~/bin)
+PATH is /bin:/usr/local/bin:/home/bin. See [[files]], [[c-programming]].

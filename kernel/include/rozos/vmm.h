@@ -28,6 +28,10 @@
 #define VMM_EXEC     0x04     /* না দিলে NX (CPU সাপোর্ট করলে) */
 #define VMM_NOCACHE  0x08     /* ডিভাইস মেমোরি: uncached (PAT 3) */
 #define VMM_WC       0x10     /* write-combining (PAT 5, ফ্রেমবাফার) */
+/* ধাপ ১৩: ভাগ করা পেজ (shared memory, /dev/fb0) — ফ্রেমটা এই ঠিকানা-স্থানের নিজের নয়:
+ * আনম্যাপ/প্রসেস শেষে মুক্ত হয় না, fork-এ কপি নয়, একই ফ্রেম ম্যাপ হয়। প্রতিবার ম্যাপ
+ * (fork) আর আনম্যাপে hook ডাকা হয় (shm.c হিসাব রাখে)। PTE-র সফটওয়্যার বিট 9। */
+#define VMM_SHARED   0x20
 
 struct vmm_space {
     uint64_t pml4_phys;
@@ -61,6 +65,8 @@ void vmm_switch(struct vmm_space *sp);
 int vmm_query(struct vmm_space *sp, uint64_t virt, uint64_t *phys, uint32_t *flags);
 /* ধাপ ৬ (fork): src-এর সব ইউজার পেজ নতুন ফ্রেমে কপি করে dst-এ; ব্যর্থ হলে 0 */
 int vmm_clone_user(struct vmm_space *dst, struct vmm_space *src);
+/* ধাপ ১৩: VMM_SHARED পেজ ম্যাপ (+1, শুধু fork-এ) বা আনম্যাপ (-1) হলে ডাকা হয় */
+void vmm_set_shared_hook(void (*fn)(uint64_t phys, int delta));
 
 /* পরিসংখ্যান */
 uint64_t vmm_table_pages(void);       /* কার্নেল পেজ-টেবিলে মোট কত পেজ */

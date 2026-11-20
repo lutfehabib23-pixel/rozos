@@ -623,12 +623,15 @@ static int64_t do_rw(int fd, void *rbuf, const void *wbuf, size_t len)
     }
     off = f->offset;
 
-    if (vn->type == VNODE_CHARDEV || vn->type == VNODE_SOCKET) {
+    if (vn->type == VNODE_CHARDEV || vn->type == VNODE_SOCKET || vn->type == VNODE_FIFO) {
         unsigned depth;
         f->refs++;                           /* অন্য থ্রেড close করলেও description থাকে */
         depth = kmutex_release_all(&vfs_lock);
         n = rbuf ? vn->ops->read(vn, off, rbuf, len) : vn->ops->write(vn, off, wbuf, len);
         kmutex_relock(&vfs_lock, depth);
+        if (n > 0 && vn->type == VNODE_CHARDEV) {
+            f->offset = off + (uint64_t)n;     /* ধাপ ১৩: /dev/fb0-এর মতো অবস্থান-নির্ভর ডিভাইস */
+        }
         file_put(f);
         UNLOCK();
         return n;
@@ -671,8 +674,8 @@ static int64_t do_vfs_seek(int fd, int64_t offset, int whence)
         f->offset = (uint64_t)offset;
         return offset;
     }
-    if (f->vn->type != VNODE_FILE) {
-        return -ESPIPE;
+    if (f->vn->type != VNODE_FILE && f->vn->type != VNODE_CHARDEV) {
+        return -ESPIPE;                  /* pipe, socket */
     }
     switch (whence) {
     case SEEK_SET: base = 0; break;
@@ -941,6 +944,59 @@ int vfs_install_vnode(struct vnode *vn, int flags)
     fd = install_file(flags, vn, NULL);
     UNLOCK();
     return fd;
+}
+
+/* ধাপ ১৩ */
+int vfs_ftruncate(int fd, uint64_t size)
+{
+    struct file *f;
+    int r;
+    LOCK();
+    f = get_file(fd);
+    if (!f) r = -EBADF;
+    else if ((f->flags & O_ACCMODE) == O_RDONLY) r = -EBADF;
+    else if (f->vn->type != VNODE_FILE) r = -EINVAL;
+    else if (!f->vn->ops->truncate) r = -EROFS;
+    else r = f->vn->ops->truncate(f->vn, size);
+    UNLOCK();
+    return r;
+}
+
+int vfs_fd_flags(int fd)
+{
+    struct file *f;
+    int r;
+    LOCK();
+    f = get_file(fd);
+    r = f ? f->flags : -EBADF;
+    UNLOCK();
+    return r;
+}
+
+/* ধাপ ১৩: poll() — fd-এর vnode-কে জিজ্ঞেস করা (ops->poll না থাকলে সাধারণ ফাইল:
+ * সবসময় তৈরি); খোলার মোডের বাইরের ঘটনা বাদ (যেমন শুধু-পড়ার fd-এ POLLOUT নয়) */
+int vfs_poll_fd(int fd, int events)
+{
+    struct file *f;
+    struct vnode *vn;
+    int r, acc;
+    LOCK();
+    f = get_file(fd);
+    if (!f) {
+        UNLOCK();
+        return VFS_POLLNVAL;
+    }
+    vn = f->vn;
+    acc = f->flags & O_ACCMODE;
+    vnode_ref(vn);
+    UNLOCK();
+    r = (vn->ops && vn->ops->poll) ? vn->ops->poll(vn, events) : (VFS_POLLIN | VFS_POLLOUT);
+    if (acc == O_WRONLY) r &= ~VFS_POLLIN;
+    if (acc == O_RDONLY) r &= ~VFS_POLLOUT;
+    LOCK();
+    vnode_unref(vn);
+    UNLOCK();
+    return r;
 }
 
 struct vnode *vfs_fd_vnode(int fd)

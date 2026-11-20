@@ -1,31 +1,74 @@
 # Running rozOS in QEMU (on the build PC)
 All of these run in the WSL terminal, in the rozOS source folder:
 
-  `make run-serial`   boot in this terminal only (no window)
+  `make run-serial`   boot in this terminal only (no window) - phase 14:
+                      the desktop runs unseen, you get a shell on the
+                      serial line ([[desktop]])
   `make run`          boot with a QEMU window and this terminal
   `make run-uefi`     the same, with UEFI firmware instead of BIOS
-  `make disk-reset`   rebuild the disk image from sysroot/ (erases it!)
-  `make disk-check`   check the disk image with e2fsck (QEMU stopped)
-  `make disk-update`  copy only new programs, libc and TCC to the disk
+  `make run-iso`      boot from the CD image instead of the disk (rescue)
+  `make disk-update`  copy only new programs, libc, TCC, help pages,
+                      /etc/ssl/certs.pem and the factory kernel to the disk
+  `make disk-grow`    make the disk bigger, files kept (see below)
+  `make disk-migrate` old disk (before phase 11b) -> partitions, files kept
+  `make disk-check`   check the disk image (ext2 and FAT, QEMU stopped)
+  `make disk-reset`   rebuild the disk image from sysroot/ (ERASES it!)
 
-The run targets call disk-update by themselves when a program changed,
-so normally `make run-serial` is all you need.
+No need to build again and again: the run targets build and update the
+disk only when a source file changed, so normally `make run-serial` is
+all you need. `make clean` + `make` only after unpacking a new phase.
+`disk-reset` is only a command on the PC - never in the [[menu]].
+
+== Speed: KVM ==
+Without KVM, QEMU imitates every CPU instruction in software - building
+the kernel inside rozOS ([[kernel-build]]) is then slow. With KVM the
+real CPU runs rozOS and it is many times faster.
+Since phase 13 KVM is OFF by default: building the kernel inside rozOS
+under KVM can crash (#GP in interrupt return - a known bug, to be fixed).
+  `make run-serial KVM=1`      fast; fine for the shell, edit, graphics
+  `make run-serial KVM=auto`   on when /dev/kvm can be used
+  `make run-serial`            no KVM (safe for kernel builds)
+The first lines say "KVM (fast)" or "TCG emulation".
+On WSL2, once:  `sudo usermod -aG kvm $USER`  then in Windows
+PowerShell `wsl --shutdown` and open WSL again. Check: `ls -l /dev/kvm`.
+rozOS uses one CPU core for now (more cores come later).
+
+== Memory (RAM) ==
+Default 1 GiB. More for one run: `make run-serial QEMU_MEM=2G`.
+The boot log shows "Usable RAM". Always: set QEMU_MEM in config.mk.
+
+== Disk size ==
+The disk image (rozos-disk.img) is 512 MiB: 64 MiB FAT32 boot partition
++ the rest ext2 root. A smaller disk from an older phase grows by itself
+at the next disk-update; your files are kept. Bigger: 
+  `make disk-grow DISK_MIB=1024`
+(only growing; to keep it, set DISK_MIB in the Makefile). In rozOS,
+`kmon` then `disks` shows the sizes. See [[disks]], [[partitions]].
 
 == Leaving QEMU ==
 Press `Ctrl+A`, release, then `X`. Ctrl+C goes to rozOS instead (the
-shell uses it to cancel a line).
+shell uses it to cancel a line). In rozOS, `reboot` restarts inside
+QEMU (the boot menu appears again) and `poweroff` closes QEMU.
+`make debug` stops instead of restarting, for finding crashes.
 
 == Screen size ==
-The framebuffer is 142x50 characters, but your terminal may be smaller.
-Find its size on the host with `stty size`, then in rozOS run
-`stty 30 120` (rows, columns) so [[edit]] and [[help]] fit. See [[stty]].
+The framebuffer is 1280x800 pixels = 142x50 characters by default (see
+[[fonts]] for other fonts and `kinstall --resolution`), but your
+terminal may be smaller.
+[[edit]], [[help]] and the [[menu]] find the size by themselves; if the
+picture is wrong, run `stty detect` (or set it: `stty 30 120`). See [[stty]].
 
 == Network ==
 QEMU gives rozOS a private network: rozOS is 10.0.2.15, your PC is
 10.0.2.2, and connections to the internet go out through the PC. Try
 `python3 -m http.server 8000` on the PC and in rozOS
 `http-get http://10.0.2.2:8000/`. See [[network]].
+ping to the internet needs one setting on WSL/Linux (TCP does not):
+  `sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"`
+and, to keep it, the same line in /etc/sysctl.d/99-ping.conf - see [[ping]].
+https uses the PC's CA list, copied at build time (see [[tls]]).
 
 == Boot menu ==
-Limine shows two entries for 3 seconds: "rozOS" and "rozOS (no init)".
-The second skips the shell and starts [[kmon]] directly. See [[boot]].
+Limine shows the installed kernels for 3 seconds, then the factory
+kernel and "factory (no init: kernel monitor)", which skips the shell
+and starts [[kmon]]. See [[boot-menu]], [[kinstall]].

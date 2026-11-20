@@ -1,0 +1,18 @@
+# cjson - JSON in C (the first rozpkg package)
+cJSON 1.7.18 by Dave Gamble (MIT license), as a static library.
+  `rozpkg install cjson`
+  `tcc /usr/share/doc/cjson/example.c -lcjson -o /tmp/j`
+  `/tmp/j`
+
+== Use ==
+  #include <cjson/cJSON.h>     (or <cJSON.h>)
+  cJSON *root = cJSON_Parse("{\"a\":1}");
+  int a = cJSON_GetObjectItem(root, "a")->valueint;
+  char *text = cJSON_Print(root);     /* free() it later */
+  cJSON_Delete(root);
+Build with `-lcjson`. cJSON_Utils (JSON pointer/patch) is in the same
+library: #include <cjson/cJSON_Utils.h>.
+
+Installed files: `rozpkg info cjson`. Documentation:
+/usr/share/doc/cjson/README.md. Remove: `rozpkg remove cjson`.
+See [[rozpkg]], [[c-programming]].

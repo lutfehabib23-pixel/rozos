@@ -12,6 +12,7 @@ void  *memchr(const void *s, int c, size_t n);
 size_t strlen(const char *s);
 size_t strnlen(const char *s, size_t max);
 char  *strcpy(char *dst, const char *src);
+char  *stpcpy(char *dst, const char *src);           /* ধাপ ১১: শেষের \0-এর ঠিকানা ফেরত */
 char  *strncpy(char *dst, const char *src, size_t n);
 char  *strcat(char *dst, const char *src);
 char  *strncat(char *dst, const char *src, size_t n);

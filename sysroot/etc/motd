@@ -2,4 +2,6 @@ Welcome to rozOS!
 A self-hosting 64-bit operating system, built from scratch.
 
 This file came from sysroot/etc/motd on the build host.
-Shell tips: ls /bin, cat /src/hello.c, edit notes.txt, systest, kmon, help
+Shell tips: menu, ls /bin | wc -l, edit notes.txt, systest, kmon, help
+Desktop: Start menu, Terminal icon; textmode / desktop switch; help desktop
+Graphics (make run window): gfxdemo, paint, imgview, gcalc, setfont, help graphics

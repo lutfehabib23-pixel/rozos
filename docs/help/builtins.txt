@@ -13,6 +13,7 @@ These run inside [[rozsh]] itself (no new process):
   `source file`     run commands from a file (`. file` also works)
   `help [page]`     this help viewer ([[help]])
   `exit [code]`     leave the shell; /bin/init starts a new one
+  `set -e` / `set +e`  stop / keep going after a failing command
 
 Built-ins can be redirected too: `history > /tmp/h.txt`
 See [[variables]] for what $NAME, $? and quotes do.

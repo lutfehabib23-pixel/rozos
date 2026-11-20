@@ -31,5 +31,7 @@ size_t acpi_table_count(void);
 const struct acpi_sdt_header *acpi_table(size_t index);
 /* signature (৪ অক্ষর, যেমন "APIC") অনুযায়ী n-তম টেবিল; না থাকলে NULL */
 const struct acpi_sdt_header *acpi_find_table(const char *signature, size_t n);
+/* ধাপ ১১খ: ACPI S5 দিয়ে বিদ্যুৎ বন্ধ — সফল হলে ফেরে না, না পারলে -1 */
+int acpi_poweroff(void);
 
 #endif

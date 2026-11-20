@@ -1,0 +1,4 @@
+# poweroff - switch rozOS off
+  `poweroff`      switch off (ACPI); in QEMU this also closes QEMU
+  `poweroff -h`   only stop (halt)
+Same program family as `reboot` - see [[reboot]].

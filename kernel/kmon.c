@@ -25,6 +25,7 @@
 #include <rozos/heap.h>
 #include <rozos/acpi.h>
 #include <rozos/vfs.h>
+#include <rozos/shm.h>
 #include <rozos/errno.h>
 #include <rozos/sched.h>
 #include <rozos/proc.h>
@@ -32,6 +33,7 @@
 #include <rozos/net.h>
 #include <rozos/pci.h>
 #include <rozos/block.h>
+#include <rozos/fat.h>
 #include <rozos/clock.h>
 #include <arch/x86_64/pic.h>
 #include <arch/x86_64/pit.h>
@@ -406,22 +408,81 @@ static void cmd_lspci(void)
     kprintf("  %u device(s)\n", (unsigned)pci_device_count());
 }
 
-static void cmd_disks(void)
+/* ধাপ ১১খ: এই ডিভাইস কোথায় mount করা (statfs-এর source দিয়ে মিলিয়ে); না থাকলে NULL */
+static const struct mount *mount_of_device(const struct block_device *d)
 {
     size_t i;
+    for (i = 0; i < vfs_mount_count(); i++) {
+        const struct mount *m = vfs_mount_at(i);
+        struct vfs_statfs sf;
+        if (vfs_statfs(m->path, &sf) == 0 && !strcmp(sf.source, d->name)) {
+            return m;
+        }
+    }
+    return NULL;
+}
+
+static void disk_line(struct block_device *d)
+{
+    const struct mount *m = mount_of_device(d);
+    const char *fsname = (!d->parent && d->partitions) ? "-" : fs_probe_name(d);
+    if (!d->parent) {
+        kprintf("  /dev/%-6s %8llu MiB  %llu x %u B  \"%s\"  table: %s\n", d->name,
+                (unsigned long long)(d->sector_count * d->sector_size / (1024 * 1024)),
+                (unsigned long long)d->sector_count, (unsigned)d->sector_size, d->model,
+                d->table[0] ? d->table : "none");
+    } else {
+        kprintf("   /dev/%-6s %7llu MiB  sectors %llu-%llu  %s%s%s%s\n", d->name,
+                (unsigned long long)(d->sector_count * d->sector_size / (1024 * 1024)),
+                (unsigned long long)d->start_lba, (unsigned long long)(d->start_lba + d->sector_count - 1),
+                d->part_type, d->part_label[0] ? "  \"" : "", d->part_label, d->part_label[0] ? "\"" : "");
+    }
+    kprintf("      file system     %s%s%s\n", fsname, m ? "  mounted on " : (strcmp(fsname, "-") ? "  (not mounted)" : ""),
+            m ? m->path : "");
+    if (!d->parent) {
+        kprintf("      I/O             reads %llu, writes %llu, cache hits %llu / misses %llu\n",
+                (unsigned long long)d->reads, (unsigned long long)d->writes,
+                (unsigned long long)d->cache_hits, (unsigned long long)d->cache_misses);
+    } else {
+        kprintf("      I/O             reads %llu, writes %llu (cached through /dev/%s)\n",
+                (unsigned long long)d->reads, (unsigned long long)d->writes, d->parent->name);
+    }
+    if (m) {
+        struct vfs_statfs sf;
+        if (vfs_statfs(m->path, &sf) == 0 && sf.total_blocks) {
+            uint64_t total = sf.total_blocks * sf.block_size / 1024, freeb = sf.free_blocks * sf.block_size / 1024;
+            kprintf("      space           %llu KiB total, %llu KiB used, %llu KiB free (%llu%% used)%s\n",
+                    (unsigned long long)total, (unsigned long long)(total - freeb), (unsigned long long)freeb,
+                    (unsigned long long)(total ? (total - freeb) * 100 / total : 0), sf.read_only ? ", read-only" : "");
+        }
+        if (m->fs->info) {
+            m->fs->info(m->root);
+        }
+    }
+}
+
+/* ধাপ ১১খ: ডিস্ক, partition আর তাদের ফাইলসিস্টেমের বিস্তারিত */
+static void cmd_disks(void)
+{
+    size_t i, k;
     if (block_device_count() == 0) {
         kprintf("no disks\n");
         return;
     }
     for (i = 0; i < block_device_count(); i++) {
-        const struct block_device *d = block_device_at(i);
-        kprintf("  /dev/%-4s %8llu MiB  %llu x %u B  \"%s\"\n", d->name,
-                (unsigned long long)(d->sector_count * d->sector_size / (1024 * 1024)),
-                (unsigned long long)d->sector_count, (unsigned)d->sector_size, d->model);
-        kprintf("             reads %llu, writes %llu, cache hits %llu / misses %llu\n",
-                (unsigned long long)d->reads, (unsigned long long)d->writes,
-                (unsigned long long)d->cache_hits, (unsigned long long)d->cache_misses);
+        struct block_device *d = block_device_at(i);
+        if (d->parent) {
+            continue;
+        }
+        disk_line(d);
+        for (k = 0; k < block_device_count(); k++) {
+            struct block_device *p = block_device_at(k);
+            if (p->parent == d) {
+                disk_line(p);
+            }
+        }
     }
+    kprintf("  (df: space of every mount, mount: the mount table)\n");
 }
 
 static void cmd_df(void)
@@ -777,7 +838,8 @@ static void cmd_help(void)
             "  write <f> <t>  write text to a file (append <f> <t> adds)\n"
             "  rm <file>, rmdir <dir>, stat <path>, tree [path], mount\n"
             "  lspci          list PCI devices\n"
-            "  disks          list disks (/dev/sdX)\n"
+            "  disks          disks, partitions and file system details\n"
+            "  shm            shared memory objects (shm_open, MAP_SHARED)\n"
             "  df             file system space\n"
             "  sync           flush disk write caches\n"
             "  date           current date and time (UTC)\n"
@@ -927,6 +989,8 @@ static void run_command(int argc, char **argv)
         cmd_lspci();
     } else if (!strcmp(cmd, "disks")) {
         cmd_disks();
+    } else if (!strcmp(cmd, "shm")) {
+        shm_dump();                              /* ধাপ ১৩ */
     } else if (!strcmp(cmd, "df")) {
         cmd_df();
     } else if (!strcmp(cmd, "sync")) {

@@ -40,8 +40,17 @@ enum vnode_type {
     VNODE_FILE = 1,
     VNODE_DIR  = 2,
     VNODE_CHARDEV = 3,
-    VNODE_SOCKET = 4             /* ধাপ ৯: নেটওয়ার্ক socket (kernel/net/socket.c) */
+    VNODE_SOCKET = 4,            /* ধাপ ৯: নেটওয়ার্ক socket (kernel/net/socket.c) */
+    VNODE_FIFO = 5               /* ধাপ ১৩: pipe-এর এক মুখ (kernel/fs/pipe.c) */
 };
+
+/* ধাপ ১৩: poll()-এর ঘটনা — Linux-এর একই মান */
+#define VFS_POLLIN   0x0001      /* পড়ার মতো কিছু আছে (বা শেষ/EOF) */
+#define VFS_POLLPRI  0x0002
+#define VFS_POLLOUT  0x0004      /* আটকে না গিয়ে লেখা যাবে */
+#define VFS_POLLERR  0x0008
+#define VFS_POLLHUP  0x0010      /* অন্য মুখ বন্ধ */
+#define VFS_POLLNVAL 0x0020      /* fd খোলা নেই */
 
 struct vnode;
 struct vfs_dirent;
@@ -58,6 +67,9 @@ struct vnode_ops {
     int     (*readdir)(struct vnode *dir, uint64_t index, struct vfs_dirent *out);
     /* refcount শূন্য হলে (এবং ডিরেক্টরি থেকে সরানো থাকলে) মেমোরি ফেরত */
     void    (*release)(struct vnode *vn);
+    /* ধাপ ১৩ (ঐচ্ছিক): এখনই কোন ঘটনা তৈরি (VFS_POLL*), আটকে থাকে না; NULL হলে
+     * সাধারণ ফাইলের মতো সবসময় পড়া/লেখা যায় ধরা হয় */
+    int     (*poll)(struct vnode *vn, int events);
 };
 
 struct mount;
@@ -112,6 +124,8 @@ struct filesystem {
     int (*mount)(const void *arg, struct vnode **root);
     /* ঐচ্ছিক (ধাপ ৫): জায়গার হিসাব; NULL হলে শূন্য দেখায় */
     int (*statfs)(struct vnode *root, struct vfs_statfs *out);
+    /* ঐচ্ছিক (ধাপ ১১খ): kmon-এর `disks`-এর জন্য বিস্তারিত বিবরণ kprintf দিয়ে */
+    void (*info)(struct vnode *root);
 };
 
 struct mount {
@@ -156,6 +170,14 @@ uint64_t vfs_lock_contended(void);
 int  vfs_install_vnode(struct vnode *vn, int flags);
 /* fd-এর vnode (ref বাড়িয়ে; শেষে vnode_unref) — না থাকলে NULL */
 struct vnode *vfs_fd_vnode(int fd);
+/* ধাপ ১৩: fd-এর খোলার ফ্ল্যাগ (O_ACCMODE ইত্যাদি) — না থাকলে -EBADF */
+int  vfs_fd_flags(int fd);
+/* ধাপ ১৩: pipe — fds[0] পড়ার মুখ, fds[1] লেখার মুখ (kernel/fs/pipe.c) */
+int  vfs_pipe(int fds[2]);
+/* ধাপ ১৩: fd-এ এখন কোন ঘটনা তৈরি (VFS_POLL*); খোলা না থাকলে VFS_POLLNVAL */
+int  vfs_poll_fd(int fd, int events);
+/* ধাপ ১৩: খোলা fd-এর মাপ বদলানো (ftruncate) */
+int  vfs_ftruncate(int fd, uint64_t size);
 
 /* ---------- পাথ অপারেশন ---------- */
 int vfs_stat(const char *path, struct vfs_stat *st);

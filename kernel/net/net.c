@@ -15,6 +15,7 @@
 #include <rozos/string.h>
 #include <rozos/printf.h>
 #include <arch/x86_64/cpu.h>
+#include <rozos/random.h>
 
 #include "lwip/init.h"
 #include "lwip/netif.h"
@@ -165,6 +166,7 @@ static int netd(void *arg)
                 int budget = 64;
                 while (budget-- > 0 && (len = n->dev->poll(n->dev, rx_frame, sizeof(rx_frame))) > 0) {
                     struct pbuf *p = pbuf_alloc(PBUF_RAW, (u16_t)len, PBUF_POOL);
+                    random_add_entropy(cpu_rdtsc() ^ ((uint64_t)len << 48));
                     if (!p) {
                         n->dev->rx_dropped++;
                         continue;

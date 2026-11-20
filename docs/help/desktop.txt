@@ -1,0 +1,35 @@
+# The desktop (phase 14)
+rozOS starts in the desktop (use `make run` to see the QEMU window):
+  top panel     rozOS, the name of the front window, date and time
+  icons         Terminal, Calculator, Paint, Images, Help - double-click
+  taskbar       Start, then one button per window (click = front,
+                click again = minimise)
+  Start menu    the programs of /usr/share/apps by category, then
+                Terminal, Text mode, Restart, Shut down
+Text programs from the menu open in a [[rozterm|terminal window]],
+graphics programs in their own window ([[graphics]]).
+
+== Windows ==
+Drag the title bar to move, drag the bottom-right corner to resize,
+double-click the title for full size. [_] minimises (the taskbar
+button brings it back), [□] full size / back, [X] closes - a program
+that does not close in 3 seconds is stopped.
+
+== Text mode and back ==
+  `textmode`       (in a terminal) close the desktop, text console
+  Start > Text mode   the same
+  `desktop`        (in the text console) start the desktop again
+  `textmode -r` / `textmode -p`   restart / switch off
+Boot menu entry "rozOS factory (text mode, no desktop)" starts without
+it once; for always: `mode=text` in /etc/rozos.conf ([[boot-menu]]).
+
+== /etc/rozos.conf ==
+  mode=desktop        or text
+  utc_offset=+06:00   the clock's time zone (Dhaka); +00:00 = UTC
+  wallpaper=          a picture: /usr/share/images/x.jpg (.jpg .png .bmp)
+
+== The serial line ==
+While the desktop runs, the keyboard belongs to it; the serial line
+(`make run-serial`, or the terminal next to the QEMU window) gets its
+own shell. [[kmon]] needs the text console - not a terminal window.
+More: [[rozwm]], [[rozterm]], [[signals]], [[rozui]].

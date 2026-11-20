@@ -1,0 +1,6 @@
+# imgview - picture viewer
+  `imgview`              the pictures in /usr/share/images
+  `imgview a.bmp b.ppm`  these files
+Left/right (or Space) = previous/next, + - zoom (or the wheel), 0 = fit,
+q quits. Reads .bmp, .ppm, .jpg, .png, .gif and .tga.
+Source: /usr/src/gfx/imgview.c. See [[graphics]].

@@ -1,0 +1,34 @@
+# rozhttp - http/https in your C programs
+A small library (/usr/lib/librozhttp.a, header `rozhttp.h`) that
+[[http-get]] and [[rozpkg]] are built on. With [[tls|BearSSL]] it does
+https; it follows redirects and understands chunked answers.
+
+== Example ==
+  #include <stdio.h>
+  #include <rozhttp.h>
+  int main(int argc, char **argv) {
+      struct rozhttp_result r;
+      if (rozhttp_get(argv[1], 1, NULL, &r) < 0) {
+          printf("error: %s\n", r.error);
+          return 1;
+      }
+      printf("\nHTTP %d, %ld bytes\n", r.status, r.bytes);
+      return 0;
+  }
+Build: `tcc get.c -lrozhttp -lbearssl -o get`, run: `./get https://example.com/`
+
+== Functions ==
+  `rozhttp_get(url, fd, opts, &r)`  body to fd (-1 = none); 0 if 2xx
+  `rozhttp_tls_available()`         1 if built with BearSSL
+  `rozhttp_trust_anchor_count()`    how many CAs certs.pem gave
+  `rozhttp_sha256_init/update/hex`  SHA-256 as 64 hex characters
+
+== Options (struct rozhttp_opts, NULL = defaults) ==
+  header_fd      where response headers go (-1 = nowhere)
+  no_body        1 = stop after the headers
+  max_redirects  0 means 5;  no_follow = 1 returns the 30x itself
+  progress       KiB counter on stderr;  verbose = connect steps
+  on_data, on_data_ctx   called with every piece of the body
+The result has status, bytes, content_length, redirects, tls,
+final_url and error (a readable reason when it fails).
+See also [[sockets]] for plain TCP.

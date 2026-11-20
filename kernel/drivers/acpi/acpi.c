@@ -10,6 +10,7 @@
 #include <rozos/bootinfo.h>
 #include <rozos/vmm.h>
 #include <rozos/string.h>
+#include <arch/x86_64/io.h>
 
 #define ACPI_MAX_TABLES 64
 
@@ -130,4 +131,64 @@ const struct acpi_sdt_header *acpi_find_table(const char *signature, size_t n)
         }
     }
     return NULL;
+}
+
+/* ---------- ধাপ ১১খ: ACPI দিয়ে বিদ্যুৎ বন্ধ (S5) ----------
+ * FADT ("FACP") থেকে PM1a/PM1b control register; DSDT-র AML-এ "_S5_" প্যাকেজ খুঁজে
+ * SLP_TYP মান (পুরো AML interpreter ছাড়া প্রচলিত সরল পদ্ধতি)। তারপর
+ * SLP_TYP << 10 | SLP_EN (bit 13) লেখা। ACPI mode বন্ধ থাকলে SMI_CMD দিয়ে চালু। */
+
+static int s5_value(const uint8_t *p, const uint8_t *end, uint16_t *out)
+{
+    if (p >= end) return -1;
+    if (*p == 0x0A && p + 1 < end) { *out = p[1]; return 2; }   /* BytePrefix */
+    if (*p == 0x00) { *out = 0; return 1; }                     /* ZeroOp */
+    if (*p == 0x01) { *out = 1; return 1; }                     /* OneOp */
+    return -1;
+}
+
+int acpi_poweroff(void)
+{
+    const uint8_t *fadt = (const uint8_t *)acpi_find_table("FACP", 0);
+    const struct acpi_sdt_header *dsdt;
+    const uint8_t *p, *end;
+    uint32_t pm1a, pm1b, smi_cmd, dsdt_phys;
+    uint8_t acpi_enable;
+    uint16_t typa = 0, typb = 0;
+    int found = 0, i;
+
+    if (!fadt || ((const struct acpi_sdt_header *)fadt)->length < 76) return -1;
+    dsdt_phys = *(const uint32_t *)(fadt + 40);
+    smi_cmd = *(const uint32_t *)(fadt + 48);
+    acpi_enable = fadt[52];
+    pm1a = *(const uint32_t *)(fadt + 64);
+    pm1b = *(const uint32_t *)(fadt + 68);
+    if (!pm1a) return -1;
+    dsdt = map_table(dsdt_phys);
+    if (dsdt) {
+        p = (const uint8_t *)dsdt + sizeof(*dsdt);
+        end = (const uint8_t *)dsdt + dsdt->length;
+        for (; p + 8 < end; p++) {
+            if (p[0] == '_' && p[1] == 'S' && p[2] == '5' && p[3] == '_' &&
+                (p[-1] == 0x08 || (p[-2] == 0x08 && p[-1] == '\\')) && p[4] == 0x12) {
+                const uint8_t *q = p + 5;
+                int n;
+                q += ((*q & 0xC0) >> 6) + 1;                     /* PkgLength */
+                q++;                                             /* NumElements */
+                n = s5_value(q, end, &typa);
+                if (n > 0 && s5_value(q + n, end, &typb) > 0) found = 1;
+                break;
+            }
+        }
+    }
+    if (!found) {
+        typa = typb = 0;                                         /* QEMU q35/piix-এ S5 = 0 */
+    }
+    if (smi_cmd && acpi_enable && !(inw((uint16_t)pm1a) & 1)) {
+        outb((uint16_t)smi_cmd, acpi_enable);
+        for (i = 0; i < 300 && !(inw((uint16_t)pm1a) & 1); i++) io_wait();
+    }
+    outw((uint16_t)pm1a, (uint16_t)((typa << 10) | (1 << 13)));
+    if (pm1b) outw((uint16_t)pm1b, (uint16_t)((typb << 10) | (1 << 13)));
+    return -1;                                                   /* এখানে এলে কাজ হয়নি */
 }

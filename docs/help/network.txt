@@ -7,7 +7,8 @@ rozOS talks TCP/IP through an Intel e1000/e1000e network card.
                 ICMP (ping), UDP, TCP, DHCP, DNS
   sockets       kernel/net/socket.c - turns lwIP into file descriptors
   rozlibc       socket(), connect(), send() ... ([[sockets]])
-  programs      [[ifconfig]], [[ping]], [[nslookup]], [[http-get]]
+  TLS           BearSSL in userland ([[tls]], [[rozhttp]])
+  programs      [[ifconfig]], [[ping]], [[nslookup]], [[http-get]], [[rozpkg]]
 A kernel thread "netd" checks the card every millisecond and runs
 lwIP's timers (see it with `kmon` then `ps`).
 
@@ -23,4 +24,6 @@ The DNS server is written to /etc/resolv.conf; fixed names are in
   `ping -c 3 10.0.2.2`       is the PC answering?
   `ping google.com`          name lookup + internet
   `http-get http://example.com/`   fetch a web page
-HTTPS (TLS) is phase 10; there is no firewall and no IPv6 yet.
+  `http-get -h https://example.com/`   the same over TLS
+  `rozpkg update`            the package list ([[rozpkg]])
+There is no firewall and no IPv6 yet.

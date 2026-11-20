@@ -1,8 +1,11 @@
 # stty - console size
   `stty`           show rows and columns
-  `stty 30 120`    set rows and columns
+  `stty detect`    ask the terminal for its size and use it
+  `stty 30 120`    set rows and columns by hand
   `stty auto`      back to the screen size (142x50 on the framebuffer)
-Full-screen programs ([[edit]], [[help]]) ask the kernel for this size
-(ioctl TIOCGWINSZ). When you use the serial terminal on the PC its size
-is different: find it there with `stty size` and set it here.
+Full-screen programs ([[edit]], [[help]], [[menu]]) find the size by
+themselves: they ask the serial terminal on the PC (it answers with
+its size, like `stty size` there). With both the QEMU window and the
+terminal, the smaller size is used so it fits in both.
+A size set by hand stays until `stty auto` or `stty detect`.
 Back to [[programs]] or [[qemu]].

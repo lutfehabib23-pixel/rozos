@@ -9,11 +9,14 @@
 #include <rozos/vfs.h>
 #include <rozos/errno.h>
 #include <rozos/sched.h>
+#include <rozos/random.h>
 #include <rozos/string.h>
 #include <rozos/console.h>
 #include <rozos/serial.h>
 #include <rozos/keyboard.h>
 #include <rozos/timer.h>
+#include <rozos/mouse.h>
+#include <rozos/ttyctl.h>
 #include <arch/x86_64/cpu.h>
 
 struct devfs_device {
@@ -21,6 +24,7 @@ struct devfs_device {
     char name[32];
     devfs_read_fn read;
     devfs_write_fn write;
+    devfs_poll_fn poll;          /* ধাপ ১৩ */
     void *ctx;
 };
 
@@ -43,6 +47,13 @@ static int64_t dev_write(struct vnode *vn, uint64_t off, const void *buf, size_t
 {
     struct devfs_device *d = (struct devfs_device *)vn;
     return d->write ? d->write(d->ctx, off, buf, len) : -EINVAL;
+}
+
+/* ধাপ ১৩ */
+static int dev_poll(struct vnode *vn, int events)
+{
+    struct devfs_device *d = (struct devfs_device *)vn;
+    return d->poll ? d->poll(d->ctx, events) : (VFS_POLLIN | VFS_POLLOUT);
 }
 
 static int root_lookup(struct vnode *dir, const char *name, struct vnode **out)
@@ -74,12 +85,12 @@ static int root_readdir(struct vnode *dir, uint64_t index, struct vfs_dirent *ou
 }
 
 static const struct vnode_ops dev_ops = {
-    dev_read, dev_write, NULL, NULL, NULL, NULL, NULL, NULL
+    dev_read, dev_write, NULL, NULL, NULL, NULL, NULL, NULL, dev_poll
 };
 
 /* create/unlink নেই — devfs-এ ফাইল বানানো বা মোছা যায় না */
 static const struct vnode_ops root_ops = {
-    NULL, NULL, NULL, root_lookup, NULL, NULL, root_readdir, NULL
+    NULL, NULL, NULL, root_lookup, NULL, NULL, root_readdir, NULL, NULL
 };
 
 int devfs_register(const char *name, devfs_read_fn read, devfs_write_fn write, void *ctx)
@@ -109,6 +120,27 @@ int devfs_register(const char *name, devfs_read_fn read, devfs_write_fn write, v
     return 0;
 }
 
+int devfs_set_poll(const char *name, devfs_poll_fn poll)
+{
+    size_t i;
+    for (i = 0; i < device_count; i++) {
+        if (!strcmp(devices[i].name, name)) {
+            devices[i].poll = poll;
+            return 0;
+        }
+    }
+    return -ENOENT;
+}
+
+const char *devfs_vnode_name(struct vnode *vn)
+{
+    size_t i;
+    for (i = 0; i < device_count; i++) {
+        if (&devices[i].vn == vn) return devices[i].name;
+    }
+    return NULL;
+}
+
 static int devfs_mount(const void *arg, struct vnode **out)
 {
     (void)arg;
@@ -129,7 +161,7 @@ static int devfs_statfs(struct vnode *r, struct vfs_statfs *out)
     return 0;
 }
 
-const struct filesystem devfs_filesystem = { "devfs", devfs_mount, devfs_statfs };
+const struct filesystem devfs_filesystem = { "devfs", devfs_mount, devfs_statfs, NULL };
 
 /* ---------- ডিফল্ট ডিভাইস ---------- */
 
@@ -152,6 +184,49 @@ static int64_t zero_read(void *ctx, uint64_t off, void *buf, size_t len)
     return (int64_t)len;
 }
 
+/* ধাপ ১২: মাপ খোঁজার সময় serial-এ আসা অন্য বাইট (ব্যবহারকারীর কী) এখানে জমে থাকে */
+static char serial_back[64];
+static size_t serial_back_len, serial_back_pos;
+
+/* ---------- ধাপ ১৪: কনসোলের Ctrl+C → foreground গ্রুপে SIGINT ---------- */
+static struct ttyctl console_tc;
+static struct ttyctl serial_tc;               /* /dev/serial0-এর shell (ডেস্কটপ মোডে) */
+static volatile int serial_querying;          /* console_query_size নিজে serial পড়ছে */
+
+struct ttyctl *console_ttyctl(void) { return &console_tc; }
+struct ttyctl *serial_ttyctl(void) { return &serial_tc; }
+
+static int kbd_intr(void)
+{
+    return ttyctl_input(&console_tc, 3);
+}
+
+/* প্রতি টিকে: serial-এ আসা বাইট serial_back-এ তুলে রাখা (হারায় না), Ctrl+C দেখা —
+ * যাতে CPU-খেকো প্রোগ্রামকেও (যে stdin পড়ে না) serial থেকে থামানো যায় */
+static void console_tick(uint64_t t)
+{
+    (void)t;
+    if (serial_querying || !serial_is_ready()) return;
+    while (serial_back_len < sizeof(serial_back)) {
+        char c;
+        if (!serial_try_getc(&c)) break;
+        /* serial0-তে কোনো shell থাকলে (ডেস্কটপ মোড) সেটাই serial-এর টার্মিনাল */
+        if (c == 3 && ttyctl_input(serial_tc.fg_pgid > 0 ? &serial_tc : &console_tc, 3)) continue;
+        if (serial_back_pos == serial_back_len) serial_back_pos = serial_back_len = 0;
+        serial_back[serial_back_len++] = c;
+    }
+}
+
+static int serial_next(char *c)
+{
+    if (serial_back_pos < serial_back_len) {
+        *c = serial_back[serial_back_pos++];
+        if (serial_back_pos == serial_back_len) serial_back_pos = serial_back_len = 0;
+        return 1;
+    }
+    return serial_try_getc(c);
+}
+
 /* কিবোর্ড বা serial থেকে একটা কী — না থাকলে 0 */
 static int try_any_key(int *key)
 {
@@ -159,7 +234,7 @@ static int try_any_key(int *key)
     if (keyboard_try_getkey(key)) {
         return 1;
     }
-    if (serial_try_getc(&c)) {
+    if (serial_next(&c)) {
         *key = (c == '\r') ? '\n' : (c == 0x7F) ? '\b' : (unsigned char)c;
         return 1;
     }
@@ -185,9 +260,156 @@ static const char *key_sequence(int key)
     }
 }
 
-/* আগের read-এ জায়গা না পাওয়া sequence-এর বাকি অংশ */
-static char pending_seq[8];
+/* ধাপ ১২: Shift/Ctrl/Alt সহ বিশেষ কী — xterm-এর মতো ESC[1;<m>A বা ESC[3;<m>~
+ * (m = 1 + Shift 1 + Alt 2 + Ctrl 4); modifier না থাকলে আগের সাধারণ রূপ */
+static int key_sequence_mod(int key, char *out, size_t size)
+{
+    const char *base = key_sequence(key);
+    uint8_t mods = keyboard_modifiers();
+    int m = 1 + ((mods & KEYMOD_SHIFT) ? 1 : 0) + ((mods & KEYMOD_ALT) ? 2 : 0) + ((mods & KEYMOD_CTRL) ? 4 : 0);
+    size_t n;
+    if (!base) return 0;
+    n = strlen(base);
+    if (m == 1 || n < 3 || n + 4 >= size) {
+        memcpy(out, base, n);
+        return (int)n;
+    }
+    if (base[n - 1] == '~') {                    /* ESC[3~ → ESC[3;5~ */
+        memcpy(out, base, n - 1);
+        out[n - 1] = ';';
+        out[n] = (char)('0' + m);
+        out[n + 1] = '~';
+        return (int)n + 2;
+    }
+    /* ESC[A → ESC[1;5A */
+    out[0] = 0x1B; out[1] = '['; out[2] = '1'; out[3] = ';'; out[4] = (char)('0' + m);
+    out[5] = base[n - 1];
+    return 6;
+}
+
+/* আগের read-এ জায়গা না পাওয়া sequence-এর বাকি অংশ (ধাপ ১২: মাউসের জন্য বড়) */
+static char pending_seq[128];
 static size_t pending_len, pending_pos;
+
+static void pending_add(const char *s, size_t n)
+{
+    if (pending_pos == pending_len) pending_pos = pending_len = 0;
+    if (pending_len + n > sizeof(pending_seq)) return;          /* ভরা — বাদ */
+    memcpy(pending_seq + pending_len, s, n);
+    pending_len += n;
+}
+
+/* ---------- ধাপ ১২: PS/2 মাউস → মাউস-কার্সর আর xterm SGR ঘটনা ---------- */
+
+static uint8_t mouse_last_buttons;
+
+static size_t put_num(char *p, uint32_t v)
+{
+    char tmp[12];
+    size_t n = 0, i;
+    do { tmp[n++] = (char)('0' + v % 10); v /= 10; } while (v);
+    for (i = 0; i < n; i++) p[i] = tmp[n - 1 - i];
+    return n;
+}
+
+static void sgr_event(uint32_t b, uint32_t col, uint32_t row, int release)
+{
+    char buf[32];
+    size_t n = 0;
+    buf[n++] = 0x1B; buf[n++] = '['; buf[n++] = '<';
+    n += put_num(buf + n, b);
+    buf[n++] = ';';
+    n += put_num(buf + n, col + 1);
+    buf[n++] = ';';
+    n += put_num(buf + n, row + 1);
+    buf[n++] = release ? 'm' : 'M';
+    pending_add(buf, n);
+}
+
+static void process_mouse(void)
+{
+    struct mouse_event e;
+    uint64_t w = fb_is_ready() ? fb_width() : 0, h = fb_is_ready() ? fb_height() : 0;
+    while (mouse_poll_event(0, &e)) {
+        uint32_t col, row;
+        int mode = tty_mouse_mode();
+        uint8_t changed = (uint8_t)(e.buttons ^ mouse_last_buttons);
+        static const uint8_t bit[3] = { MOUSE_BUTTON_LEFT, MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_RIGHT };
+        int i;
+        if (!w || !h || !tty_cols() || !tty_rows()) continue;
+        col = (uint32_t)((uint64_t)e.x * tty_cols() / w);
+        row = (uint32_t)((uint64_t)e.y * tty_rows() / h);
+        tty_mouse_pointer(1, col, row);
+        if (mode & (TTY_MOUSE_CLICKS | TTY_MOUSE_DRAG | TTY_MOUSE_MOTION)) {
+            for (i = 0; i < 3; i++) {                   /* xterm: 0 বাম, 1 মাঝ, 2 ডান */
+                if (changed & bit[i]) sgr_event((uint32_t)i, col, row, !(e.buttons & bit[i]));
+            }
+            if (!changed && (e.dx || e.dy)) {
+                if (e.buttons && (mode & (TTY_MOUSE_DRAG | TTY_MOUSE_MOTION))) {
+                    uint32_t b = (e.buttons & MOUSE_BUTTON_LEFT) ? 0 : (e.buttons & MOUSE_BUTTON_MIDDLE) ? 1 : 2;
+                    sgr_event(32 + b, col, row, 0);      /* টেনে নেওয়া */
+                } else if (!e.buttons && (mode & TTY_MOUSE_MOTION)) {
+                    sgr_event(35, col, row, 0);
+                }
+            }
+            if (e.wheel) sgr_event(e.wheel < 0 ? 64 : 65, col, row, 0);
+        }
+        mouse_last_buttons = e.buttons;
+    }
+}
+
+/* ---------- ধাপ ১২: serial টার্মিনালের মাপ জিজ্ঞেস করা ----------
+ * কার্সর অনেক দূরে (ডানে-নিচে) পাঠিয়ে "কার্সর কোথায়?" (ESC[6n) — টার্মিনাল উত্তর দেয়
+ * ESC[<row>;<col>R, যা তার মাপ। শুধু serial-এ লেখা হয় (স্ক্রিনের গ্রিডে নয়)। উত্তরের
+ * আগে আসা অন্য বাইট serial_back-এ জমে থাকে, হারায় না। ফেরত 0 = পাওয়া গেছে। */
+int console_query_size(uint32_t *rows, uint32_t *cols)
+{
+    static const char q[] = "\0337\033[999;999H\033[6n\0338";
+    char buf[32];
+    size_t n = 0, i;
+    uint64_t end;
+    if (!serial_is_ready()) {
+        return -1;
+    }
+    serial_querying = 1;                          /* ধাপ ১৪: টিক এখন serial পড়বে না */
+    serial_write(q, sizeof(q) - 1);
+    end = timer_uptime_ms() + 300;
+    while (timer_uptime_ms() < end) {
+        char c;
+        if (!serial_try_getc(&c)) {
+            sched_relax();
+            continue;
+        }
+        if (n == 0 && c != 0x1B) {                   /* উত্তরের আগের ব্যবহারকারীর কী */
+            if (serial_back_len < sizeof(serial_back)) serial_back[serial_back_len++] = c;
+            continue;
+        }
+        if (n < sizeof(buf) - 1) buf[n++] = c;
+        if (c == 'R') {
+            uint32_t r = 0, cc = 0, *p = &r;
+            if (n < 6 || buf[1] != '[') break;
+            for (i = 2; i < n - 1; i++) {
+                if (buf[i] == ';') { p = &cc; continue; }
+                if (buf[i] < '0' || buf[i] > '9') { r = 0; break; }
+                *p = *p * 10 + (uint32_t)(buf[i] - '0');
+            }
+            if (r >= 5 && cc >= 20 && r < 1000 && cc < 1000) {
+                *rows = r;
+                *cols = cc;
+                serial_querying = 0;
+                return 0;
+            }
+            break;
+        }
+        if (n > 1 && buf[1] != '[') {                /* ESC কিন্তু উত্তর নয় — ফেরত রাখা */
+            for (i = 0; i < n && serial_back_len < sizeof(serial_back); i++) serial_back[serial_back_len++] = buf[i];
+            n = 0;
+        }
+    }
+    for (i = 0; i < n && serial_back_len < sizeof(serial_back); i++) serial_back[serial_back_len++] = buf[i];
+    serial_querying = 0;
+    return -1;
+}
 
 /* অন্তত একটা অক্ষর না আসা পর্যন্ত অপেক্ষা, তারপর যা জমে আছে তা */
 static int64_t console_read(void *ctx, uint64_t off, void *buf, size_t len)
@@ -202,6 +424,7 @@ static int64_t console_read(void *ctx, uint64_t off, void *buf, size_t len)
     }
     while (n == 0) {
         cpu_cli();
+        process_mouse();                          /* ধাপ ১২ */
         while (n < len && pending_pos < pending_len) {
             out[n++] = pending_seq[pending_pos++];
         }
@@ -209,11 +432,10 @@ static int64_t console_read(void *ctx, uint64_t off, void *buf, size_t len)
             if (key < 0x100) {
                 out[n++] = (char)key;
             } else {
-                const char *seq = key_sequence(key);
-                if (seq) {
-                    pending_len = strlen(seq);
-                    memcpy(pending_seq, seq, pending_len);
-                    pending_pos = 0;
+                char seq[16];
+                int sl = key_sequence_mod(key, seq, sizeof(seq));
+                if (sl > 0) {
+                    pending_add(seq, (size_t)sl);
                     while (n < len && pending_pos < pending_len) {
                         out[n++] = pending_seq[pending_pos++];
                     }
@@ -231,6 +453,48 @@ static int64_t console_read(void *ctx, uint64_t off, void *buf, size_t len)
         }
     }
     return (int64_t)n;
+}
+
+/* ধাপ ১৩: poll — কী/মাউস-ঘটনা থাকলে সেটা pending-এ তুলে রাখা (হারায় না; পরের
+ * read সেখান থেকেই দেয়), তারপর pending খালি কিনা দেখা */
+static int console_poll(void *ctx, int events)
+{
+    int key, r = VFS_POLLOUT;
+    uint64_t flags;
+    (void)ctx; (void)events;
+    flags = cpu_irq_save();
+    process_mouse();
+    if (pending_pos >= pending_len && try_any_key(&key)) {
+        if (key < 0x100) {
+            char ch = (char)key;
+            pending_add(&ch, 1);
+        } else {
+            char seq[16];
+            int sl = key_sequence_mod(key, seq, sizeof(seq));
+            if (sl > 0) pending_add(seq, (size_t)sl);
+        }
+    }
+    if (pending_pos < pending_len) r |= VFS_POLLIN;
+    cpu_irq_restore(flags);
+    return r;
+}
+
+static int kbd_poll(void *ctx, int events)
+{
+    (void)ctx; (void)events;
+    return keyboard_has_key() ? VFS_POLLIN : 0;
+}
+
+static int mouse_dev_poll(void *ctx, int events)
+{
+    (void)ctx; (void)events;
+    return mouse_event_pending(1) ? VFS_POLLIN : 0;
+}
+
+static int serial_dev_poll(void *ctx, int events)
+{
+    (void)ctx; (void)events;
+    return VFS_POLLOUT | ((serial_back_pos < serial_back_len || serial_rx_ready()) ? VFS_POLLIN : 0);
 }
 
 static int64_t console_write(void *ctx, uint64_t off, const void *buf, size_t len)
@@ -251,9 +515,11 @@ static int64_t serial_dev_read(void *ctx, uint64_t off, void *buf, size_t len)
         return 0;
     }
     while (n == 0) {
-        while (n < len && serial_try_getc(&c)) {
+        uint64_t fl = cpu_irq_save();             /* টিকের সাথে serial_back ভাগ */
+        while (n < len && serial_next(&c)) {      /* ধাপ ১৪: টিকে জমা বাইটও */
             out[n++] = c;
         }
+        cpu_irq_restore(fl);
         if (n == 0) {
             if (sched_should_abort()) {
                 return -EINTR;
@@ -271,7 +537,53 @@ static int64_t serial_dev_write(void *ctx, uint64_t off, const void *buf, size_t
     return (int64_t)len;
 }
 
+/* ধাপ ১০: /dev/random, /dev/urandom — দুটোই কখনো আটকায় না (ChaCha20 CSPRNG);
+ * লিখলে সেই বাইটগুলো entropy হিসেবে মেশে */
+static int64_t urandom_read(void *ctx, uint64_t off, void *buf, size_t len)
+{
+    (void)ctx; (void)off;
+    random_get(buf, len);
+    return (int64_t)len;
+}
+
+static int64_t urandom_write(void *ctx, uint64_t off, const void *buf, size_t len)
+{
+    const uint8_t *p = (const uint8_t *)buf;
+    size_t i;
+    (void)ctx; (void)off;
+    for (i = 0; i + 8 <= len; i += 8) {
+        uint64_t v;
+        memcpy(&v, p + i, 8);
+        random_add_entropy(v);
+    }
+    return (int64_t)len;
+}
+
 /* /dev/kbd: প্রতিটি কী int32 হিসেবে (ASCII বা KEY_*); len অন্তত 4 হতে হবে */
+/* ধাপ ১২: /dev/mouse — struct mouse_event (rozos/mouse.h, ২০ বাইট) এর তালিকা;
+ * অন্তত একটা ঘটনা না আসা পর্যন্ত অপেক্ষা (গ্রাফিক্স প্রোগ্রামের জন্য, ধাপ ১৩) */
+static int64_t mouse_dev_read(void *ctx, uint64_t off, void *buf, size_t len)
+{
+    struct mouse_event *out = (struct mouse_event *)buf;
+    size_t n = 0, max = len / sizeof(struct mouse_event);
+    (void)ctx; (void)off;
+    if (max == 0) {
+        return -EINVAL;
+    }
+    while (n == 0) {
+        while (n < max && mouse_poll_event(1, &out[n])) {
+            n++;
+        }
+        if (n == 0) {
+            if (sched_should_abort()) {
+                return -EINTR;
+            }
+            sched_relax();
+        }
+    }
+    return (int64_t)(n * sizeof(struct mouse_event));
+}
+
 static int64_t kbd_read(void *ctx, uint64_t off, void *buf, size_t len)
 {
     int32_t *out = (int32_t *)buf;
@@ -285,6 +597,8 @@ static int64_t kbd_read(void *ctx, uint64_t off, void *buf, size_t len)
     while (n == 0) {
         cpu_cli();
         while (n < max && keyboard_try_getkey(&key)) {
+            /* ধাপ ১৪: বিশেষ কী-র সাথে modifier: বিট 16-18 = Shift/Ctrl/Alt (KEYMOD_*) */
+            if (key >= 0x100) key |= (int)(keyboard_modifiers() & 7) << 16;
             out[n++] = key;
         }
         if (n == 0) {
@@ -320,5 +634,18 @@ int devfs_init(void)
     devfs_register("console", console_read, console_write, NULL);
     devfs_register("serial0", serial_dev_read, serial_dev_write, NULL);
     devfs_register("kbd", kbd_read, NULL, NULL);
+    devfs_register("mouse", mouse_dev_read, NULL, NULL);    /* ধাপ ১২ */
+    devfs_register("random", urandom_read, urandom_write, NULL);
+    devfs_register("urandom", urandom_read, urandom_write, NULL);
+    /* ধাপ ১৩: poll() */
+    devfs_set_poll("console", console_poll);
+    devfs_set_poll("kbd", kbd_poll);
+    devfs_set_poll("mouse", mouse_dev_poll);
+    devfs_set_poll("serial0", serial_dev_poll);
+    /* ধাপ ১৪: Ctrl+C */
+    ttyctl_init(&console_tc);
+    ttyctl_init(&serial_tc);
+    keyboard_set_intr_hook(kbd_intr);
+    timer_add_tick_hook(console_tick);
     return vfs_register_filesystem(&devfs_filesystem);
 }

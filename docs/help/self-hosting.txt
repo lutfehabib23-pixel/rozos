@@ -10,6 +10,11 @@ and install it with `cp /tmp/tcc-new /bin/tcc` if you want.
 == Step 2: rebuild userland programs ==
 Their sources are not on the disk yet; they will be put in /usr/src.
 
-== Step 3 (phase 11): rebuild the kernel ==
-The kernel needs a linker script and a few assembler features that
-TCC's built-in assembler and linker must handle. See [[kernel]].
+== Step 3 (done, phase 11): rebuild the kernel ==
+  `cd /usr/src/rozos && make`
+builds the whole kernel with [[make]] and [[tcc]]; then `make run-self`
+on the PC boots it. Everything is explained in [[kernel-build]].
+
+== Step 4 (done, phase 11b): install and boot it ==
+`kinstall` then `reboot`: the new kernel is on the FAT boot partition
+and in the boot menu, older ones stay as a fallback ([[kinstall]]).

@@ -1,0 +1,23 @@
+# Partitions
+The disk (rozos-disk.img, 512 MiB - [[qemu|make disk-grow]] for more) uses a GPT partition table:
+  /dev/sda1  64 MiB   FAT32  "rozOS boot"  -> /boot  (kernels, menu)
+  /dev/sda2  190 MiB  ext2   "rozOS root"  -> /      (everything else)
+  /dev/sda3  1 MiB    -      "BIOS boot"   Limine's BIOS code
+rozOS reads GPT and old MBR tables; each partition is a device like
+/dev/sda2. They share the disk's cache, so /dev/sda and /dev/sda2
+always agree.
+
+== See the details ==
+  `kmon` then `disks`    every disk, partition and file system: type,
+                         label, UUID, sizes, free space, block/cluster
+                         size, inodes, mount count, times ...
+  `kmon` then `df`       space of every mounted file system
+
+== On the PC ==
+  `make disk`          a new disk (only if rozos-disk.img is missing)
+  `make disk-migrate`  turn an old disk (ext2 without partitions, up
+                       to phase 11a) into this layout; all files stay;
+                       the old image is kept as rozos-disk.img.old-ext2
+                       (disk-update does this by itself when needed)
+  `make disk-check`    check both file systems (QEMU stopped)
+Needs: sudo apt install gdisk dosfstools mtools.  See [[fat]], [[disks]].

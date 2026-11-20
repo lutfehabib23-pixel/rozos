@@ -1,0 +1,4 @@
+# gfxdemo - graphics demo
+Shapes, a colour gradient, a picture (normal and scaled), bitmap and
+TrueType text and a bouncing ball; click to move the ball. q quits.
+Source: /usr/src/gfx/gfxdemo.c. See [[graphics]], [[rozgfx]].
