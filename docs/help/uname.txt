@@ -1,0 +1,4 @@
+# uname - system name
+  `uname`      prints rozOS
+  `uname -a`   name, host name (/etc/hostname), version, machine
+Back to [[programs]].

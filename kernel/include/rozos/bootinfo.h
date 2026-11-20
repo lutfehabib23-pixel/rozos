@@ -41,6 +41,7 @@ struct bootinfo {
     uint64_t kernel_virt;
     char     cmdline[256];
     uint64_t rsdp_phys;                  /* 0 = ACPI নেই */
+    int64_t  boot_unix_time;             /* বুটের মুহূর্ত (UNIX সেকেন্ড, UTC); 0 = অজানা */
 
     uint64_t memmap_count;
     struct boot_memmap_entry memmap[BOOTINFO_MAX_MEMMAP];

@@ -1,0 +1,6 @@
+# rm - delete files
+  `rm [-r] [-f] path ...`
+  `-r`  delete directories and everything inside them
+  `-f`  no error if the file does not exist
+There is no undo and no trash. Example: `rm -r /tmp/test`
+Back to [[programs]], see also [[rmdir]].

@@ -1,0 +1,8 @@
+# Command history
+Every line you type is saved in memory (last 100) and appended to
+~/.rozsh_history, so it survives a reboot.
+
+  `Up`      previous command          `Down`   next command
+  `history` numbered list
+Lines repeated twice in a row are stored once. Delete the file
+(`rm ~/.rozsh_history`) to forget everything. See [[keys]].

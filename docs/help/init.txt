@@ -1,0 +1,7 @@
+# init - process 1
+The kernel starts /bin/init as the first ring-3 program (pid 1).
+init starts [[rozsh]] in /home and waits. When the shell exits, init
+starts a new one; if it fails three times in a row init gives up and
+the kernel hands the console to [[kmon]]. Other children that finish
+are collected by init's wait() loop.
+Boot with "rozOS (no init)" in the boot menu to skip it ([[boot]]).

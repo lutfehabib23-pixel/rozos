@@ -1,0 +1,4 @@
+# echo - print text
+  `echo [-n] text ...`   -n: no newline at the end
+The shell has a built-in echo ([[builtins]]); /bin/echo is the same
+for scripts and other programs.   Back to [[programs]].

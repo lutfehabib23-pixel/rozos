@@ -1,0 +1,17 @@
+# The rozOS kernel
+A 64-bit x86 kernel written in C99 and GNU assembler (kernel/ in the
+source). Its parts, from the bottom up:
+
+  boot      Limine loads it at 0xffffffff80000000 ([[boot]])
+  arch      GDT, IDT, interrupts, APIC timer at 1000 Hz, syscalls
+  memory    page bitmap (PMM), page tables per process (VMM), kmalloc
+  drivers   serial, framebuffer/VGA console with ANSI colours, PS/2
+            keyboard and mouse, ACPI, PCI, AHCI disks
+  fs        VFS + ext2, tmpfs, devfs, initrd ([[disks]])
+  proc      threads, scheduler, processes, ELF loader ([[processes]])
+  syscall   the system call layer ([[syscalls]])
+  kmon      the kernel monitor ([[kmon]])
+
+The kernel code does not stop in the middle for another thread unless
+it waits (sleep, disk, keyboard) - only user programs are preempted.
+That keeps the kernel simple on one CPU.

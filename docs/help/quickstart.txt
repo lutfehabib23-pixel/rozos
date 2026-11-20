@@ -1,0 +1,20 @@
+# Quick start
+After boot you are in [[rozsh]], the shell. The prompt looks like
+  root@rozos:~$
+"~" is your home directory, /home. Try these, one per line:
+
+  `ls /`                  list the top directory (see [[files]])
+  `ls -l /bin`            all programs, with sizes ([[programs]])
+  `cat /etc/motd`         print a file ([[cat]])
+  `edit notes.txt`        write something, Ctrl+S saves, Ctrl+Q quits ([[edit]])
+  `cat notes.txt`         see what you saved - it stays after a reboot
+  `tcc /src/hello.c -o hello`  compile C inside rozOS ([[tcc]])
+  `./hello`               run it
+  `echo hi > /tmp/a.txt`  redirect output to a file ([[redirect]])
+  `history`               commands you typed ([[history]])
+  `systest`               run the 36 self-tests ([[systest]])
+  `kmon`                  kernel monitor; `exit` returns ([[kmon]])
+
+Files in /tmp live in RAM and vanish at reboot; everything else is on
+the ext2 disk ([[disks]]). For the keys see [[keys]]; to leave QEMU see
+[[qemu]].

@@ -1,0 +1,3 @@
+# rozhelp - the help viewer
+`rozhelp [page]` is what the shell's `help` command starts.
+See [[help]] for the keys and the page format.

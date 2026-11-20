@@ -1,0 +1,25 @@
+# tcc - the Tiny C Compiler
+TCC (TinyCC, mob branch) runs inside rozOS and makes rozOS programs.
+
+  `tcc file.c -o prog`        compile and link a program
+  `tcc a.c b.c -o prog`       several source files
+  `tcc -c file.c`             only compile, gives file.o
+  `tcc file.o -o prog`        link object files
+  `tcc -I dir -L dir -lname`  extra include / library directories
+  `tcc -lm ...`               math (it is in libc anyway, libm.a is a stub)
+  `tcc -run file.c args`      compile in memory and run at once
+  `tcc -E file.c`             only run the preprocessor
+  `tcc -Wall -g -O`           warnings, debug info (no real optimizer)
+  `tcc -v`                    version
+
+== Where things are ==
+  /bin/tcc                 the compiler
+  /usr/include             [[rozlibc]] headers (stdio.h ...)
+  /usr/lib/libc.a          the C library, crt1.o = program start
+  /usr/lib/tcc/            libtcc1.a (helpers) and tcc's own headers
+  /usr/src/tcc             TCC's source code ([[self-hosting]])
+Programs are always linked statically (no shared libraries yet) and
+start at address 0x400000.
+
+== Example ==
+See [[c-programming]] for a walk-through.

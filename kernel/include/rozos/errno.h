@@ -26,6 +26,16 @@
 #define ENAMETOOLONG 36
 #define ENOSYS       38
 #define ENOTEMPTY    39
+/* ধাপ ৬ */
+#define ESRCH         3
+#define EINTR         4
+#define E2BIG         7
+#define ENOEXEC       8
+#define ECHILD       10
+#define EFAULT       14
+#define ENOTTY       25
+#define ERANGE       34
+#define ETIMEDOUT   110
 
 const char *kstrerror(int err);   /* err ধনাত্মক বা ঋণাত্মক দুটোই চলে */
 

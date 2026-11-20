@@ -12,7 +12,8 @@
 #include <rozos/errno.h>
 #include <rozos/heap.h>
 #include <rozos/string.h>
-#include <rozos/timer.h>
+#include <rozos/clock.h>
+#include <rozos/pmm.h>
 
 #define TMPFS_MAX_FILE_SIZE (256ULL * 1024 * 1024)
 
@@ -47,7 +48,7 @@ static struct vnode *new_node(enum vnode_type type, struct vnode *parent)
     n->vn.type = type;
     n->vn.mode = (type == VNODE_DIR) ? 0755 : 0644;
     n->vn.inode = next_inode++;
-    n->vn.mtime = timer_uptime_ms();
+    n->vn.mtime = (uint64_t)clock_unix_time();
     n->vn.ops = &tmpfs_ops;
     n->vn.fs_data = n;
     n->vn.parent = (type == VNODE_DIR) ? parent : NULL;
@@ -115,7 +116,7 @@ static int64_t tmpfs_write(struct vnode *vn, uint64_t off, const void *buf, size
     if (off + len > vn->size) {
         vn->size = off + len;
     }
-    vn->mtime = timer_uptime_ms();
+    vn->mtime = (uint64_t)clock_unix_time();
     return (int64_t)len;
 }
 
@@ -131,7 +132,7 @@ static int tmpfs_truncate(struct vnode *vn, uint64_t size)
         memset(n->data + vn->size, 0, (size_t)(size - vn->size));
     }
     vn->size = size;
-    vn->mtime = timer_uptime_ms();
+    vn->mtime = (uint64_t)clock_unix_time();
     return 0;
 }
 
@@ -192,7 +193,7 @@ static int tmpfs_create(struct vnode *dir, const char *name, enum vnode_type typ
     vn->nlink = 1;
     vn->refcount = 1;                     /* ফেরত দেওয়া ref */
     dir->size = d->entry_count;
-    dir->mtime = timer_uptime_ms();
+    dir->mtime = (uint64_t)clock_unix_time();
     *out = vn;
     return 0;
 }
@@ -210,7 +211,7 @@ static int tmpfs_unlink(struct vnode *dir, const char *name)
             kfree(e);
             d->entry_count--;
             dir->size = d->entry_count;
-            dir->mtime = timer_uptime_ms();
+            dir->mtime = (uint64_t)clock_unix_time();
             vn->nlink = 0;
             if (vn->refcount == 0 && vn->ops->release) {
                 vn->ops->release(vn);    /* কেউ খুলে রাখেনি — এখনই মুক্ত */
@@ -271,4 +272,19 @@ static int tmpfs_mount(const void *arg, struct vnode **root)
     return 0;
 }
 
-const struct filesystem tmpfs_filesystem = { "tmpfs", tmpfs_mount };
+/* tmpfs-এর জায়গা = সিস্টেমের খালি RAM (যা kmalloc-এর মাধ্যমে পাওয়া যায়) */
+static int tmpfs_statfs(struct vnode *r, struct vfs_statfs *out)
+{
+    struct pmm_stats ps;
+    (void)r;
+    pmm_get_stats(&ps);
+    out->block_size = PMM_PAGE_SIZE;
+    out->total_blocks = ps.usable_pages;
+    out->free_blocks = ps.free_pages;
+    out->total_inodes = 0;
+    out->free_inodes = 0;
+    out->source[0] = 'r'; out->source[1] = 'a'; out->source[2] = 'm'; out->source[3] = '\0';
+    return 0;
+}
+
+const struct filesystem tmpfs_filesystem = { "tmpfs", tmpfs_mount, tmpfs_statfs };

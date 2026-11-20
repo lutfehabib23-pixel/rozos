@@ -1,0 +1,27 @@
+# rozlibc - the rozOS C library
+A small C99 library written for rozOS (libc/ in the source tree).
+Headers are in /usr/include, the library in /usr/lib/libc.a.
+
+== Headers ==
+  `stdio.h`    printf family (%d %s %x %f %e %g ...), FILE, fopen,
+               fgets, getline, fread/fwrite, fseek, sscanf, perror
+  `stdlib.h`   malloc/free/realloc/calloc, exit/atexit, getenv/setenv,
+               strtol/strtod, atoi, qsort, bsearch, rand, realpath
+  `string.h`   mem*, str*, strdup, strtok, strerror
+  `math.h`     sqrt pow exp log sin cos tan atan2 floor ceil fmod ...
+  `ctype.h` `limits.h` `stdint.h` `inttypes.h` `errno.h` `assert.h`
+  `unistd.h`   read write close lseek fork execve execvp getcwd chdir
+               sleep usleep sbrk getopt isatty ...
+  `fcntl.h` `dirent.h` `time.h` `signal.h` `setjmp.h`
+  `sys/stat.h` `sys/wait.h` `sys/mman.h` `sys/ioctl.h` `sys/utsname.h`
+  `rozos.h`    rozOS extras: rozos_now_ms(), rozos_kmon(), raw syscalls
+
+== Inside ==
+malloc grows the heap with brk and uses mmap for blocks >= 256 KiB.
+stdout is line-buffered on the console, fully buffered into files.
+Math uses the x87 FPU instructions. Errors set errno like on Linux.
+See [[syscalls]] for how a call such as write() reaches the kernel.
+
+== Later ==
+musl can replace rozlibc one day: rozOS uses the Linux system call
+numbers on purpose, so musl's syscall layer would work almost as is.

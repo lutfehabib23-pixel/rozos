@@ -390,3 +390,69 @@ void vmm_destroy_space(struct vmm_space *sp, int free_frames)
     table_pages--;
     kfree(sp);
 }
+
+/* ---------- ধাপ ৬: প্রসেসের জন্য সহায়ক ---------- */
+
+/* 4 KiB পেজ ম্যাপ থাকলে 1; *phys ও *flags (VMM_WRITE/VMM_USER/VMM_EXEC) ভরে */
+int vmm_query(struct vmm_space *sp, uint64_t virt, uint64_t *phys, uint32_t *flags)
+{
+    uint64_t *pml4 = table_virt(sp->pml4_phys), *pdpt, *pd, *pt, e;
+    uint32_t f = 0;
+
+    if (!(pdpt = next_table(pml4, idx(virt, 39), 0, 0))) return 0;
+    if (!(pd   = next_table(pdpt, idx(virt, 30), 0, 0))) return 0;
+    if (!(pt   = next_table(pd,   idx(virt, 21), 0, 0))) return 0;
+    e = pt[idx(virt, 12)];
+    if (!(e & PTE_PRESENT)) {
+        return 0;
+    }
+    if (e & PTE_WRITABLE) f |= VMM_WRITE;
+    if (e & PTE_USER)     f |= VMM_USER;
+    if (!(e & PTE_NX))    f |= VMM_EXEC;
+    if (phys)  *phys = e & PTE_ADDR_MASK;
+    if (flags) *flags = f;
+    return 1;
+}
+
+/* fork: src-এর ইউজার-অর্ধেকের প্রতিটি পেজ নতুন ফ্রেমে কপি করে dst-এ একই ঠিকানায়,
+ * একই permission-এ ম্যাপ করে। ব্যর্থ হলে 0 (যা কপি হয়েছে তা dst-এই থাকে —
+ * ডাকা ফাংশন vmm_destroy_space(dst, 1) দিয়ে ফেরত দেয়)। */
+int vmm_clone_user(struct vmm_space *dst, struct vmm_space *src)
+{
+    uint64_t *pml4 = table_virt(src->pml4_phys);
+    unsigned a, b, c, d;
+
+    for (a = 0; a < 256; a++) {
+        uint64_t *pdpt;
+        if (!(pml4[a] & PTE_PRESENT)) continue;
+        pdpt = table_virt(pml4[a] & PTE_ADDR_MASK);
+        for (b = 0; b < PT_ENTRIES; b++) {
+            uint64_t *pd;
+            if (!(pdpt[b] & PTE_PRESENT) || (pdpt[b] & PTE_HUGE)) continue;
+            pd = table_virt(pdpt[b] & PTE_ADDR_MASK);
+            for (c = 0; c < PT_ENTRIES; c++) {
+                uint64_t *pt;
+                if (!(pd[c] & PTE_PRESENT) || (pd[c] & PTE_HUGE)) continue;
+                pt = table_virt(pd[c] & PTE_ADDR_MASK);
+                for (d = 0; d < PT_ENTRIES; d++) {
+                    uint64_t e = pt[d], virt, np;
+                    uint32_t f = VMM_USER;
+                    if (!(e & PTE_PRESENT) || !(e & PTE_USER)) continue;
+                    virt = ((uint64_t)a << 39) | ((uint64_t)b << 30) | ((uint64_t)c << 21) | ((uint64_t)d << 12);
+                    np = pmm_alloc_page();
+                    if (!np) {
+                        return 0;
+                    }
+                    memcpy(table_virt(np), table_virt(e & PTE_ADDR_MASK), VMM_PAGE_SIZE);
+                    if (e & PTE_WRITABLE) f |= VMM_WRITE;
+                    if (!(e & PTE_NX))    f |= VMM_EXEC;
+                    if (!vmm_map_page(dst, virt, np, f)) {
+                        pmm_free_page(np);
+                        return 0;
+                    }
+                }
+            }
+        }
+    }
+    return 1;
+}

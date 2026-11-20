@@ -1,0 +1,19 @@
+# Disks and file systems
+rozOS joins several file systems into one tree (the VFS):
+
+  /       ext2 on the first SATA disk (/dev/sda) - kept across reboots
+  /tmp    tmpfs - in RAM, fast, lost at reboot
+  /dev    devfs - devices as files
+
+Without a disk, / is a tmpfs filled from the initrd (a tar file the
+bootloader loads), so rozOS still boots, but nothing is kept.
+
+== Devices in /dev ==
+  console  screen + keyboard (+ serial)    null   discards writes
+  zero     endless zero bytes               kbd    raw key codes
+  serial0  the serial port                  sda    the whole disk
+
+== Driver stack ==
+PCI scan -> AHCI (SATA) driver -> block layer with a 4 KiB write-through
+cache -> ext2 -> VFS. Writes reach the disk at once; [[kmon]]'s `sync`
+flushes the disk's own cache. On the PC `make disk-check` runs e2fsck.

@@ -1,0 +1,326 @@
+/* rozOS — ব্লক ডিভাইস স্তর ও write-through cache (rozos/block.h দেখুন)
+ *
+ * cache-এর একক 4 KiB (512-বাইট sector হলে ৮টা)। প্রতিটি এন্ট্রির ডেটা PMM-এর একটা
+ * পুরো পেজ (HHDM দিয়ে অ্যাক্সেস)। পূর্ণ হলে সবচেয়ে কম সম্প্রতি ব্যবহৃত (LRU) এন্ট্রি
+ * বদলানো হয়। লেখা সবসময় সাথে সাথে ডিস্কে যায় (write-through), তাই cache-এ কখনো
+ * "ময়লা" ডেটা থাকে না এবং sync শুধু ডিস্কের নিজস্ব cache খালি করে। */
+
+#include <stdint.h>
+#include <stddef.h>
+#include <rozos/block.h>
+#include <rozos/devfs.h>
+#include <rozos/pmm.h>
+#include <rozos/errno.h>
+#include <rozos/string.h>
+#include <rozos/sched.h>
+
+#define CHUNK_SIZE     4096ULL
+#define CACHE_ENTRIES  256           /* 1 MiB */
+
+struct cache_entry {
+    struct block_device *dev;
+    uint64_t chunk;                  /* বাইট offset / CHUNK_SIZE */
+    uint64_t last_use;
+    uint8_t *data;                   /* NULL = এখনো পেজ নেওয়া হয়নি */
+    int valid;
+};
+
+static struct block_device *devices[BLOCK_MAX_DEVICES];
+static size_t dev_count;
+static struct cache_entry cache[CACHE_ENTRIES];
+static uint64_t use_clock;
+
+/* ---------- নিবন্ধন ---------- */
+
+static int64_t dev_file_read(void *ctx, uint64_t off, void *buf, size_t len)
+{
+    struct block_device *d = (struct block_device *)ctx;
+    uint64_t size = d->sector_count * d->sector_size;
+    int err;
+    if (off >= size) {
+        return 0;
+    }
+    if (len > size - off) {
+        len = (size_t)(size - off);
+    }
+    err = block_read_bytes(d, off, buf, len);
+    return err < 0 ? err : (int64_t)len;
+}
+
+static int64_t dev_file_write(void *ctx, uint64_t off, const void *buf, size_t len)
+{
+    struct block_device *d = (struct block_device *)ctx;
+    uint64_t size = d->sector_count * d->sector_size;
+    int err;
+    if (off >= size) {
+        return -ENOSPC;
+    }
+    if (len > size - off) {
+        len = (size_t)(size - off);
+    }
+    err = block_write_bytes(d, off, buf, len);
+    return err < 0 ? err : (int64_t)len;
+}
+
+int block_register(struct block_device *dev, const char *prefix)
+{
+    size_t i, n = 0, plen = strlen(prefix);
+
+    if (dev_count >= BLOCK_MAX_DEVICES) {
+        return -ENOMEM;
+    }
+    if (dev->sector_size == 0 || CHUNK_SIZE % dev->sector_size != 0) {
+        return -EINVAL;                               /* 512 বা 4096 বাইট sector সাপোর্টেড */
+    }
+    if (plen + 2 > BLOCK_NAME_MAX) {
+        return -ENAMETOOLONG;
+    }
+    for (i = 0; i < dev_count; i++) {
+        if (!strncmp(devices[i]->name, prefix, plen)) {
+            n++;
+        }
+    }
+    memcpy(dev->name, prefix, plen);
+    dev->name[plen] = (char)('a' + n);
+    dev->name[plen + 1] = '\0';
+    devices[dev_count++] = dev;
+    devfs_register(dev->name, dev_file_read, dev_file_write, dev);
+    return 0;
+}
+
+size_t block_device_count(void) { return dev_count; }
+
+struct block_device *block_device_at(size_t index)
+{
+    return index < dev_count ? devices[index] : NULL;
+}
+
+struct block_device *block_find(const char *name)
+{
+    size_t i;
+    if (!strncmp(name, "/dev/", 5)) {
+        name += 5;
+    }
+    for (i = 0; i < dev_count; i++) {
+        if (!strcmp(devices[i]->name, name)) {
+            return devices[i];
+        }
+    }
+    return NULL;
+}
+
+/* ---------- cache ---------- */
+
+static struct cache_entry *cache_lookup(struct block_device *dev, uint64_t chunk)
+{
+    size_t i;
+    for (i = 0; i < CACHE_ENTRIES; i++) {
+        if (cache[i].valid && cache[i].dev == dev && cache[i].chunk == chunk) {
+            cache[i].last_use = ++use_clock;
+            return &cache[i];
+        }
+    }
+    return NULL;
+}
+
+static struct cache_entry *cache_victim(void)
+{
+    size_t i, best = 0;
+    for (i = 0; i < CACHE_ENTRIES; i++) {
+        if (!cache[i].valid) {
+            best = i;
+            break;
+        }
+        if (cache[i].last_use < cache[best].last_use) {
+            best = i;
+        }
+    }
+    if (!cache[best].data) {
+        uint64_t phys = pmm_alloc_page();
+        if (!phys) {
+            return NULL;
+        }
+        cache[best].data = (uint8_t *)pmm_phys_to_virt(phys);
+    }
+    cache[best].valid = 0;
+    return &cache[best];
+}
+
+/* chunk-এ কতটা sector ডিস্কের ভেতরে পড়ে (শেষ chunk ছোট হতে পারে) */
+static uint32_t chunk_sectors(struct block_device *dev, uint64_t chunk, uint64_t *first_lba)
+{
+    uint32_t per = (uint32_t)(CHUNK_SIZE / dev->sector_size);
+    uint64_t lba = chunk * per;
+    *first_lba = lba;
+    if (lba >= dev->sector_count) {
+        return 0;
+    }
+    if (lba + per > dev->sector_count) {
+        per = (uint32_t)(dev->sector_count - lba);
+    }
+    return per;
+}
+
+/* chunk cache-এ আনা (দরকার হলে ডিস্ক থেকে) */
+static int load_chunk(struct block_device *dev, uint64_t chunk, struct cache_entry **out)
+{
+    struct cache_entry *e = cache_lookup(dev, chunk);
+    uint64_t lba;
+    uint32_t n;
+    int err;
+
+    if (e) {
+        dev->cache_hits++;
+        *out = e;
+        return 0;
+    }
+    dev->cache_misses++;
+    n = chunk_sectors(dev, chunk, &lba);
+    if (n == 0) {
+        return -EINVAL;
+    }
+    e = cache_victim();
+    if (!e) {
+        return -ENOMEM;
+    }
+    if (n * dev->sector_size < CHUNK_SIZE) {
+        memset(e->data, 0, CHUNK_SIZE);
+    }
+    err = dev->ops->read(dev, lba, n, e->data);
+    dev->reads++;
+    if (err < 0) {
+        return err;
+    }
+    e->dev = dev;
+    e->chunk = chunk;
+    e->last_use = ++use_clock;
+    e->valid = 1;
+    *out = e;
+    return 0;
+}
+
+/* ---------- পড়া/লেখা ---------- */
+
+static int do_block_read_bytes(struct block_device *dev, uint64_t offset, void *buf, size_t len)
+{
+    uint8_t *out = (uint8_t *)buf;
+    if (offset + len > dev->sector_count * dev->sector_size) {
+        return -EINVAL;
+    }
+    while (len) {
+        uint64_t chunk = offset / CHUNK_SIZE;
+        size_t in = (size_t)(offset % CHUNK_SIZE);
+        size_t n = (size_t)(CHUNK_SIZE - in);
+        struct cache_entry *e;
+        int err;
+        if (n > len) {
+            n = len;
+        }
+        err = load_chunk(dev, chunk, &e);
+        if (err < 0) {
+            return err;
+        }
+        memcpy(out, e->data + in, n);
+        out += n;
+        offset += n;
+        len -= n;
+    }
+    return 0;
+}
+
+static int do_block_write_bytes(struct block_device *dev, uint64_t offset, const void *buf, size_t len)
+{
+    const uint8_t *in_buf = (const uint8_t *)buf;
+    if (offset + len > dev->sector_count * dev->sector_size) {
+        return -EINVAL;
+    }
+    while (len) {
+        uint64_t chunk = offset / CHUNK_SIZE, first_lba;
+        size_t in = (size_t)(offset % CHUNK_SIZE);
+        size_t n = (size_t)(CHUNK_SIZE - in);
+        uint32_t ss = dev->sector_size, s_first, s_last;
+        struct cache_entry *e;
+        int err;
+
+        if (n > len) {
+            n = len;
+        }
+        /* chunk cache-এ এনে (আংশিক লেখার জন্য বাকি অংশ লাগে) তাতে বদল */
+        err = load_chunk(dev, chunk, &e);
+        if (err < 0) {
+            return err;
+        }
+        memcpy(e->data + in, in_buf, n);
+
+        /* শুধু বদলানো sector-গুলো ডিস্কে */
+        chunk_sectors(dev, chunk, &first_lba);
+        s_first = (uint32_t)(in / ss);
+        s_last = (uint32_t)((in + n - 1) / ss);
+        err = dev->ops->write(dev, first_lba + s_first, s_last - s_first + 1, e->data + s_first * ss);
+        dev->writes++;
+        if (err < 0) {
+            e->valid = 0;                            /* ডিস্কের সাথে না মিললে cache বাতিল */
+            return err;
+        }
+        in_buf += n;
+        offset += n;
+        len -= n;
+    }
+    return 0;
+}
+
+int block_read(struct block_device *dev, uint64_t lba, uint32_t count, void *buf)
+{
+    return block_read_bytes(dev, lba * dev->sector_size, buf, (size_t)count * dev->sector_size);
+}
+
+int block_write(struct block_device *dev, uint64_t lba, uint32_t count, const void *buf)
+{
+    return block_write_bytes(dev, lba * dev->sector_size, buf, (size_t)count * dev->sector_size);
+}
+
+static int do_block_sync(struct block_device *dev)
+{
+    size_t i;
+    int err = 0;
+    for (i = 0; i < dev_count; i++) {
+        if ((!dev || devices[i] == dev) && devices[i]->ops->flush) {
+            int e = devices[i]->ops->flush(devices[i]);
+            if (e < 0) {
+                err = e;
+            }
+        }
+    }
+    return err;
+}
+
+/* ---------- ধাপ ৬: ক্যাশ ও ড্রাইভার একসাথে একটাই থ্রেড ব্যবহার করে ---------- */
+
+static struct kmutex block_lock = KMUTEX_INIT("block");
+
+int block_read_bytes(struct block_device *dev, uint64_t offset, void *buf, size_t len)
+{
+    int r;
+    kmutex_lock(&block_lock);
+    r = do_block_read_bytes(dev, offset, buf, len);
+    kmutex_unlock(&block_lock);
+    return r;
+}
+
+int block_write_bytes(struct block_device *dev, uint64_t offset, const void *buf, size_t len)
+{
+    int r;
+    kmutex_lock(&block_lock);
+    r = do_block_write_bytes(dev, offset, buf, len);
+    kmutex_unlock(&block_lock);
+    return r;
+}
+
+int block_sync(struct block_device *dev)
+{
+    int r;
+    kmutex_lock(&block_lock);
+    r = do_block_sync(dev);
+    kmutex_unlock(&block_lock);
+    return r;
+}

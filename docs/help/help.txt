@@ -1,0 +1,29 @@
+# How to use the help viewer
+Start it with `help` (index) or `help <page>`, for example `help tcc`.
+
+== Keys ==
+  `Tab`            select the next highlighted link
+  `Shift+Tab`      select the previous link
+  `Enter` or `->`  open the selected link
+  `Backspace`, `<-` or `b`   go back to the previous page
+  `Up` `Down`      scroll one line   (`j` `k` work too)
+  `PgUp` `PgDn`    scroll one screen (`Space` = next screen)
+  `Home` `End`     top / bottom of the page
+  `i`              jump to the [[index]]
+  `/`              type a page name and press Enter
+  `q`              quit back to the shell
+
+== Colours ==
+  Cyan text is a link. The selected link has a cyan background.
+  Yellow text is something you can type, like `ls -l /bin`.
+  White text is a section heading.
+
+== Printing a page ==
+If the output is not the console the page is printed as plain text:
+  `help tcc > /tmp/tcc.txt`
+
+== Adding pages ==
+Pages live in /usr/share/help/<name>.txt (docs/help/ in the source tree).
+First line: "# Title". A link is [ [name] ] or [ [name|shown text] ]
+(written without the spaces), code is put between backquotes, and a
+heading line starts with "== ". See [[files]].

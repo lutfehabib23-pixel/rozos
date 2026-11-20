@@ -34,6 +34,8 @@ extern char isr_stub_table[];   /* isr.S */
 
 static struct idt_entry idt[IDT_ENTRIES] ROZ_ALIGNED(16);
 static interrupt_handler_t handlers[IDT_ENTRIES];
+static int  (*user_fault_hook)(struct interrupt_frame *frame);    /* ধাপ ৬ */
+static void (*user_return_hook)(struct interrupt_frame *frame);   /* ধাপ ৬ */
 
 static const char *const exception_names[IDT_EXCEPTION_COUNT] = {
     "Divide error (#DE)",              "Debug (#DB)",
@@ -143,23 +145,34 @@ static void breakpoint_handler(struct interrupt_frame *f)
     tty_set_color(TTY_COLOR_LIGHT_GREY, TTY_COLOR_BLACK);
 }
 
+void idt_set_user_hooks(int (*fault)(struct interrupt_frame *frame),
+                        void (*ret)(struct interrupt_frame *frame))
+{
+    user_fault_hook = fault;
+    user_return_hook = ret;
+}
+
 void interrupt_dispatch(struct interrupt_frame *frame)
 {
     uint64_t v = frame->vector;
+    int from_user = (frame->cs & 3) != 0;
 
     if (v >= PIC_VECTOR_BASE && v < PIC_VECTOR_BASE + PIC_IRQ_COUNT) {
         pic_dispatch(frame);
-        return;
-    }
-    if (handlers[v]) {
+    } else if (v < IDT_EXCEPTION_COUNT && from_user && user_fault_hook && user_fault_hook(frame)) {
+        /* ইউজার প্রোগ্রামের এক্সেপশন — প্রসেস সামলেছে (স্ট্যাক বাড়ানো বা প্রসেস শেষ) */
+    } else if (handlers[v]) {
         handlers[v](frame);
-        return;
-    }
-    if (v < IDT_EXCEPTION_COUNT) {
+    } else if (v < IDT_EXCEPTION_COUNT) {
         unhandled_exception(frame);
-        return;
+    } else {
+        kprintf("[WARN] unexpected interrupt vector %llu\n", (unsigned long long)v);
     }
-    kprintf("[WARN] unexpected interrupt vector %llu\n", (unsigned long long)v);
+
+    /* ধাপ ৬: ইউজার-মোডে ফেরার আগে শিডিউলার (সময় ফুরালে অন্য থ্রেড, kill হলে শেষ) */
+    if (from_user && user_return_hook) {
+        user_return_hook(frame);
+    }
 }
 
 void idt_init(void)

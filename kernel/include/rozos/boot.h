@@ -27,6 +27,7 @@ extern volatile struct limine_memmap_request              limine_memmap_req;
 extern volatile struct limine_executable_address_request  limine_exec_addr_req;
 extern volatile struct limine_module_request              limine_module_req;
 extern volatile struct limine_rsdp_request                limine_rsdp_req;
+extern volatile struct limine_date_at_boot_request        limine_date_req;
 
 /* বুটলোডার কোন base revision দিয়ে কার্নেল লোড করেছে তা যাচাই করে।
  * ফেরত দেয়: ব্যবহৃত revision (>= 0), অথবা -1 যদি নির্ণয় করা না যায়।

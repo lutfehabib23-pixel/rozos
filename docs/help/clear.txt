@@ -1,0 +1,3 @@
+# clear - clear the screen
+Sends the ANSI codes ESC[2J ESC[H. Ctrl+L in the shell does the same.
+Back to [[programs]].

@@ -1,0 +1,13 @@
+# System calls
+A program asks the kernel for something with the `syscall` instruction:
+number in rax, arguments in rdi rsi rdx r10 r8 r9, result in rax (a
+negative number is -errno). `int 0x80` works the same way as a backup.
+rozOS uses the Linux x86-64 numbers, for example:
+  0 read    1 write    2 open     3 close    4 stat    5 fstat
+  8 lseek   9 mmap    11 munmap  12 brk     16 ioctl  20 writev
+ 32 dup    33 dup2    35 nanosleep 39 getpid 57 fork  59 execve
+ 60 exit   61 wait4   62 kill    63 uname   79 getcwd 80 chdir
+ 83 mkdir  84 rmdir   87 unlink 217 getdents64  228 clock_gettime
+500 rozos_kmon (rozOS only: starts [[kmon]])
+[[rozlibc]] wraps these in normal C functions (write(), fork() ...).
+The kernel checks every pointer a program passes before using it.

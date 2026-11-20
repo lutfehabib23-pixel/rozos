@@ -1,5 +1,5 @@
 Welcome to rozOS!
 A self-hosting 64-bit operating system, built from scratch.
 
-This file came from the initrd (sysroot/etc/motd on the build host).
-Try: ls /, cat /src/hello.c, mkdir /tmp/test, write /tmp/a.txt hello
+This file came from sysroot/etc/motd on the build host.
+Shell tips: ls /bin, cat /src/hello.c, edit notes.txt, systest, kmon, help

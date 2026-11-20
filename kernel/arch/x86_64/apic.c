@@ -327,6 +327,19 @@ int apic_init(void)
 
     flags = cpu_irq_save();
 
+    /* ধাপ ৬ বাগ-ফিক্স (ধাপ ৫-এর "একবারের অব্যাখ্যাত panic"-এর কারণ): 8259 যদি
+     * ঠিক এই মুহূর্তে LINT0 (ExtINT) দিয়ে ইন্টারাপ্ট তুলে রাখে আর আমরা আগে LINT0
+     * mask করি, তাহলে CPU পরে IF = 1 হলেই সেই "ঝুলে থাকা" ইন্টারাপ্ট নিতে যায়, কিন্তু
+     * কোনো ভেক্টর পায় না — QEMU-তে তা #GP (err 0xfffffffa) হয়ে kernel panic।
+     * তাই আগে 8259 পুরো mask (INTR লাইন নামে), তারপর অল্প সময় IF = 1 রেখে আগে থেকে
+     * আটকে থাকা কিছু থাকলে তা বেরিয়ে যেতে দেওয়া (বড়জোর spurious IRQ 7), তারপর LINT0 বন্ধ। */
+    pic_disable();
+    cpu_sti();
+    for (i = 0; i < 1000; i++) {
+        cpu_pause();
+    }
+    cpu_cli();
+
     info.bsp_lapic_id = lapic_id();
     info.lapic_version = lapic_read(LAPIC_VERSION) & 0xFF;
 

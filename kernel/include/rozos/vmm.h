@@ -56,6 +56,12 @@ struct vmm_space *vmm_create_space(void);
 void vmm_destroy_space(struct vmm_space *sp, int free_frames);
 void vmm_switch(struct vmm_space *sp);
 
+/* ধাপ ৬: 4 KiB পেজ ম্যাপ থাকলে 1; *phys ও *flags (VMM_WRITE/VMM_USER/VMM_EXEC) ভরে
+ * (দুটোই NULL হতে পারে) */
+int vmm_query(struct vmm_space *sp, uint64_t virt, uint64_t *phys, uint32_t *flags);
+/* ধাপ ৬ (fork): src-এর সব ইউজার পেজ নতুন ফ্রেমে কপি করে dst-এ; ব্যর্থ হলে 0 */
+int vmm_clone_user(struct vmm_space *dst, struct vmm_space *src);
+
 /* পরিসংখ্যান */
 uint64_t vmm_table_pages(void);       /* কার্নেল পেজ-টেবিলে মোট কত পেজ */
 int      vmm_nx_enabled(void);

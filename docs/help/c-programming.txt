@@ -1,0 +1,27 @@
+# Writing a C program inside rozOS
+1. Make a folder and open the editor:
+     `mkdir -p ~/hello ; cd ~/hello`
+     `edit main.c`
+2. Type the program, then Ctrl+S to save and Ctrl+Q to quit:
+     #include <stdio.h>
+     #include <stdlib.h>
+     int main(int argc, char **argv)
+     {
+         printf("Hello, %s!\n", argc > 1 ? argv[1] : "rozOS");
+         return 0;
+     }
+3. Compile and run:
+     `tcc main.c -o hello`
+     `./hello world`
+4. Errors show the file and line, for example
+     main.c:5: error: ';' expected
+   Open the file again with [[edit]], press Ctrl+G and type the line.
+
+== Quicker for small tests ==
+     `tcc -run main.c world`
+
+== What can I use? ==
+Everything in [[rozlibc]]: stdio, stdlib, string, math, time, files,
+directories, fork/exec. Not yet: threads, sockets, signals handlers.
+Your program can also read the console directly with read(0, ...) -
+the console is raw, see [[keys]].

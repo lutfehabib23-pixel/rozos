@@ -1,0 +1,15 @@
+# Files and directories
+  /bin            programs ([[programs]])
+  /etc            settings: motd (boot message), hostname
+  /home           your home directory (~), .rozshrc, .rozsh_history
+  /src            sample sources (hello.c)
+  /usr/include    C headers ([[rozlibc]])
+  /usr/lib        libc.a, crt1.o, tcc/ ([[tcc]])
+  /usr/share/help these help pages
+  /usr/src/tcc    TCC source ([[self-hosting]])
+  /tmp            temporary files in RAM - empty after every boot
+  /dev            devices ([[disks]])
+
+Paths starting with / are absolute; others start from the current
+directory (`pwd`). ".." is the parent, "." the current directory, and
+"~" is /home in the shell.

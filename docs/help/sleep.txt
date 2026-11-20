@@ -1,0 +1,4 @@
+# sleep - wait
+  `sleep 2`  `sleep 0.5`
+The process sleeps in the kernel (nanosleep), other programs keep
+running ([[processes]]).   Back to [[programs]].

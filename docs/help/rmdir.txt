@@ -1,0 +1,4 @@
+# rmdir - remove empty directories
+  `rmdir dir ...`
+Fails with "directory not empty" if something is inside; use
+[[rm|rm -r]] for that.   Back to [[programs]].

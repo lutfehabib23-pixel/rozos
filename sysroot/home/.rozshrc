@@ -1,0 +1,2 @@
+# rozsh startup script (run by the login shell) - put your settings here
+export EDITOR=edit

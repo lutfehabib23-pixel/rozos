@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <rozos/sched.h>
 #include <rozos/keyboard.h>
 #include <rozos/ps2.h>
 #include <arch/x86_64/pic.h>
@@ -281,7 +282,7 @@ int keyboard_getkey(void)
             cpu_sti();
             return key;
         }
-        cpu_sti_hlt();
+        sched_relax();
     }
 }
 

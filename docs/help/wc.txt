@@ -1,0 +1,4 @@
+# wc - count lines, words and bytes
+  `wc [file ...]`     with no file: counts stdin (`wc < file`)
+Output columns: lines, words, bytes, name; a total line for 2+ files.
+Example: `wc /src/hello.c`   Back to [[programs]].

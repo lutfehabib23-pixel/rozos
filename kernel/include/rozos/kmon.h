@@ -11,6 +11,9 @@
 /* কখনো ফেরে না */
 ROZ_NORETURN void kmon_run(void);
 
+/* ধাপ ৭: shell-এর /bin/kmon থেকে (কার্নেল-থ্রেডে) — "exit" দিলে ফেরে; একসাথে একটাই, নইলে -1 */
+int kmon_session(void);
+
 /* কিবোর্ড বা serial থেকে একটি কী (অপেক্ষা করে) */
 int kmon_getkey(void);
 

@@ -1,0 +1,4 @@
+# touch - create an empty file
+  `touch file ...`
+Creates the file if it does not exist (it does not change dates yet).
+Back to [[programs]].

@@ -8,6 +8,7 @@
 #include <rozos/devfs.h>
 #include <rozos/vfs.h>
 #include <rozos/errno.h>
+#include <rozos/sched.h>
 #include <rozos/string.h>
 #include <rozos/console.h>
 #include <rozos/serial.h>
@@ -118,7 +119,17 @@ static int devfs_mount(const void *arg, struct vnode **out)
     return 0;
 }
 
-const struct filesystem devfs_filesystem = { "devfs", devfs_mount };
+static int devfs_statfs(struct vnode *r, struct vfs_statfs *out)
+{
+    (void)r;
+    out->total_inodes = DEVFS_MAX_DEVICES;
+    out->free_inodes = DEVFS_MAX_DEVICES - device_count;
+    out->read_only = 1;
+    out->source[0] = 'd'; out->source[1] = 'e'; out->source[2] = 'v'; out->source[3] = '\0';
+    return 0;
+}
+
+const struct filesystem devfs_filesystem = { "devfs", devfs_mount, devfs_statfs };
 
 /* ---------- ডিফল্ট ডিভাইস ---------- */
 
@@ -155,6 +166,29 @@ static int try_any_key(int *key)
     return 0;
 }
 
+/* ধাপ ৭: বিশেষ কী → ANSI/VT100 escape sequence (serial টার্মিনাল যেমন পাঠায়), যাতে
+ * shell ও এডিটর কিবোর্ড আর serial দুটো থেকেই একইভাবে তীর-কী ইত্যাদি পায় */
+static const char *key_sequence(int key)
+{
+    switch (key) {
+    case KEY_UP:        return "\x1b[A";
+    case KEY_DOWN:      return "\x1b[B";
+    case KEY_RIGHT:     return "\x1b[C";
+    case KEY_LEFT:      return "\x1b[D";
+    case KEY_HOME:      return "\x1b[H";
+    case KEY_END:       return "\x1b[F";
+    case KEY_INSERT:    return "\x1b[2~";
+    case KEY_DELETE:    return "\x1b[3~";
+    case KEY_PAGE_UP:   return "\x1b[5~";
+    case KEY_PAGE_DOWN: return "\x1b[6~";
+    default:            return NULL;      /* F-কী এখনো নয় — /dev/kbd-তে পাওয়া যায় */
+    }
+}
+
+/* আগের read-এ জায়গা না পাওয়া sequence-এর বাকি অংশ */
+static char pending_seq[8];
+static size_t pending_len, pending_pos;
+
 /* অন্তত একটা অক্ষর না আসা পর্যন্ত অপেক্ষা, তারপর যা জমে আছে তা */
 static int64_t console_read(void *ctx, uint64_t off, void *buf, size_t len)
 {
@@ -168,13 +202,30 @@ static int64_t console_read(void *ctx, uint64_t off, void *buf, size_t len)
     }
     while (n == 0) {
         cpu_cli();
+        while (n < len && pending_pos < pending_len) {
+            out[n++] = pending_seq[pending_pos++];
+        }
         while (n < len && try_any_key(&key)) {
             if (key < 0x100) {
-                out[n++] = (char)key;     /* বিশেষ কী (তীর ইত্যাদি) এখানে বাদ — /dev/kbd-তে পাওয়া যায় */
+                out[n++] = (char)key;
+            } else {
+                const char *seq = key_sequence(key);
+                if (seq) {
+                    pending_len = strlen(seq);
+                    memcpy(pending_seq, seq, pending_len);
+                    pending_pos = 0;
+                    while (n < len && pending_pos < pending_len) {
+                        out[n++] = pending_seq[pending_pos++];
+                    }
+                }
             }
         }
         if (n == 0) {
-            cpu_sti_hlt();
+            if (sched_should_abort()) {       /* ধাপ ৬: প্রসেস kill হয়েছে */
+                cpu_sti();
+                return -EINTR;
+            }
+            sched_relax();
         } else {
             cpu_sti();
         }
@@ -204,6 +255,9 @@ static int64_t serial_dev_read(void *ctx, uint64_t off, void *buf, size_t len)
             out[n++] = c;
         }
         if (n == 0) {
+            if (sched_should_abort()) {
+                return -EINTR;
+            }
             timer_sleep_ms(1);           /* serial-এ এখনো ইন্টারাপ্ট নেই */
         }
     }
@@ -234,7 +288,11 @@ static int64_t kbd_read(void *ctx, uint64_t off, void *buf, size_t len)
             out[n++] = key;
         }
         if (n == 0) {
-            cpu_sti_hlt();
+            if (sched_should_abort()) {
+                cpu_sti();
+                return -EINTR;
+            }
+            sched_relax();
         } else {
             cpu_sti();
         }
@@ -244,13 +302,17 @@ static int64_t kbd_read(void *ctx, uint64_t off, void *buf, size_t len)
 
 int devfs_init(void)
 {
+    /* ধাপ ৫: একবারই চলে, আর আগে নিবন্ধিত ডিভাইস (যদি থাকে) মোছে না */
+    if (root_ready) {
+        return 0;
+    }
     memset(&root, 0, sizeof(root));
     root.type = VNODE_DIR;
     root.mode = 0755;
     root.inode = 1;
     root.nlink = 1;
     root.ops = &root_ops;
-    device_count = 0;
+    root.size = device_count;
     root_ready = 1;
 
     devfs_register("null", null_read, sink_write, NULL);

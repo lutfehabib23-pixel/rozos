@@ -88,6 +88,12 @@ volatile struct limine_module_request limine_module_req = {
     .id = LIMINE_MODULE_REQUEST_ID, .revision = 0, .response = NULL
 };
 
+/* ধাপ ৫: বুটের সময়ের তারিখ/সময় (RTC থেকে) — ext2-এর টাইমস্ট্যাম্প ও date কমান্ড */
+ROZ_USED ROZ_SECTION(".limine_requests") ROZ_ALIGNED(8)
+volatile struct limine_date_at_boot_request limine_date_req = {
+    .id = LIMINE_DATE_AT_BOOT_REQUEST_ID, .revision = 0, .response = NULL
+};
+
 /* ধাপ ২-এ APIC চালু করতে ACPI (MADT) লাগবে */
 ROZ_USED ROZ_SECTION(".limine_requests") ROZ_ALIGNED(8)
 volatile struct limine_rsdp_request limine_rsdp_req = {

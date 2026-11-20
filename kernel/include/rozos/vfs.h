@@ -5,8 +5,9 @@
  *     vnode_ops দিয়ে আসল কাজ করে।
  *   - mount: কোনো ডিরেক্টরি vnode-এর ওপর অন্য ফাইলসিস্টেমের root বসানো।
  *   - পাথ সবসময় পরম ('/' দিয়ে শুরু); ".", ".." ও পরপর '/' বোঝে।
- *   - file descriptor: এখন একটা গ্লোবাল টেবিল; ধাপ ৬-এ প্রতিটি প্রসেসের নিজস্ব
- *     টেবিলে যাবে — এই API একই থাকবে।
+ *   - file descriptor: প্রতিটি প্রসেসের নিজস্ব টেবিল (ধাপ ৬); কার্নেলের থ্রেডগুলো
+ *     একটা কার্নেল টেবিল ব্যবহার করে — vfs_open/read/... API আগের মতোই।
+ *   - সব ফাংশন একটা recursive mutex দিয়ে সুরক্ষিত (ধাপ ৬)।
  * সব ফাংশন ব্যর্থ হলে -ERRNO (rozos/errno.h) দেয়। */
 #ifndef ROZOS_VFS_H
 #define ROZOS_VFS_H
@@ -16,7 +17,8 @@
 
 #define VFS_NAME_MAX   255
 #define VFS_PATH_MAX   1024
-#define VFS_MAX_FDS    64
+#define VFS_MAX_FDS    64       /* প্রতি fd টেবিলে */
+#define VFS_MAX_FILES  256      /* সব মিলিয়ে খোলা file description (ধাপ ৬) */
 #define VFS_MAX_MOUNTS 16
 
 /* open() ফ্ল্যাগ — Linux-এর একই মান */
@@ -64,7 +66,7 @@ struct vnode {
     uint32_t mode;               /* অনুমতি বিট (এখন তথ্য হিসেবে; যাচাই ধাপ ৬-এ) */
     uint64_t size;
     uint64_t inode;              /* ফাইলসিস্টেমের ভেতরে অনন্য নম্বর */
-    uint64_t mtime;              /* শেষ পরিবর্তন (uptime ms; RTC এলে আসল সময়) */
+    uint64_t mtime;              /* শেষ পরিবর্তন: UNIX সময় (সেকেন্ড, UTC); 0 = অজানা (ধাপ ৫) */
     uint32_t refcount;
     uint32_t nlink;              /* কয়টা ডিরেক্টরি এন্ট্রি এটাকে দেখায় (0 = মুছে ফেলা) */
     const struct vnode_ops *ops;
@@ -91,11 +93,24 @@ struct vfs_stat {
     const char *fs_name;         /* কোন ফাইলসিস্টেমে */
 };
 
+/* df-এর জন্য ফাইলসিস্টেমের জায়গার হিসাব */
+struct vfs_statfs {
+    uint64_t block_size;
+    uint64_t total_blocks;
+    uint64_t free_blocks;
+    uint64_t total_inodes;
+    uint64_t free_inodes;
+    int      read_only;
+    char     source[32];         /* যেমন "sda" বা "ram" */
+};
+
 /* ফাইলসিস্টেম ড্রাইভার */
 struct filesystem {
     const char *name;
     /* নতুন instance-এর root vnode বানায় (arg ফাইলসিস্টেম-নির্ভর) */
     int (*mount)(const void *arg, struct vnode **root);
+    /* ঐচ্ছিক (ধাপ ৫): জায়গার হিসাব; NULL হলে শূন্য দেখায় */
+    int (*statfs)(struct vnode *root, struct vfs_statfs *out);
 };
 
 struct mount {
@@ -119,9 +134,22 @@ int64_t vfs_read(int fd, void *buf, size_t len);
 int64_t vfs_write(int fd, const void *buf, size_t len);
 int64_t vfs_seek(int fd, int64_t offset, int whence);
 int     vfs_fstat(int fd, struct vfs_stat *st);
-/* ডিরেক্টরি fd থেকে পরের এন্ট্রি: 1 = পাওয়া গেছে, 0 = শেষ, <0 = ত্রুটি */
+/* ডিরেক্টরি fd থেকে পরের এন্ট্রি: 1 = পাওয়া গেছে, 0 = শেষ, <0 = ত্রুটি
+ * (ধাপ ৬: ডিরেক্টরিতে vfs_seek SEEK_SET/SEEK_CUR = এন্ট্রির index) */
 int     vfs_readdir(int fd, struct vfs_dirent *out);
-int     vfs_open_count(void);
+int     vfs_open_count(void);              /* সব মিলিয়ে খোলা description */
+
+/* ---------- প্রতি-প্রসেস fd টেবিল (ধাপ ৬) ---------- */
+struct vfs_fdtable;
+/* চলমান থ্রেডের টেবিল যে দেয় (proc.c); NULL ফেরত দিলে কার্নেল টেবিল */
+void vfs_set_fdtable_hook(struct vfs_fdtable *(*hook)(void));
+struct vfs_fdtable *vfs_fdtable_create(void);
+struct vfs_fdtable *vfs_fdtable_clone(void);          /* চলমান টেবিলের কপি (fork) */
+void vfs_fdtable_destroy(struct vfs_fdtable *t);      /* সব fd বন্ধ করে মুক্ত */
+int  vfs_fdtable_used(const struct vfs_fdtable *t);   /* NULL = কার্নেল টেবিল */
+int  vfs_dup(int oldfd);
+int  vfs_dup2(int oldfd, int newfd);
+uint64_t vfs_lock_contended(void);
 
 /* ---------- পাথ অপারেশন ---------- */
 int vfs_stat(const char *path, struct vfs_stat *st);
@@ -130,6 +158,7 @@ int vfs_mkdir_p(const char *path);            /* মাঝের সব ডি�
 int vfs_unlink(const char *path);             /* ফাইল বা ডিভাইস */
 int vfs_rmdir(const char *path);              /* খালি ডিরেক্টরি */
 int vfs_truncate(const char *path, uint64_t size);
+int vfs_statfs(const char *path, struct vfs_statfs *st);   /* যে mount-এ path আছে তার হিসাব */
 
 /* ফাইলসিস্টেম ড্রাইভারদের জন্য */
 int  vfs_lookup(const char *path, struct vnode **out);   /* refcount বাড়ায় */

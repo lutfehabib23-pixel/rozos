@@ -1,0 +1,4 @@
+# mkdir - make directories
+  `mkdir [-p] dir ...`
+  `-p`  also make missing parent directories, no error if it exists
+Example: `mkdir -p ~/projects/hello`   Back to [[programs]].

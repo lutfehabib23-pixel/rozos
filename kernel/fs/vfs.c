@@ -5,19 +5,30 @@
  * refcount দুটোই শূন্য হলে release() ডাকা হয় (Unix-এর মতো: খোলা ফাইল মুছলেও
  * যতক্ষণ খোলা আছে ততক্ষণ পড়া/লেখা যায়)।
  *
- * এখনো lock নেই: VFS শুধু সাধারণ কার্নেল কোড থেকে ডাকা হয়, ইন্টারাপ্ট থেকে নয়।
- * ধাপ ৬-এ মাল্টিটাস্কিং এলে এখানে lock যোগ হবে। */
+ * ধাপ ৬:
+ *   - lock: একটা recursive kmutex (vfs_lock) সব public ফাংশন ঘিরে রাখে। ext2 ও
+ *     tmpfs/devfs শুধু VFS দিয়েই ডাকা হয়, তাই তারাও এর ভেতরে সুরক্ষিত। ডিভাইস
+ *     (VNODE_CHARDEV) পড়া/লেখার সময় lock ছাড়া হয় — কিবোর্ডের জন্য অপেক্ষারত
+ *     প্রসেস যেন বাকি সবার ফাইল-অ্যাক্সেস আটকে না রাখে।
+ *   - file descriptor: "open file description" (struct file: offset, flags, vnode)
+ *     একটা গ্লোবাল পুলে, refcount সহ; প্রতিটি প্রসেসের নিজস্ব fd টেবিল (struct
+ *     vfs_fdtable) সেগুলোর দিকে পয়েন্টার রাখে — fork/dup-এ একই description ভাগ হয়
+ *     (Unix-এর মতো offset-ও)। কোন টেবিল চলবে তা proc.c-র hook বলে দেয়; কার্নেলের
+ *     থ্রেডগুলো (kmon) kernel_fdt ব্যবহার করে। */
 
 #include <stdint.h>
 #include <stddef.h>
 #include <rozos/vfs.h>
 #include <rozos/errno.h>
 #include <rozos/string.h>
+#include <rozos/heap.h>
+#include <rozos/sched.h>
 
 #define VFS_MAX_FILESYSTEMS 8
 
 struct file {
     int used;
+    int refs;                    /* কয়টা fd (সব টেবিল মিলিয়ে) এটাকে দেখায় */
     int flags;
     uint64_t offset;             /* ফাইলে অবস্থান; ডিরেক্টরিতে পরের এন্ট্রির index */
     struct vnode *vn;
@@ -29,7 +40,24 @@ static size_t fs_count;
 static struct mount mounts[VFS_MAX_MOUNTS];
 static size_t mount_count;
 static struct mount *root_mount;
-static struct file files[VFS_MAX_FDS];
+static struct file files[VFS_MAX_FILES];
+
+struct vfs_fdtable {
+    struct file *fd[VFS_MAX_FDS];
+};
+
+static struct vfs_fdtable kernel_fdt;
+static struct vfs_fdtable *(*fdt_hook)(void);
+static struct kmutex vfs_lock = KMUTEX_INIT("vfs");
+
+#define LOCK()   kmutex_lock(&vfs_lock)
+#define UNLOCK() kmutex_unlock(&vfs_lock)
+
+static struct vfs_fdtable *cur_fdt(void)
+{
+    struct vfs_fdtable *t = fdt_hook ? fdt_hook() : NULL;
+    return t ? t : &kernel_fdt;
+}
 
 /* ---------- refcount ---------- */
 
@@ -188,7 +216,7 @@ static int resolve(const char *path, struct vnode **out, struct mount **mnt_out)
     return 0;
 }
 
-int vfs_lookup(const char *path, struct vnode **out)
+static int do_vfs_lookup(const char *path, struct vnode **out)
 {
     return resolve(path, out, NULL);
 }
@@ -263,7 +291,7 @@ static int resolve_parent(const char *path, struct vnode **dir, char *name)
 
 /* ---------- mount ---------- */
 
-int vfs_mount(const char *path, const char *fs_name, const void *arg)
+static int do_vfs_mount(const char *path, const char *fs_name, const void *arg)
 {
     const struct filesystem *fs = find_fs(fs_name);
     struct mount *m;
@@ -326,22 +354,174 @@ int vfs_mount(const char *path, const char *fs_name, const void *arg)
 
 static struct file *get_file(int fd)
 {
-    if (fd < 0 || fd >= VFS_MAX_FDS || !files[fd].used) {
+    struct vfs_fdtable *t = cur_fdt();
+    if (fd < 0 || fd >= VFS_MAX_FDS || !t->fd[fd]) {
         return NULL;
     }
-    return &files[fd];
+    return t->fd[fd];
+}
+
+static void file_put(struct file *f)
+{
+    if (f && --f->refs <= 0) {
+        vnode_unref(f->vn);
+        memset(f, 0, sizeof(*f));
+    }
+}
+
+/* নতুন description বানিয়ে চলমান টেবিলের সবচেয়ে ছোট খালি fd-তে বসানো */
+static int install_file(int flags, struct vnode *vn, struct mount *mnt)
+{
+    struct vfs_fdtable *t = cur_fdt();
+    int fd, i;
+
+    for (fd = 0; fd < VFS_MAX_FDS && t->fd[fd]; fd++) {
+    }
+    if (fd == VFS_MAX_FDS) {
+        return -EMFILE;
+    }
+    for (i = 0; i < VFS_MAX_FILES; i++) {
+        if (!files[i].used) {
+            files[i].used = 1;
+            files[i].refs = 1;
+            files[i].flags = flags;
+            files[i].offset = 0;
+            files[i].vn = vn;
+            files[i].mnt = mnt;
+            t->fd[fd] = &files[i];
+            return fd;
+        }
+    }
+    return -ENFILE;
 }
 
 int vfs_open_count(void)
 {
     int i, n = 0;
-    for (i = 0; i < VFS_MAX_FDS; i++) {
+    LOCK();
+    for (i = 0; i < VFS_MAX_FILES; i++) {
         n += files[i].used;
+    }
+    UNLOCK();
+    return n;
+}
+
+/* ---------- fd টেবিল (ধাপ ৬) ---------- */
+
+void vfs_set_fdtable_hook(struct vfs_fdtable *(*hook)(void))
+{
+    fdt_hook = hook;
+}
+
+struct vfs_fdtable *vfs_fdtable_create(void)
+{
+    struct vfs_fdtable *t = (struct vfs_fdtable *)kmalloc(sizeof(*t));
+    if (t) {
+        memset(t, 0, sizeof(*t));
+    }
+    return t;
+}
+
+struct vfs_fdtable *vfs_fdtable_clone(void)
+{
+    struct vfs_fdtable *src, *t = vfs_fdtable_create();
+    int i;
+    if (!t) {
+        return NULL;
+    }
+    LOCK();
+    src = cur_fdt();
+    for (i = 0; i < VFS_MAX_FDS; i++) {
+        if (src->fd[i]) {
+            t->fd[i] = src->fd[i];
+            t->fd[i]->refs++;
+        }
+    }
+    UNLOCK();
+    return t;
+}
+
+void vfs_fdtable_destroy(struct vfs_fdtable *t)
+{
+    int i;
+    if (!t) {
+        return;
+    }
+    LOCK();
+    for (i = 0; i < VFS_MAX_FDS; i++) {
+        if (t->fd[i]) {
+            file_put(t->fd[i]);
+            t->fd[i] = NULL;
+        }
+    }
+    UNLOCK();
+    kfree(t);
+}
+
+int vfs_fdtable_used(const struct vfs_fdtable *t)
+{
+    int i, n = 0;
+    if (!t) {
+        t = &kernel_fdt;
+    }
+    for (i = 0; i < VFS_MAX_FDS; i++) {
+        n += t->fd[i] != NULL;
     }
     return n;
 }
 
-int vfs_open(const char *path, int flags)
+int vfs_dup(int oldfd)
+{
+    struct vfs_fdtable *t;
+    struct file *f;
+    int fd;
+
+    LOCK();
+    t = cur_fdt();
+    f = get_file(oldfd);
+    if (!f) {
+        UNLOCK();
+        return -EBADF;
+    }
+    for (fd = 0; fd < VFS_MAX_FDS && t->fd[fd]; fd++) {
+    }
+    if (fd == VFS_MAX_FDS) {
+        UNLOCK();
+        return -EMFILE;
+    }
+    t->fd[fd] = f;
+    f->refs++;
+    UNLOCK();
+    return fd;
+}
+
+int vfs_dup2(int oldfd, int newfd)
+{
+    struct vfs_fdtable *t;
+    struct file *f;
+
+    if (newfd < 0 || newfd >= VFS_MAX_FDS) {
+        return -EBADF;
+    }
+    LOCK();
+    t = cur_fdt();
+    f = get_file(oldfd);
+    if (!f) {
+        UNLOCK();
+        return -EBADF;
+    }
+    if (oldfd != newfd) {
+        if (t->fd[newfd]) {
+            file_put(t->fd[newfd]);
+        }
+        t->fd[newfd] = f;
+        f->refs++;
+    }
+    UNLOCK();
+    return newfd;
+}
+
+static int do_vfs_open(const char *path, int flags)
 {
     struct vnode *vn = NULL;
     struct mount *mnt = NULL;
@@ -397,86 +577,99 @@ int vfs_open(const char *path, int flags)
         }
     }
 
-    for (fd = 0; fd < VFS_MAX_FDS; fd++) {
-        if (!files[fd].used) {
-            files[fd].used = 1;
-            files[fd].flags = flags;
-            files[fd].offset = 0;
-            files[fd].vn = vn;
-            files[fd].mnt = mnt;
-            return fd;
-        }
+    fd = install_file(flags, vn, mnt);
+    if (fd < 0) {
+        vnode_unref(vn);
     }
-    vnode_unref(vn);
-    return -EMFILE;
+    return fd;
 }
 
-int vfs_close(int fd)
+static int do_vfs_close(int fd)
 {
     struct file *f = get_file(fd);
     if (!f) {
         return -EBADF;
     }
-    vnode_unref(f->vn);
-    memset(f, 0, sizeof(*f));
+    cur_fdt()->fd[fd] = NULL;
+    file_put(f);
     return 0;
+}
+
+/* ডিভাইস পড়া/লেখা lock ছাড়া (ফাইল-description ধরে রেখে), বাকি সব lock-এর ভেতরে */
+static int64_t do_rw(int fd, void *rbuf, const void *wbuf, size_t len)
+{
+    struct file *f;
+    struct vnode *vn;
+    uint64_t off;
+    int64_t n;
+
+    LOCK();
+    f = get_file(fd);
+    if (!f) {
+        UNLOCK();
+        return -EBADF;
+    }
+    vn = f->vn;
+    if (rbuf) {
+        if ((f->flags & O_ACCMODE) == O_WRONLY) { UNLOCK(); return -EBADF; }
+        if (vn->type == VNODE_DIR)              { UNLOCK(); return -EISDIR; }
+        if (!vn->ops->read)                     { UNLOCK(); return -EINVAL; }
+    } else {
+        if ((f->flags & O_ACCMODE) == O_RDONLY) { UNLOCK(); return -EBADF; }
+        if (!vn->ops->write)                    { UNLOCK(); return -EROFS; }
+        if ((f->flags & O_APPEND) && vn->type == VNODE_FILE) {
+            f->offset = vn->size;
+        }
+    }
+    off = f->offset;
+
+    if (vn->type == VNODE_CHARDEV) {
+        unsigned depth;
+        f->refs++;                           /* অন্য থ্রেড close করলেও description থাকে */
+        depth = kmutex_release_all(&vfs_lock);
+        n = rbuf ? vn->ops->read(vn, off, rbuf, len) : vn->ops->write(vn, off, wbuf, len);
+        kmutex_relock(&vfs_lock, depth);
+        file_put(f);
+        UNLOCK();
+        return n;
+    }
+
+    n = rbuf ? vn->ops->read(vn, off, rbuf, len) : vn->ops->write(vn, off, wbuf, len);
+    if (n > 0 && vn->type == VNODE_FILE) {
+        f->offset = off + (uint64_t)n;
+    }
+    UNLOCK();
+    return n;
 }
 
 int64_t vfs_read(int fd, void *buf, size_t len)
 {
-    struct file *f = get_file(fd);
-    int64_t n;
-
-    if (!f) {
-        return -EBADF;
-    }
-    if ((f->flags & O_ACCMODE) == O_WRONLY) {
-        return -EBADF;
-    }
-    if (f->vn->type == VNODE_DIR) {
-        return -EISDIR;
-    }
-    if (!f->vn->ops->read) {
+    if (!buf && len) {
         return -EINVAL;
     }
-    n = f->vn->ops->read(f->vn, f->offset, buf, len);
-    if (n > 0 && f->vn->type == VNODE_FILE) {
-        f->offset += (uint64_t)n;
-    }
-    return n;
+    return do_rw(fd, buf ? buf : (void *)"", NULL, len);
 }
 
 int64_t vfs_write(int fd, const void *buf, size_t len)
 {
-    struct file *f = get_file(fd);
-    int64_t n;
-
-    if (!f) {
-        return -EBADF;
-    }
-    if ((f->flags & O_ACCMODE) == O_RDONLY) {
-        return -EBADF;
-    }
-    if (!f->vn->ops->write) {
-        return -EROFS;
-    }
-    if ((f->flags & O_APPEND) && f->vn->type == VNODE_FILE) {
-        f->offset = f->vn->size;
-    }
-    n = f->vn->ops->write(f->vn, f->offset, buf, len);
-    if (n > 0 && f->vn->type == VNODE_FILE) {
-        f->offset += (uint64_t)n;
-    }
-    return n;
+    return do_rw(fd, NULL, buf ? buf : "", len);
 }
 
-int64_t vfs_seek(int fd, int64_t offset, int whence)
+static int64_t do_vfs_seek(int fd, int64_t offset, int whence)
 {
     struct file *f = get_file(fd);
     int64_t base;
 
     if (!f) {
         return -EBADF;
+    }
+    if (f->vn->type == VNODE_DIR) {
+        /* ধাপ ৬: ডিরেক্টরিতে offset = পরের এন্ট্রির index (getdents64-এর জন্য) */
+        if (whence == SEEK_CUR) offset += (int64_t)f->offset;
+        else if (whence != SEEK_SET) return -EINVAL;
+        if (offset < 0) return -EINVAL;
+        f->offset = (uint64_t)offset;
+        return offset;
     }
     if (f->vn->type != VNODE_FILE) {
         return -ESPIPE;
@@ -505,7 +698,7 @@ static void fill_stat(struct vnode *vn, struct mount *mnt, struct vfs_stat *st)
     st->fs_name = (mnt && mnt->fs) ? mnt->fs->name : "?";
 }
 
-int vfs_fstat(int fd, struct vfs_stat *st)
+static int do_vfs_fstat(int fd, struct vfs_stat *st)
 {
     struct file *f = get_file(fd);
     if (!f) {
@@ -515,7 +708,7 @@ int vfs_fstat(int fd, struct vfs_stat *st)
     return 0;
 }
 
-int vfs_readdir(int fd, struct vfs_dirent *out)
+static int do_vfs_readdir(int fd, struct vfs_dirent *out)
 {
     struct file *f = get_file(fd);
     int r;
@@ -538,7 +731,7 @@ int vfs_readdir(int fd, struct vfs_dirent *out)
 
 /* ---------- পাথ অপারেশন ---------- */
 
-int vfs_stat(const char *path, struct vfs_stat *st)
+static int do_vfs_stat(const char *path, struct vfs_stat *st)
 {
     struct vnode *vn;
     struct mount *mnt;
@@ -551,7 +744,7 @@ int vfs_stat(const char *path, struct vfs_stat *st)
     return 0;
 }
 
-int vfs_mkdir(const char *path)
+static int do_vfs_mkdir(const char *path)
 {
     struct vnode *dir, *child;
     char name[VFS_NAME_MAX + 1];
@@ -578,7 +771,7 @@ int vfs_mkdir(const char *path)
     return 0;
 }
 
-int vfs_mkdir_p(const char *path)
+static int do_vfs_mkdir_p(const char *path)
 {
     char partial[VFS_PATH_MAX];
     size_t i, len = strnlen(path, VFS_PATH_MAX);
@@ -646,10 +839,41 @@ static int remove_entry(const char *path, int want_dir)
     return err;
 }
 
-int vfs_unlink(const char *path) { return remove_entry(path, 0); }
-int vfs_rmdir(const char *path)  { return remove_entry(path, 1); }
+int vfs_unlink(const char *path)
+{
+    int r;
+    LOCK();
+    r = remove_entry(path, 0);
+    UNLOCK();
+    return r;
+}
 
-int vfs_truncate(const char *path, uint64_t size)
+int vfs_rmdir(const char *path)
+{
+    int r;
+    LOCK();
+    r = remove_entry(path, 1);
+    UNLOCK();
+    return r;
+}
+
+static int do_vfs_statfs(const char *path, struct vfs_statfs *st)
+{
+    struct vnode *vn;
+    struct mount *mnt = NULL;
+    int err = resolve(path, &vn, &mnt);
+    if (err < 0) {
+        return err;
+    }
+    vnode_unref(vn);
+    memset(st, 0, sizeof(*st));
+    if (mnt && mnt->fs && mnt->fs->statfs) {
+        return mnt->fs->statfs(mnt->root, st);
+    }
+    return 0;
+}
+
+static int do_vfs_truncate(const char *path, uint64_t size)
 {
     struct vnode *vn;
     int err = resolve(path, &vn, NULL);
@@ -663,4 +887,47 @@ int vfs_truncate(const char *path, uint64_t size)
     }
     vnode_unref(vn);
     return err;
+}
+
+/* ---------- lock-সহ public ফাংশন (ধাপ ৬) ---------- */
+
+int vfs_mount(const char *path, const char *fs_name, const void *arg)
+{ int r; LOCK(); r = do_vfs_mount(path, fs_name, arg); UNLOCK(); return r; }
+
+int vfs_open(const char *path, int flags)
+{ int r; LOCK(); r = do_vfs_open(path, flags); UNLOCK(); return r; }
+
+int vfs_close(int fd)
+{ int r; LOCK(); r = do_vfs_close(fd); UNLOCK(); return r; }
+
+int64_t vfs_seek(int fd, int64_t offset, int whence)
+{ int64_t r; LOCK(); r = do_vfs_seek(fd, offset, whence); UNLOCK(); return r; }
+
+int vfs_fstat(int fd, struct vfs_stat *st)
+{ int r; LOCK(); r = do_vfs_fstat(fd, st); UNLOCK(); return r; }
+
+int vfs_readdir(int fd, struct vfs_dirent *out)
+{ int r; LOCK(); r = do_vfs_readdir(fd, out); UNLOCK(); return r; }
+
+int vfs_stat(const char *path, struct vfs_stat *st)
+{ int r; LOCK(); r = do_vfs_stat(path, st); UNLOCK(); return r; }
+
+int vfs_mkdir(const char *path)
+{ int r; LOCK(); r = do_vfs_mkdir(path); UNLOCK(); return r; }
+
+int vfs_mkdir_p(const char *path)
+{ int r; LOCK(); r = do_vfs_mkdir_p(path); UNLOCK(); return r; }
+
+int vfs_truncate(const char *path, uint64_t size)
+{ int r; LOCK(); r = do_vfs_truncate(path, size); UNLOCK(); return r; }
+
+int vfs_statfs(const char *path, struct vfs_statfs *st)
+{ int r; LOCK(); r = do_vfs_statfs(path, st); UNLOCK(); return r; }
+
+int vfs_lookup(const char *path, struct vnode **out)
+{ int r; LOCK(); r = do_vfs_lookup(path, out); UNLOCK(); return r; }
+
+uint64_t vfs_lock_contended(void)
+{
+    return vfs_lock.contended;
 }

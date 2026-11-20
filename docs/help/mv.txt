@@ -1,0 +1,5 @@
+# mv - move or rename a file
+  `mv file dst`   dst may be a new name or a directory
+rozOS has no rename system call yet, so mv copies the file and then
+deletes the original (only files, not directories).
+Back to [[programs]].

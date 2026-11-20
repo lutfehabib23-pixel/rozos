@@ -1,0 +1,18 @@
+# Shell built-in commands
+These run inside [[rozsh]] itself (no new process):
+
+  `cd [dir]`        change directory; no dir = $HOME; `cd -` = previous
+  `pwd`             print the current directory
+  `echo [-n] text`  print text (-n: no newline at the end)
+  `export N=V`      set an environment variable for later programs
+  `export`          list all variables
+  `unset N`         remove a variable
+  `env`             print the environment
+  `history`         numbered list of earlier commands ([[history]])
+  `time cmd ...`    run cmd and print how long it took
+  `source file`     run commands from a file (`. file` also works)
+  `help [page]`     this help viewer ([[help]])
+  `exit [code]`     leave the shell; /bin/init starts a new one
+
+Built-ins can be redirected too: `history > /tmp/h.txt`
+See [[variables]] for what $NAME, $? and quotes do.

@@ -1,0 +1,6 @@
+# cat - print files
+  `cat [file ...]`
+Prints each file in order. With no file (or "-") it copies stdin, so
+`cat < a.txt` works and `cat > new.txt` copies what you type (no
+Ctrl+D end-of-file yet on the console - prefer [[edit]]).
+Example: `cat /etc/motd /etc/hostname`   Back to [[programs]].

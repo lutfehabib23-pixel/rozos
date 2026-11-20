@@ -1,0 +1,25 @@
+# Running rozOS in QEMU (on the build PC)
+All of these run in the WSL terminal, in the rozOS source folder:
+
+  `make run-serial`   boot in this terminal only (no window)
+  `make run`          boot with a QEMU window and this terminal
+  `make run-uefi`     the same, with UEFI firmware instead of BIOS
+  `make disk-reset`   rebuild the disk image from sysroot/ (erases it!)
+  `make disk-check`   check the disk image with e2fsck (QEMU stopped)
+  `make disk-update`  copy only new programs, libc and TCC to the disk
+
+The run targets call disk-update by themselves when a program changed,
+so normally `make run-serial` is all you need.
+
+== Leaving QEMU ==
+Press `Ctrl+A`, release, then `X`. Ctrl+C goes to rozOS instead (the
+shell uses it to cancel a line).
+
+== Screen size ==
+The framebuffer is 142x50 characters, but your terminal may be smaller.
+Find its size on the host with `stty size`, then in rozOS run
+`stty 30 120` (rows, columns) so [[edit]] and [[help]] fit. See [[stty]].
+
+== Boot menu ==
+Limine shows two entries for 3 seconds: "rozOS" and "rozOS (no init)".
+The second skips the shell and starts [[kmon]] directly. See [[boot]].

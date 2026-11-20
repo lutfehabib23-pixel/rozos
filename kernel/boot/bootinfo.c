@@ -31,6 +31,7 @@ int bootinfo_save(void)
     struct limine_memmap_response *mm = limine_memmap_req.response;
     struct limine_module_response *mods = limine_module_req.response;
     struct limine_rsdp_response *rs = limine_rsdp_req.response;
+    struct limine_date_at_boot_response *dt = limine_date_req.response;
     uint64_t i;
 
     memset(&info, 0, sizeof(info));
@@ -62,6 +63,10 @@ int bootinfo_save(void)
         /* PROTOCOL.md: base revision 3-এ ফিজিক্যাল, অন্য সবগুলোতে HHDM ভার্চুয়াল */
         uint64_t a = (uint64_t)(uintptr_t)rs->address;
         info.rsdp_phys = (a >= info.hhdm_offset) ? a - info.hhdm_offset : a;
+    }
+
+    if (dt) {
+        info.boot_unix_time = dt->timestamp;
     }
 
     for (i = 0; i < mm->entry_count; i++) {

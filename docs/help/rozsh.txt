@@ -1,0 +1,31 @@
+# rozsh - the rozOS shell
+The shell reads a line, splits it into words, and runs it. /bin/init
+starts it at boot and starts a new one if it exits.
+
+== How a command runs ==
+1. The line is cut into commands at `;` (see [[redirect]]).
+2. Each command is cut into words; quotes and $NAME are handled
+   ([[variables]]).
+3. If the first word is a built-in (cd, echo, ...) the shell does it
+   itself ([[builtins]]).
+4. Otherwise it searches the directories in $PATH (normally /bin),
+   then fork()s a copy of itself, the copy exec()s the program, and
+   the shell wait()s for it ([[processes]]).
+5. The exit code is kept in $? and a red $ in the prompt means the
+   last command failed.
+
+== Examples ==
+  `ls -l /bin ; echo done`
+  `cat < /etc/motd > /tmp/copy.txt`
+  `echo "home is $HOME, last status $?"`
+  `time tcc /src/hello.c -o /tmp/h`
+
+== Scripts ==
+`rozsh file.sh` or `source file.sh` runs commands from a file, one per
+line; # starts a comment. At login ~/.rozshrc is run (it sets EDITOR).
+
+== Line editing ==
+See [[keys]] and [[history]].
+
+== Not yet ==
+Pipes (|), background jobs (&), && and ||, Tab completion, globbing (*).

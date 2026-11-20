@@ -1,0 +1,36 @@
+# Index - start here
+Welcome to the rozOS help system. Highlighted words are links:
+press Tab to move to the next link, Enter to open it, Backspace to go back.
+Type [[help|how to use this viewer]] if you are new here.
+
+== Getting started ==
+  [[quickstart]]      your first five minutes in rozOS
+  [[keys]]            every special key, in one place
+  [[qemu]]            running rozOS on your PC (make run, quitting QEMU)
+
+== The shell (rozsh) ==
+  [[rozsh]]           what the shell does and how a command runs
+  [[builtins]]        cd, pwd, echo, export, history, time, source ...
+  [[redirect]]        < > >> 2> 2>&1 and ; between commands
+  [[variables]]       $NAME, $?, quotes, ~ and the environment
+  [[history]]         up/down arrows and ~/.rozsh_history
+
+== Programs in /bin ==
+  [[programs]]        the full list, one line each
+  [[edit]]            the text editor
+  [[tcc]]             the C compiler - build programs inside rozOS
+  [[kmon]]            the kernel monitor (debugging)
+  [[systest]]         the self-test (36 checks)
+
+== Writing software ==
+  [[c-programming]]   write, compile and run a C program, step by step
+  [[rozlibc]]         the C library: headers and what is in them
+  [[self-hosting]]    rebuilding TCC with TCC, and the road ahead
+
+== How rozOS works ==
+  [[files]]           the directory layout (/bin, /usr, /tmp, /dev ...)
+  [[disks]]           ext2 on disk, tmpfs in RAM, devfs, the initrd
+  [[processes]]       fork, exec, wait, kill, signals, ring 3
+  [[syscalls]]        how programs talk to the kernel
+  [[kernel]]          the big picture: boot, memory, scheduler, drivers
+  [[boot]]            what happens from power-on to the shell prompt

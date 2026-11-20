@@ -1,0 +1,21 @@
+# Variables, quotes and the environment
+== Variables ==
+  `$NAME` or `${NAME}`  value of an environment variable
+  `$?`                  exit code of the last command (0 = success)
+  `$$`                  process id of the shell
+  `~`                   $HOME at the start of a word (/home)
+Set one with `export NAME=value`, remove it with `unset NAME`.
+
+Variables at boot: PATH=/bin, HOME=/home, TERM=rozos, USER=root,
+SHELL=/bin/rozsh, EDITOR=edit (from ~/.rozshrc). Programs get a copy of
+the environment when they start; `getenv("HOME")` reads it in C.
+
+== Quotes ==
+  `'single'`   everything literal, no $ expansion
+  `"double"`   spaces kept, $NAME expanded, \" and \$ escape
+  `\x`         the character x literally (for example `\ ` a space)
+Example: `echo "a  b" 'c $HOME' \$HOME` prints:  a  b c $HOME $HOME
+
+== Exit codes ==
+0 means success. 127 = command not found, 126 = could not run it,
+128+N = killed by signal N (139 = segmentation fault). See [[processes]].

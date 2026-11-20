@@ -1,0 +1,24 @@
+# Programs in /bin
+== Files ==
+  [[ls]]       list a directory          [[cat]]     print files
+  [[cp]]       copy files                [[mv]]      move/rename a file
+  [[rm]]       delete files or trees     [[mkdir]]   make directories
+  [[rmdir]]    delete an empty directory [[touch]]   create an empty file
+  [[wc]]       count lines, words, bytes
+
+== Text and development ==
+  [[edit]]     the text editor           [[tcc]]     the C compiler
+
+== System ==
+  [[uname]]    system name and version   [[date]]    date and time (UTC)
+  [[echo]]     print text                [[clear]]   clear the screen
+  [[sleep]]    wait some seconds         [[stty]]    console size
+  [[kmon]]     kernel monitor            [[rozhelp]] this help viewer
+  [[init]]     process 1 (starts the shell)
+  [[rozsh]]    the shell
+
+== Tests and demos ==
+  [[systest]]  36 kernel and libc tests  [[demos|hello, spin, crash]]
+
+Every program is a normal ELF file built from userland/ in the source
+tree; you can write your own with [[c-programming|tcc]].

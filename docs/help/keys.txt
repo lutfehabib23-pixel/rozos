@@ -1,0 +1,26 @@
+# Keys
+== In the shell ([[rozsh]]) ==
+  `Left` `Right`       move in the line       `Home` `End`  start / end
+  `Up` `Down`          older / newer command from [[history]]
+  `Backspace` `Delete` delete a character
+  `Ctrl+U`           delete everything left of the cursor
+  `Ctrl+W`           delete the previous word
+  `Ctrl+L`           clear the screen
+  `Ctrl+C`           cancel the current line
+  `Ctrl+D`           on an empty line: exit the shell (init starts a new one)
+
+== In the editor ([[edit]]) ==
+  `Ctrl+S` save  `Ctrl+Q` or `Ctrl+X` quit  `Ctrl+F` find  `Ctrl+G` go to line
+  `Ctrl+K` cut line  `Ctrl+U` paste line  `Ctrl+L` redraw
+
+== In the help viewer ([[help]]) ==
+  `Tab` next link, `Enter` open, `Backspace` back, `q` quit
+
+== In QEMU on the host ([[qemu]]) ==
+  `Ctrl+A` then `X`    quit QEMU (serial terminal)
+  `Ctrl+A` `Ctrl+A`    send one Ctrl+A to rozOS
+
+== Not yet ==
+Ctrl+C does not stop a running program yet (no signals for that); use
+`kmon` and its `kill <pid>` from another moment, see [[processes]].
+Ctrl+K as a shortcut to [[kmon]] is planned.

@@ -7,7 +7,9 @@
  * ধাপ ৩: bootinfo কপি → PMM → VMM (নিজস্ব PML4) → heap (kmalloc, C++ new/delete) →
  * ACPI → LAPIC/I-O APIC → LAPIC টাইমার → bootloader-reclaimable মেমোরি ফেরত।
  * ধাপ ৪: VFS → tmpfs "/" → devfs "/dev" → initrd (tar) "/"-এ খোলা।
- * পরের ধাপগুলো (ডিস্ক, প্রসেস ...) এখানে ক্রমানুসারে যোগ হবে। */
+ * ধাপ ৫: PCI স্ক্যান → AHCI ডিস্ক (/dev/sdX) → ext2 ডিস্ক থাকলে সেটাই "/",
+ *        tmpfs "/tmp"-এ; ডিস্ক না থাকলে আগের মতো tmpfs + initrd।
+ * পরের ধাপগুলো (প্রসেস, syscall ...) এখানে ক্রমানুসারে যোগ হবে। */
 
 #include <stdint.h>
 #include <stddef.h>
@@ -32,6 +34,15 @@
 #include <rozos/devfs.h>
 #include <rozos/initrd.h>
 #include <rozos/errno.h>
+#include <rozos/pci.h>
+#include <rozos/block.h>
+#include <rozos/ahci.h>
+#include <rozos/ext2.h>
+#include <rozos/clock.h>
+#include <rozos/string.h>
+#include <rozos/sched.h>
+#include <rozos/proc.h>
+#include <rozos/syscall.h>
 #ifdef ROZOS_KCXX
 #include <rozos/kcxx.h>
 #endif
@@ -42,7 +53,7 @@
 #include <arch/x86_64/pit.h>
 #include <arch/x86_64/apic.h>
 
-#define ROZOS_VERSION "0.4.0-phase4"
+#define ROZOS_VERSION "0.8.0-phase8"
 
 /* linker.ld থেকে */
 extern char __kernel_start[], __kernel_end[];
@@ -302,38 +313,188 @@ static void init_apic(void)
     }
 }
 
-/* ধাপ ৪: ফাইলসিস্টেম। initrd মডিউলের ডেটা executable_and_modules অঞ্চলে থাকে
+/* ধাপ ৬: শিডিউলার, প্রসেস, syscall। heap আর চূড়ান্ত টাইমার (APIC) লাগে, আর
+ * VFS-এর lock শিডিউলারের থ্রেড চেনে — তাই স্টোরেজের আগে। */
+static void init_processes(void)
+{
+    char msg[96];
+
+    sched_init();
+    ksnprintf(msg, sizeof(msg), "Scheduler: round-robin, %u ms slices, %u KiB kernel stacks, SSE on",
+              (unsigned)SCHED_SLICE_MS, (unsigned)(SCHED_KSTACK_SIZE / 1024));
+    print_ok(msg);
+
+    proc_init();
+    syscall_init();
+    print_ok("Syscalls: syscall/sysret (fast) and int 0x80, Linux x86-64 numbers");
+}
+
+/* কার্নেলের command line-এ word আছে কিনা (স্পেস দিয়ে আলাদা শব্দ) */
+static int cmdline_has(const char *word)
+{
+    const char *c = bootinfo()->cmdline;
+    size_t n = strlen(word);
+    while (*c) {
+        while (*c == ' ') c++;
+        if (!strncmp(c, word, n) && (c[n] == ' ' || c[n] == '\0')) {
+            return 1;
+        }
+        while (*c && *c != ' ') c++;
+    }
+    return 0;
+}
+
+/* ধাপ ৬-৭: প্রথম ইউজার প্রোগ্রাম। ধাপ ৭ থেকে init shell (rozsh) চালায় এবং কখনো শেষ
+ * হয় না, তাই এই থ্রেড শুধু অপেক্ষা করে; init কোনো কারণে শেষ হলে তবেই কনসোলে kmon
+ * আসে (shell থেকে kmon চাইলে /bin/kmon)। */
+static void start_init(void)
+{
+    static const char *const argv[] = { "/bin/init", NULL };
+    struct vfs_stat st;
+    char msg[96];
+    int pid, status, r;
+
+    if (cmdline_has("noinit")) {
+        print_warn("'noinit' on the kernel command line: /bin/init not started");
+        return;
+    }
+    if (vfs_stat("/bin/init", &st) < 0) {
+        print_warn("no /bin/init (run 'make disk-update' or 'make disk-reset')");
+        return;
+    }
+    pid = proc_spawn("/bin/init", argv, 0);
+    if (pid < 0) {
+        ksnprintf(msg, sizeof(msg), "could not start /bin/init: %s", kstrerror(pid));
+        print_warn(msg);
+        return;
+    }
+    ksnprintf(msg, sizeof(msg), "Started /bin/init as pid %d (ring 3)", pid);
+    print_ok(msg);
+    kprintf("\n");
+
+    r = proc_wait_kernel(pid, &status, 0);
+    if (r < 0) {
+        ksnprintf(msg, sizeof(msg), "waiting for /bin/init failed: %s", kstrerror(r));
+        print_warn(msg);
+        return;
+    }
+    if (status & 0x7F) {
+        ksnprintf(msg, sizeof(msg), "/bin/init was killed by signal %d", status & 0x7F);
+        print_warn(msg);
+    } else {
+        ksnprintf(msg, sizeof(msg), "/bin/init exited with code %d - kmon takes over the console",
+                  (status >> 8) & 0xFF);
+        print_warn(msg);
+    }
+}
+
+/* ধাপ ৫: ডিস্ক। VFS আর devfs আগে তৈরি হয়, কারণ ডিস্ক ড্রাইভার নিজেকে /dev-এ
+ * (sda ...) নিবন্ধন করে। */
+static void init_storage(void)
+{
+    char msg[128];
+    struct ahci_info ai;
+    size_t i;
+    int n;
+
+    vfs_init();
+    devfs_init();
+
+    n = pci_init();
+    ksnprintf(msg, sizeof(msg), "PCI: %d device(s)", n);
+    print_ok(msg);
+
+    n = ahci_init();
+    ahci_get_info(&ai);
+    if (!ai.present) {
+        print_warn("no AHCI (SATA) controller");
+    } else {
+        ksnprintf(msg, sizeof(msg), "AHCI %u.%u: %d disk(s), %u command slots, %s DMA",
+                  (unsigned)(ai.version >> 16), (unsigned)((ai.version >> 8) & 0xFF), n,
+                  (unsigned)ai.command_slots, ai.supports_64bit ? "64-bit" : "32-bit");
+        print_ok(msg);
+    }
+    for (i = 0; i < block_device_count(); i++) {
+        struct block_device *d = block_device_at(i);
+        ksnprintf(msg, sizeof(msg), "/dev/%s: %llu MiB, %u-byte sectors, \"%s\"",
+                  d->name, (unsigned long long)(d->sector_count * d->sector_size / (1024 * 1024)),
+                  (unsigned)d->sector_size, d->model);
+        print_ok(msg);
+    }
+}
+
+/* ext2 পাওয়া প্রথম ডিস্ক "/"-এ; সফল হলে 1 */
+static int mount_disk_root(void)
+{
+    char msg[128];
+    size_t i;
+    for (i = 0; i < block_device_count(); i++) {
+        struct block_device *d = block_device_at(i);
+        struct vfs_statfs sf;
+        if (vfs_mount("/", "ext2", d->name) == 0) {
+            vfs_statfs("/", &sf);
+            ksnprintf(msg, sizeof(msg), "ext2 on /dev/%s mounted on / (%llu MiB, %llu MiB free%s)",
+                      d->name,
+                      (unsigned long long)(sf.total_blocks * sf.block_size / (1024 * 1024)),
+                      (unsigned long long)(sf.free_blocks * sf.block_size / (1024 * 1024)),
+                      sf.read_only ? ", read-only" : "");
+            print_ok(msg);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* ধাপ ৪-৫: ফাইলসিস্টেম। initrd মডিউলের ডেটা executable_and_modules অঞ্চলে থাকে
  * (reclaim হয় না), আর এর তথ্য bootinfo-তে কপি করা — তাই এটা reclaim-এর আগে বা পরে
  * যেকোনো সময় চলতে পারে। */
 static void init_vfs(void)
 {
     char msg[128];
     struct initrd_stats st;
-    int err;
+    int err, disk_root;
 
-    vfs_init();
     vfs_register_filesystem(&tmpfs_filesystem);
-    devfs_init();
+    vfs_register_filesystem(&ext2_filesystem);
 
-    err = vfs_mount("/", "tmpfs", NULL);
-    if (err < 0) {
-        kpanic("could not mount tmpfs on /: %s", kstrerror(err));
-    }
-    print_ok("VFS: tmpfs mounted on /");
-
-    err = initrd_load("/", &st);
-    if (err == -ENOENT) {
-        print_warn("no initrd module: / is empty");
-    } else if (err < 0 || st.errors) {
-        ksnprintf(msg, sizeof(msg), "initrd %s: %llu files, %llu errors",
-                  st.module_path, (unsigned long long)st.files, (unsigned long long)st.errors);
-        print_warn(msg);
+    disk_root = mount_disk_root();
+    if (disk_root) {
+        if (bootinfo()->module_count) {
+            print_ok("initrd present but not used: root is on disk");
+        }
+        vfs_mkdir_p("/tmp");
+        vfs_mkdir_p("/dev");
+        err = vfs_mount("/tmp", "tmpfs", NULL);
+        if (err < 0) {
+            ksnprintf(msg, sizeof(msg), "could not mount tmpfs on /tmp: %s", kstrerror(err));
+            print_warn(msg);
+        } else {
+            print_ok("tmpfs mounted on /tmp");
+        }
     } else {
-        ksnprintf(msg, sizeof(msg), "initrd %s (%llu KiB): %llu files, %llu dirs, %llu bytes",
-                  st.module_path, (unsigned long long)(st.archive_size / 1024),
-                  (unsigned long long)st.files, (unsigned long long)st.dirs,
-                  (unsigned long long)st.bytes);
-        print_ok(msg);
+        err = vfs_mount("/", "tmpfs", NULL);
+        if (err < 0) {
+            kpanic("could not mount tmpfs on /: %s", kstrerror(err));
+        }
+        print_ok("VFS: no ext2 disk - tmpfs mounted on /");
+        err = initrd_load("/", &st);
+        disk_root = -1;
+    }
+
+    if (disk_root < 0) {
+        if (err == -ENOENT) {
+            print_warn("no initrd module: / is empty");
+        } else if (err < 0 || st.errors) {
+            ksnprintf(msg, sizeof(msg), "initrd %s: %llu files, %llu errors",
+                      st.module_path, (unsigned long long)st.files, (unsigned long long)st.errors);
+            print_warn(msg);
+        } else {
+            ksnprintf(msg, sizeof(msg), "initrd %s (%llu KiB): %llu files, %llu dirs, %llu bytes",
+                      st.module_path, (unsigned long long)(st.archive_size / 1024),
+                      (unsigned long long)st.files, (unsigned long long)st.dirs,
+                      (unsigned long long)st.bytes);
+            print_ok(msg);
+        }
     }
 
     /* /dev, /tmp নিশ্চিত (initrd-এ না থাকলেও) */
@@ -344,7 +505,7 @@ static void init_vfs(void)
         ksnprintf(msg, sizeof(msg), "could not mount devfs on /dev: %s", kstrerror(err));
         print_warn(msg);
     } else {
-        print_ok("devfs mounted on /dev (null, zero, console, serial0, kbd)");
+        print_ok("devfs mounted on /dev");
     }
 }
 
@@ -401,6 +562,8 @@ void kmain(void)
     init_interrupts_and_devices();
     init_memory();
     init_apic();
+    init_processes();
+    init_storage();
     init_vfs();
 
     print_boot_info(revision);
@@ -418,7 +581,7 @@ void kmain(void)
     }
 
     tty_set_color(TTY_COLOR_LIGHT_GREEN, TTY_COLOR_BLACK);
-    kprintf("\nrozOS booted. Phase 4: virtual file system and initrd ready.\n");
+    kprintf("\nrozOS booted. Phase 8: TCC compiler, rozhelp and rozlibc math.\n");
     tty_set_color(TTY_COLOR_LIGHT_GREY, TTY_COLOR_BLACK);
 
     /* /etc/motd থাকলে দেখানো — initrd থেকে আসা প্রথম "ফাইল" */
@@ -435,5 +598,6 @@ void kmain(void)
         }
     }
 
+    start_init();
     kmon_run();
 }

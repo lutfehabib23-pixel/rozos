@@ -1,0 +1,5 @@
+# cp - copy files
+  `cp src dst`            copy one file (dst is replaced)
+  `cp src1 src2 ... dir`  copy files into a directory
+Directories themselves are not copied yet.
+Example: `cp /src/hello.c ~/hello.c`   Back to [[programs]].

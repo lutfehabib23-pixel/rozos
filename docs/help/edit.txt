@@ -1,0 +1,23 @@
+# edit - the text editor
+  `edit [file]`   open (or create) a file; without a name it cannot save
+
+== Screen ==
+Top line: file name and [modified]. Bottom: messages, line:column and
+how far into the file you are, then the key reminder.
+
+== Keys ==
+  arrows, `Home` `End` `PgUp` `PgDn`   move
+  `Enter`        new line (keeps the indentation of the line above)
+  `Backspace` `Delete`   delete; at a line edge they join lines
+  `Tab`          a tab character (shown as spaces, tab stop 4)
+  `Ctrl+S`       save           `Ctrl+Q` or `Ctrl+X`   quit
+  `Ctrl+F`       find; press Ctrl+F then Enter again for the next match
+  `Ctrl+G`       go to a line number
+  `Ctrl+K`       cut the current line   `Ctrl+U`   paste it above
+  `Ctrl+L`       redraw (after `stty`)
+Quitting with unsaved changes asks: `y` save, `n` throw away, `Esc` stay.
+
+== Good to know ==
+Saving rewrites the whole file. Only changed screen lines are sent, so
+it is quick even over the serial line. If the screen looks cut off, set
+the size with [[stty]]. See also [[c-programming]] and [[keys]].

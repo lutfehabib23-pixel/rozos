@@ -1,0 +1,10 @@
+# Demo programs: hello, spin, crash
+  `hello a "b c"`  prints its pid, arguments and environment, exits with 7
+                   (so `echo $?` prints 7)
+  `spin X 20`      busy-loops printing X0 X1 ... using floating point.
+                   Start two in [[kmon]] (`spawn spin A`, `spawn spin B`)
+                   to watch the scheduler share the CPU.
+  `crash`          writes to address 0: the kernel kills only this
+                   process with signal 11 ("segmentation fault")
+  `crash ud`       runs an invalid instruction: signal 4
+See [[processes]].

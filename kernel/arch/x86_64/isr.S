@@ -12,7 +12,10 @@
  * CPU-র 5টা + error + vector + 15টা রেজিস্টার = 22 × 8 = 176 বাইট (16-এর গুণিতক),
  * তাই `call interrupt_dispatch`-এর আগে rsp 16-byte aligned থাকে (SysV ABI)।
  *
- * নোট (ধাপ ৬): ইউজার-মোড থেকে ইন্টারাপ্ট এলে এখানে swapgs যোগ হবে। */
+ * ধাপ ৬: ইউজার-মোড (CS-এর RPL = 3) থেকে এলে ঢোকা ও বেরোনোর সময় swapgs —
+ * কার্নেলে GS = CPU-র নিজস্ব তথ্য (sched.c-র cpu_local), ইউজারে GS = ইউজারের।
+ * interrupt_return লেবেলটা বাইরে থেকেও ব্যবহার হয়: নতুন ইউজার থ্রেড ও fork-এর
+ * সন্তান কার্নেল স্ট্যাকে একটা interrupt_frame বানিয়ে এখানে লাফ দেয়। */
 
     .section .text
 
@@ -33,6 +36,10 @@ isr_stub_table:
     .align 16
     .type isr_common, @function
 isr_common:
+    testb   $3, 24(%rsp)        /* CS (vector, error, rip-এর পরে) */
+    jz      1f
+    swapgs
+1:
     cld                         /* SysV ABI: direction flag শূন্য */
     pushq   %rax
     pushq   %rbx
@@ -53,6 +60,8 @@ isr_common:
     movq    %rsp, %rdi          /* struct interrupt_frame * */
     call    interrupt_dispatch
 
+    .global interrupt_return
+interrupt_return:
     popq    %r15
     popq    %r14
     popq    %r13
@@ -70,6 +79,10 @@ isr_common:
     popq    %rax
 
     addq    $16, %rsp           /* vector + error code */
+    testb   $3, 8(%rsp)         /* ফেরার CS */
+    jz      2f
+    swapgs
+2:
     iretq
     .size isr_common, . - isr_common
 

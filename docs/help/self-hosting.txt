@@ -1,0 +1,15 @@
+# Self-hosting
+The goal: improve rozOS from inside rozOS.
+
+== Step 1 (done): TCC rebuilds TCC ==
+     `rozsh /usr/src/tcc/build-in-rozos.sh`
+compiles /usr/src/tcc/tcc.c with /bin/tcc into /tmp/tcc-new. Test it:
+     `/tmp/tcc-new /src/hello.c -o /tmp/h ; /tmp/h`
+and install it with `cp /tmp/tcc-new /bin/tcc` if you want.
+
+== Step 2: rebuild userland programs ==
+Their sources are not on the disk yet; they will be put in /usr/src.
+
+== Step 3 (phase 11): rebuild the kernel ==
+The kernel needs a linker script and a few assembler features that
+TCC's built-in assembler and linker must handle. See [[kernel]].

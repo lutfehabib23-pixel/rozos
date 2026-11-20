@@ -1,0 +1,22 @@
+# Redirection and command lists
+Every program starts with three open files: 0 = input (stdin),
+1 = output (stdout), 2 = errors (stderr). Normally all three are the
+console. Redirection connects them to files instead:
+
+  `cmd < file`      read input from file
+  `cmd > file`      write output to file (the file is emptied first)
+  `cmd >> file`     append output to the end of file
+  `cmd 2> file`     write error messages to file
+  `cmd 2>&1`        send errors where output goes
+  `> file`          just create (or empty) file
+
+Several can be combined:  `wc < /etc/motd > /tmp/count.txt 2>&1`
+
+== Several commands on one line ==
+  `mkdir /tmp/a ; cd /tmp/a ; pwd`
+The commands run one after another, whatever the result.
+
+== How it works ==
+The shell opens the file, then uses dup2() to put it on fd 0, 1 or 2 in
+the child process before exec(). See [[processes]] and [[syscalls]].
+Pipes (cmd1 | cmd2) are not there yet.

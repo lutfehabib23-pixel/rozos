@@ -5,3 +5,5 @@ limine/
 *.o
 *.d
 limine-protocol/
+rozos-disk.img
+ports/tcc/src/

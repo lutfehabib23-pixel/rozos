@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <rozos/sched.h>
 #include <rozos/timer.h>
 #include "pit.h"
 #include "pic.h"
@@ -117,6 +118,12 @@ uint64_t timer_uptime_ms(void)
 void timer_sleep_ms(uint64_t ms)
 {
     uint64_t target = timer_uptime_ms() + ms;
+
+    /* ধাপ ৬: শিডিউলার চালু থাকলে থ্রেড ঘুমায়, CPU অন্যরা পায় */
+    if (sched_can_sleep()) {
+        sched_sleep_ms(ms);
+        return;
+    }
     for (;;) {
         cpu_cli();
         if (timer_uptime_ms() >= target) {

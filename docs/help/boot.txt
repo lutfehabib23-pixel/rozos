@@ -1,0 +1,11 @@
+# From power-on to the prompt
+1. Firmware (BIOS or UEFI) starts Limine from the CD image.
+2. Limine shows the menu ("rozOS" / "rozOS (no init)"), loads the
+   kernel and the initrd, sets up 64-bit mode and the framebuffer.
+3. The kernel prints [ OK ] lines as it starts each part: serial,
+   screen, GDT/IDT, timer, keyboard, memory, ACPI/APIC, scheduler,
+   syscalls, PCI, AHCI, ext2 on /, tmpfs on /tmp, devfs on /dev.
+4. It gives the bootloader's memory back and prints /etc/motd.
+5. It starts /bin/init as pid 1 ([[init]]), which starts [[rozsh]].
+If something fails you see a red KERNEL PANIC with registers; the
+serial terminal on the PC keeps a copy. See [[kernel]] and [[qemu]].

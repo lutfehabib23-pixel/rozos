@@ -1,0 +1,4 @@
+# date - current date and time
+Prints the time in UTC. The kernel reads the clock once at boot (from
+the bootloader) and counts timer ticks after that; there are no time
+zones yet.   Back to [[programs]].

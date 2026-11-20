@@ -3,7 +3,7 @@
  * ভেক্টর বিন্যাস:
  *   0x00-0x1F  CPU এক্সেপশন
  *   0x20-0x2F  লিগ্যাসি PIC-এর IRQ 0-15 (pic.c)
- *   0x30-0xFE  ভবিষ্যৎ: APIC টাইমার, IPI, MSI, syscall (int 0x80) ইত্যাদি
+ *   0x30-0xFE  APIC টাইমার (0x30), syscall int 0x80 (ধাপ ৬); ভবিষ্যৎ: IPI, MSI
  *   0xFF       APIC spurious (ধাপ ৩) */
 #ifndef ROZOS_ARCH_X86_64_IDT_H
 #define ROZOS_ARCH_X86_64_IDT_H
@@ -57,6 +57,11 @@ void idt_register_handler(uint8_t vector, interrupt_handler_t handler);
 
 /* gate-এর ধরন বদলানো: ist = 0-7, dpl = 0 বা 3 (৩ হলে ইউজার-মোড থেকে int দেওয়া যায়) */
 void idt_set_gate_options(uint8_t vector, uint8_t ist, uint8_t dpl);
+
+/* ধাপ ৬: fault = ইউজার-মোডের এক্সেপশন (1 ফেরত দিলে সামলানো হয়েছে),
+ * ret = ইউজার-মোড থেকে আসা যেকোনো ইন্টারাপ্ট শেষে, ফেরার ঠিক আগে */
+void idt_set_user_hooks(int (*fault)(struct interrupt_frame *frame),
+                        void (*ret)(struct interrupt_frame *frame));
 
 /* রেজিস্টার ডাম্প (এক্সেপশন ও ডিবাগিং) */
 void interrupt_dump_frame(const struct interrupt_frame *frame);

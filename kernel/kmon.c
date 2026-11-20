@@ -3,7 +3,10 @@
  * কমান্ড: help, clear, uptime, irq, mem, mouse, keys, sleep <ms>, echo <text>,
  *         int3, fault, reboot, halt
  * ধাপ ৩: pmm, heap, heaptest, v2p <hex>, acpi, apic
- * ধাপ ৪: pwd, cd, ls, cat, mkdir, touch, write, append, rm, rmdir, stat, tree, mount */
+ * ধাপ ৪: pwd, cd, ls, cat, mkdir, touch, write, append, rm, rmdir, stat, tree, mount
+ * ধাপ ৫: lspci, disks, df, sync, date, cp, fill
+ * ধাপ ৬: ps, run, spawn, kill
+ * ধাপ ৭: shell থেকে /bin/kmon দিয়ে ডাকা যায় (kmon_session) — "exit" দিলে shell-এ ফেরে */
 
 #include <stdint.h>
 #include <stddef.h>
@@ -22,6 +25,12 @@
 #include <rozos/acpi.h>
 #include <rozos/vfs.h>
 #include <rozos/errno.h>
+#include <rozos/sched.h>
+#include <rozos/proc.h>
+#include <rozos/syscall.h>
+#include <rozos/pci.h>
+#include <rozos/block.h>
+#include <rozos/clock.h>
 #include <arch/x86_64/pic.h>
 #include <arch/x86_64/pit.h>
 #include <arch/x86_64/apic.h>
@@ -55,7 +64,7 @@ int kmon_getkey(void)
             if (c == 0x7F) return '\b';           /* টার্মিনালের Backspace */
             return (unsigned char)c;
         }
-        cpu_sti_hlt();
+        sched_relax();                            /* ধাপ ৬: অন্য থ্রেডকে সুযোগ, নইলে hlt */
     }
 }
 
@@ -366,16 +375,242 @@ static void cmd_write(int argc, char **argv, int append)
 
 static void cmd_stat(int argc, char **argv)
 {
-    char path[VFS_PATH_MAX];
+    char path[VFS_PATH_MAX], when[40];
     struct vfs_stat st;
     int r;
     if (path_arg(argc, argv, 1, path) < 0) return;
     if ((r = vfs_stat(path, &st)) < 0) { report("stat", path, r); return; }
+    clock_format((int64_t)st.mtime, when, sizeof(when));
     kprintf("  path : %s\n  type : %s\n  size : %llu\n  inode: %llu (%s)\n"
-            "  mode : %o\n  links: %u\n  mtime: %llu ms after boot\n",
+            "  mode : %o\n  links: %u\n  mtime: %s\n",
             path, st.type == VNODE_DIR ? "directory" : st.type == VNODE_CHARDEV ? "character device" : "file",
             (unsigned long long)st.size, (unsigned long long)st.inode, st.fs_name,
-            (unsigned)st.mode, (unsigned)st.nlink, (unsigned long long)st.mtime);
+            (unsigned)st.mode, (unsigned)st.nlink, when);
+}
+
+/* ---------- ধাপ ৫: PCI, ডিস্ক, জায়গা, সময় ---------- */
+
+static void cmd_lspci(void)
+{
+    size_t i;
+    for (i = 0; i < pci_device_count(); i++) {
+        const struct pci_device *d = pci_device_at(i);
+        kprintf("  %02x:%02x.%u  %04x:%04x  %02x%02x%02x  %s\n",
+                (unsigned)d->bus, (unsigned)d->slot, (unsigned)d->func,
+                (unsigned)d->vendor_id, (unsigned)d->device_id,
+                (unsigned)d->class_code, (unsigned)d->subclass, (unsigned)d->prog_if,
+                pci_class_name(d->class_code, d->subclass));
+    }
+    kprintf("  %u device(s)\n", (unsigned)pci_device_count());
+}
+
+static void cmd_disks(void)
+{
+    size_t i;
+    if (block_device_count() == 0) {
+        kprintf("no disks\n");
+        return;
+    }
+    for (i = 0; i < block_device_count(); i++) {
+        const struct block_device *d = block_device_at(i);
+        kprintf("  /dev/%-4s %8llu MiB  %llu x %u B  \"%s\"\n", d->name,
+                (unsigned long long)(d->sector_count * d->sector_size / (1024 * 1024)),
+                (unsigned long long)d->sector_count, (unsigned)d->sector_size, d->model);
+        kprintf("             reads %llu, writes %llu, cache hits %llu / misses %llu\n",
+                (unsigned long long)d->reads, (unsigned long long)d->writes,
+                (unsigned long long)d->cache_hits, (unsigned long long)d->cache_misses);
+    }
+}
+
+static void cmd_df(void)
+{
+    size_t i;
+    kprintf("  %-8s %-6s %10s %10s %10s  %s\n", "fs", "source", "size KiB", "used KiB", "free KiB", "mounted on");
+    for (i = 0; i < vfs_mount_count(); i++) {
+        const struct mount *m = vfs_mount_at(i);
+        struct vfs_statfs sf;
+        uint64_t total, freeb;
+        if (vfs_statfs(m->path, &sf) < 0) {
+            continue;
+        }
+        total = sf.total_blocks * sf.block_size / 1024;
+        freeb = sf.free_blocks * sf.block_size / 1024;
+        kprintf("  %-8s %-6s %10llu %10llu %10llu  %s%s\n", m->fs->name, sf.source,
+                (unsigned long long)total, (unsigned long long)(total - freeb),
+                (unsigned long long)freeb, m->path, sf.read_only ? " (ro)" : "");
+        if (sf.total_inodes) {
+            kprintf("  %-15s inodes: %llu total, %llu free\n", "",
+                    (unsigned long long)sf.total_inodes, (unsigned long long)sf.free_inodes);
+        }
+    }
+}
+
+/* src → dst কপি (heap-এর বাফার দিয়ে) */
+static void cmd_cp(int argc, char **argv)
+{
+    char src[VFS_PATH_MAX], dst[VFS_PATH_MAX];
+    uint8_t *buf;
+    int in, out;
+    int64_t n, total = 0;
+
+    if (argc < 3) { kprintf("usage: cp <src> <dst>\n"); return; }
+    if (path_arg(argc, argv, 1, src) < 0 || path_arg(argc, argv, 2, dst) < 0) return;
+    in = vfs_open(src, O_RDONLY);
+    if (in < 0) { report("cp", src, in); return; }
+    out = vfs_open(dst, O_WRONLY | O_CREAT | O_TRUNC);
+    if (out < 0) { report("cp", dst, out); vfs_close(in); return; }
+    buf = (uint8_t *)kmalloc(16384);
+    while (buf && (n = vfs_read(in, buf, 16384)) > 0) {
+        int64_t w = vfs_write(out, buf, (size_t)n);
+        if (w != n) { report("cp", dst, w < 0 ? (int)w : -ENOSPC); break; }
+        total += n;
+    }
+    kfree(buf);
+    vfs_close(in);
+    vfs_close(out);
+    kprintf("copied %lld bytes\n", (long long)total);
+}
+
+/* টেস্ট: KiB আকারের ফাইল বানানো; প্রতিটি বাইট = (offset * 7 + 3) & 0xFF, যাতে
+ * পরে "fill -v" দিয়ে যাচাই করা যায় ভুল জায়গায় ডেটা গেছে কিনা */
+static void cmd_fill(int argc, char **argv)
+{
+    char path[VFS_PATH_MAX];
+    uint64_t kib, off = 0, bad = 0;
+    int verify = (argc > 1 && !strcmp(argv[1], "-v")), fd, i;
+    uint8_t *buf;
+    int64_t n;
+
+    if (argc < 3 + verify && !verify) { kprintf("usage: fill <file> <KiB> | fill -v <file>\n"); return; }
+    if (verify && argc < 3) { kprintf("usage: fill -v <file>\n"); return; }
+    if (path_arg(argc, argv, 1 + verify, path) < 0) return;
+    buf = (uint8_t *)kmalloc(4096);
+    if (!buf) return;
+    if (verify) {
+        fd = vfs_open(path, O_RDONLY);
+        if (fd < 0) { report("fill", path, fd); kfree(buf); return; }
+        while ((n = vfs_read(fd, buf, 4096)) > 0) {
+            for (i = 0; i < n; i++, off++) {
+                if (buf[i] != (uint8_t)(off * 7 + 3)) bad++;
+            }
+        }
+        vfs_close(fd);
+        kprintf("verified %llu bytes: %s (%llu bad)\n", (unsigned long long)off,
+                bad ? "MISMATCH" : "OK", (unsigned long long)bad);
+    } else {
+        if (!parse_uint(argv[2], &kib)) { kprintf("bad size\n"); kfree(buf); return; }
+        fd = vfs_open(path, O_WRONLY | O_CREAT | O_TRUNC);
+        if (fd < 0) { report("fill", path, fd); kfree(buf); return; }
+        while (off < kib * 1024) {
+            for (i = 0; i < 4096; i++) buf[i] = (uint8_t)((off + (uint64_t)i) * 7 + 3);
+            n = vfs_write(fd, buf, 4096);
+            if (n != 4096) { report("fill", path, n < 0 ? (int)n : -ENOSPC); break; }
+            off += 4096;
+        }
+        vfs_close(fd);
+        kprintf("wrote %llu KiB\n", (unsigned long long)(off / 1024));
+    }
+    kfree(buf);
+}
+
+/* ---------- ধাপ ৬: প্রসেস ---------- */
+
+static void cmd_ps(void)
+{
+    size_t i;
+    uint64_t hz = timer_frequency() ? timer_frequency() : 1000;
+
+    kprintf("  PID  PPID  STATE    CPU ms  NAME\n");
+    for (i = 0; i < proc_count(); i++) {
+        struct process *p = proc_at(i);
+        const char *st = p->state == PROC_ZOMBIE ? "zombie" :
+                         p->thread ? sched_state_name(p->thread->state) : "?";
+        kprintf("  %3d  %4d  %-8s %6llu  %s\n", p->pid, p->ppid, st,
+                (unsigned long long)(p->thread ? p->thread->cpu_ticks * 1000 / hz : 0), p->name);
+    }
+    kprintf("  kernel threads:");
+    for (i = 0; i < sched_thread_count(); i++) {
+        struct thread *t = sched_thread_at(i);
+        if (!t->proc) {
+            kprintf(" %s(%s)", t->name, sched_state_name(t->state));
+        }
+    }
+    kprintf("\n  %llu context switches, %llu syscalls\n",
+            (unsigned long long)sched_switch_count(), (unsigned long long)syscall_count());
+}
+
+/* "hello" → "/bin/hello"; '/' থাকলে kmon-এর cwd অনুযায়ী */
+static int program_path(const char *name, char *out)
+{
+    if (!strchr(name, '/')) {
+        if (strlen(name) + 6 > VFS_PATH_MAX) {
+            return -ENAMETOOLONG;
+        }
+        strcpy(out, "/bin/");
+        strcpy(out + 5, name);
+        return 0;
+    }
+    return make_path(name, out, VFS_PATH_MAX);
+}
+
+/* run = শেষ হওয়া পর্যন্ত অপেক্ষা; spawn = পেছনে চলে */
+static void cmd_run(int argc, char **argv, int wait)
+{
+    char path[VFS_PATH_MAX];
+    const char *args[17];
+    int i, pid, status, r;
+
+    if (argc < 2) {
+        kprintf("usage: %s <program> [args...]  (no '/' = from /bin)\n", argv[0]);
+        return;
+    }
+    if (program_path(argv[1], path) < 0) {
+        kprintf("%s: path too long\n", argv[0]);
+        return;
+    }
+    for (i = 1; i < argc && i < 17; i++) {
+        args[i - 1] = argv[i];
+    }
+    args[i - 1] = NULL;
+    pid = proc_spawn(path, args, !wait);
+    if (pid < 0) {
+        report(argv[0], path, pid);
+        return;
+    }
+    if (!wait) {
+        kprintf("[%d] %s started in the background\n", pid, path);
+        return;
+    }
+    r = proc_wait_kernel(pid, &status, 0);
+    if (r < 0) {
+        kprintf("run: wait failed: %s\n", kstrerror(r));
+    } else if (status & 0x7F) {
+        kprintf("[%d] killed by signal %d\n", pid, status & 0x7F);
+    } else {
+        kprintf("[%d] exited with code %d\n", pid, (status >> 8) & 0xFF);
+    }
+}
+
+static void cmd_kill(int argc, char **argv)
+{
+    uint64_t pid, sig = SIGKILL;
+    int r;
+    if (argc < 2 || !parse_uint(argv[1], &pid) || (argc > 2 && !parse_uint(argv[2], &sig))) {
+        kprintf("usage: kill <pid> [signal]   (default 9)\n");
+        return;
+    }
+    r = proc_kill((int)pid, (int)sig);
+    if (r < 0) {
+        kprintf("kill: %llu: %s\n", (unsigned long long)pid, kstrerror(r));
+    }
+}
+
+static void cmd_date(void)
+{
+    char buf[40];
+    int64_t t = clock_unix_time();
+    clock_format(t, buf, sizeof(buf));
+    kprintf("%s\n", buf);
 }
 
 static void tree_walk(const char *path, int depth, int *count)
@@ -510,6 +745,18 @@ static void cmd_help(void)
             "  touch <file>   create an empty file\n"
             "  write <f> <t>  write text to a file (append <f> <t> adds)\n"
             "  rm <file>, rmdir <dir>, stat <path>, tree [path], mount\n"
+            "  lspci          list PCI devices\n"
+            "  disks          list disks (/dev/sdX)\n"
+            "  df             file system space\n"
+            "  sync           flush disk write caches\n"
+            "  date           current date and time (UTC)\n"
+            "  cp <src> <dst> copy a file\n"
+            "  fill <f> <KiB> write a test pattern; fill -v <f> verifies it\n"
+            "  ps             processes and kernel threads\n"
+            "  run <p> [args] run a program and wait (no '/' = from /bin)\n"
+            "  spawn <p> ...  run a program in the background\n"
+            "  kill <pid> [s] end a process (default signal 9)\n"
+            "  exit           back to the shell (when started as /bin/kmon)\n"
             "  echo <text>    print text\n"
             "  int3           breakpoint exception test (returns)\n"
             "  fault          invalid opcode test (panics)\n"
@@ -644,6 +891,29 @@ static void run_command(int argc, char **argv)
         cmd_tree(argc, argv);
     } else if (!strcmp(cmd, "mount")) {
         cmd_mount();
+    } else if (!strcmp(cmd, "lspci")) {
+        cmd_lspci();
+    } else if (!strcmp(cmd, "disks")) {
+        cmd_disks();
+    } else if (!strcmp(cmd, "df")) {
+        cmd_df();
+    } else if (!strcmp(cmd, "sync")) {
+        int r = block_sync(NULL);
+        kprintf("sync: %s\n", r < 0 ? kstrerror(r) : "done");
+    } else if (!strcmp(cmd, "date")) {
+        cmd_date();
+    } else if (!strcmp(cmd, "cp")) {
+        cmd_cp(argc, argv);
+    } else if (!strcmp(cmd, "fill")) {
+        cmd_fill(argc, argv);
+    } else if (!strcmp(cmd, "ps")) {
+        cmd_ps();
+    } else if (!strcmp(cmd, "run")) {
+        cmd_run(argc, argv, 1);
+    } else if (!strcmp(cmd, "spawn")) {
+        cmd_run(argc, argv, 0);
+    } else if (!strcmp(cmd, "kill")) {
+        cmd_kill(argc, argv);
     } else if (!strcmp(cmd, "apic")) {
         cmd_apic();
     } else if (!strcmp(cmd, "mouse")) {
@@ -686,14 +956,19 @@ static void run_command(int argc, char **argv)
     }
 }
 
-void kmon_run(void)
+/* ধাপ ৭: session চলাকালীন "exit" দিলে লুপ থামে */
+static int session_mode;
+static int session_exit;
+
+static void kmon_loop(void)
 {
     char line[KMON_LINE_MAX];
     char *argv[KMON_MAX_ARGS];
     int argc, n;
 
-    kprintf("\nType 'help' for commands.\n");
-    for (;;) {
+    kprintf("\nType 'help' for commands%s.\n", session_mode ? ", 'exit' to return to the shell" : "");
+    session_exit = 0;
+    while (!session_exit) {
         tty_set_color(TTY_COLOR_LIGHT_CYAN, TTY_COLOR_BLACK);
         kprintf("kmon:%s> ", cwd);
         tty_set_color(TTY_COLOR_LIGHT_GREY, TTY_COLOR_BLACK);
@@ -704,7 +979,34 @@ void kmon_run(void)
         }
         argc = split_args(line, argv, KMON_MAX_ARGS);
         if (argc > 0) {
+            if (!strcmp(argv[0], "exit")) {
+                if (session_mode) {
+                    session_exit = 1;
+                } else {
+                    kprintf("exit: no shell to return to (kmon is the console now)\n");
+                }
+                continue;
+            }
             run_command(argc, argv);
         }
     }
+}
+
+void kmon_run(void)
+{
+    session_mode = 0;
+    for (;;) {
+        kmon_loop();
+    }
+}
+
+int kmon_session(void)
+{
+    if (session_mode) {
+        return -1;                       /* একসাথে একটাই */
+    }
+    session_mode = 1;
+    kmon_loop();
+    session_mode = 0;
+    return 0;
 }
