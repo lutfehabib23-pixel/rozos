@@ -39,10 +39,13 @@ KERNEL_COMMON_FLAGS := $(OPT) -g -pipe -Wall -Wextra \
                        -fno-asynchronous-unwind-tables -fno-unwind-tables \
                        -ffunction-sections -fdata-sections \
                        $(KERNEL_ARCH_FLAGS) \
+                       -nostdinc -isystem $(shell $(CC) -print-file-name=include) \
                        -Ikernel/include -Ikernel -MMD -MP
 
 # C: C99 (TCC-বান্ধব) — GCC-only extension ব্যবহার করবেন না; inline asm-এ __asm__ লিখুন
-KERNEL_CFLAGS := -std=c99 $(KERNEL_COMMON_FLAGS)
+# GCC 14+ এগুলোকে সবসময় error ধরে — পুরোনো gcc-তেও একই রকম কড়া রাখা (শুধু C)
+KERNEL_CFLAGS := -std=c99 $(KERNEL_COMMON_FLAGS) -Werror=implicit-function-declaration \
+                 -Werror=int-conversion -Werror=incompatible-pointer-types
 
 # Assembly (.S): GAS/AT&T সিনট্যাক্স, C preprocessor সহ
 KERNEL_ASFLAGS := $(KERNEL_COMMON_FLAGS) -D__ASSEMBLY__

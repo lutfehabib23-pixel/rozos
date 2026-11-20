@@ -17,6 +17,10 @@
   [[init]]     process 1 (starts the shell)
   [[rozsh]]    the shell
 
+== Network ([[network]]) ==
+  [[ifconfig]] card and address   [[ping]]     is a host answering?
+  [[nslookup]] name to address    [[http-get]] download a web page
+
 == Tests and demos ==
   [[systest]]  36 kernel and libc tests  [[demos|hello, spin, crash]]
 

@@ -623,7 +623,7 @@ static int64_t do_rw(int fd, void *rbuf, const void *wbuf, size_t len)
     }
     off = f->offset;
 
-    if (vn->type == VNODE_CHARDEV) {
+    if (vn->type == VNODE_CHARDEV || vn->type == VNODE_SOCKET) {
         unsigned depth;
         f->refs++;                           /* অন্য থ্রেড close করলেও description থাকে */
         depth = kmutex_release_all(&vfs_lock);
@@ -930,4 +930,29 @@ int vfs_lookup(const char *path, struct vnode **out)
 uint64_t vfs_lock_contended(void)
 {
     return vfs_lock.contended;
+}
+
+/* ---------- ধাপ ৯: socket-এর মতো "ফাইলসিস্টেমহীন" vnode ---------- */
+
+int vfs_install_vnode(struct vnode *vn, int flags)
+{
+    int fd;
+    LOCK();
+    fd = install_file(flags, vn, NULL);
+    UNLOCK();
+    return fd;
+}
+
+struct vnode *vfs_fd_vnode(int fd)
+{
+    struct file *f;
+    struct vnode *vn = NULL;
+    LOCK();
+    f = get_file(fd);
+    if (f) {
+        vn = f->vn;
+        vnode_ref(vn);
+    }
+    UNLOCK();
+    return vn;
 }

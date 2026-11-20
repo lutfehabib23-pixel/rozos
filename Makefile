@@ -49,7 +49,7 @@ LIBC_M       := $(LIBC_BUILD)/libm.a      # math আসলে libc-তেই; -l
 LIBC_CRT0    := $(LIBC_BUILD)/crt0.o
 LIBC_CRTS    := $(LIBC_BUILD)/crti.o $(LIBC_BUILD)/crtn.o $(LIBC_M)   # TCC-র লিংকের জন্য
 USER_BUILD   := $(BUILD)/userland
-USER_DIRS    := init shell editor coreutils bin tests
+USER_DIRS    := init shell editor coreutils bin tests net
 USER_SRCS    := $(foreach d,$(USER_DIRS),$(wildcard userland/$(d)/*.c))
 USER_PROGS   := $(sort $(notdir $(basename $(USER_SRCS))))
 USER_BINS    := $(addprefix $(USER_BUILD)/bin/,$(USER_PROGS))
@@ -57,7 +57,9 @@ USER_BINS    := $(addprefix $(USER_BUILD)/bin/,$(USER_PROGS))
 USER_STRIPPED := $(addprefix $(USER_BUILD)/stripped/,$(USER_PROGS))
 USER_CFLAGS  := -std=c99 $(OPT) -g -pipe -Wall -Wextra -m64 -march=x86-64 \
                 -ffreestanding -nostdinc -isystem $(CC_INCLUDE) -Ilibc/include \
-                -fno-stack-protector -fno-pie -fno-pic -fno-asynchronous-unwind-tables
+                -fno-stack-protector -fno-pie -fno-pic -fno-asynchronous-unwind-tables \
+                -Werror=implicit-function-declaration -Werror=int-conversion \
+                -Werror=incompatible-pointer-types
 LIBC_CFLAGS  := $(USER_CFLAGS) -fno-builtin -fno-tree-loop-distribute-patterns
 USER_LDFLAGS := -nostdlib -static -no-pie -Wl,-z,max-page-size=0x1000 \
                 -Wl,--build-id=none -Wl,-Ttext-segment=0x400000
@@ -135,6 +137,13 @@ $(KERNEL): $(OBJS) kernel/linker.ld
 	@$(CC) $(KERNEL_LDFLAGS) $(OBJS) $(KERNEL_LIBS) -o $@
 
 -include $(DEPS)
+
+# ধাপ ৯: lwIP (kernel/net/lwip) ও তার port — নিজস্ব include পথ, আর lwIP-এর
+# নিজের কোডে warning বন্ধ (আমরা ওটা বদলাই না)
+$(BUILD)/kernel/net/%: KERNEL_CFLAGS += -Ikernel/net/port/include -Ikernel/net/lwip/include
+$(BUILD)/kernel/net/lwip/%: KERNEL_CFLAGS += -w -Werror=implicit-function-declaration \
+    -Werror=int-conversion -Werror=incompatible-pointer-types   # GCC 14+ এগুলো সবসময় error
+$(BUILD)/kernel/syscall/sys_net.c.o: KERNEL_CFLAGS += -Ikernel/net/port/include -Ikernel/net/lwip/include
 -include $(wildcard $(USER_BUILD)/*/*.d $(LIBC_BUILD)/*.d)
 
 # ---------- rozlibc বিল্ড ----------
@@ -249,6 +258,7 @@ disk-check: $(DISK)
 	e2fsck -fn $(DISK)
 
 # ধাপ ৬: ডিস্কের /bin-এ শুধু আমাদের প্রোগ্রামগুলো বদলানো (debugfs দিয়ে) — rozOS-এর
+# (ধাপ ৯: /etc/hosts শুধু না থাকলে লেখা হয় — debugfs আগের ফাইল বদলায় না)
 # ভেতরে লেখা বাকি সব ফাইল থাকে। QEMU চলার সময় চালাবেন না।
 disk-update: $(DISK_BIN_STAMP)
 
@@ -261,6 +271,7 @@ $(DISK_BIN_STAMP): $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EX
 	   for f in $(notdir $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS)); do echo "rm /usr/lib/$$f"; \
 	   echo "write $(LIBC_BUILD)/$$f /usr/lib/$$f"; done; \
 	   echo "rm /usr/lib/crt1.o"; echo "write $(LIBC_CRT0) /usr/lib/crt1.o"; \
+	   echo "write sysroot/etc/hosts /etc/hosts"; \
 	   echo "mkdir /usr/share"; echo "mkdir /usr/share/help"; \
 	   for f in $(HELP_FILES); do echo "rm /usr/share/help/$$(basename $$f)"; \
 	   echo "write $$f /usr/share/help/$$(basename $$f)"; done; \
@@ -309,30 +320,34 @@ $(ISO): $(KERNEL) $(INITRD) limine.conf $(LIMINE_DIR)/limine $(LIMINE_FILES)
 
 comma := ,
 
+# ধাপ ৯: নেটওয়ার্ক — QEMU-র user-mode (slirp): rozOS = 10.0.2.15, হোস্ট/গেটওয়ে = 10.0.2.2,
+# DNS = 10.0.2.3। কার্ড e1000e (82574L), q35-এর ডিফল্টই, এখানে স্পষ্ট করে লেখা।
+QEMU_NET ?= -nic user,model=e1000e
+
 # ধাপ ৭: serial টার্মিনাল — Ctrl+C আর QEMU বন্ধ করে না, rozOS-এ যায় (shell/এডিটরে লাগে)।
 # QEMU থেকে বের হওয়া: Ctrl+A তারপর X  (Ctrl+A দুবার = rozOS-এ একটা Ctrl+A)
 QEMU_SERIAL = -chardev stdio,id=con0,mux=on,signal=off -serial chardev:con0
 
 # ---------- QEMU ----------
 run: $(ISO) $(DISK_BIN_STAMP) | $(DISK)
-	$(QEMU) $(QEMU_FLAGS) $(QEMU_DISK) -cdrom $(ISO) -boot d $(QEMU_SERIAL)
+	$(QEMU) $(QEMU_FLAGS) $(QEMU_NET) $(QEMU_DISK) -cdrom $(ISO) -boot d $(QEMU_SERIAL)
 
 run-serial: $(ISO) $(DISK_BIN_STAMP) | $(DISK)
-	$(QEMU) $(QEMU_FLAGS) $(QEMU_DISK) -cdrom $(ISO) -boot d -display none $(QEMU_SERIAL)
+	$(QEMU) $(QEMU_FLAGS) $(QEMU_NET) $(QEMU_DISK) -cdrom $(ISO) -boot d -display none $(QEMU_SERIAL)
 
 $(BUILD)/ovmf_vars.fd:
 	@mkdir -p $(BUILD)
 	@cp $(OVMF_VARS) $@
 
 run-uefi: $(ISO) $(BUILD)/ovmf_vars.fd $(DISK_BIN_STAMP) | $(DISK)
-	$(QEMU) $(QEMU_FLAGS) $(QEMU_DISK) \
+	$(QEMU) $(QEMU_FLAGS) $(QEMU_NET) $(QEMU_DISK) \
 	    -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 	    -drive if=pflash,format=raw,file=$(BUILD)/ovmf_vars.fd \
 	    -cdrom $(ISO) -boot d $(QEMU_SERIAL)
 
 debug: $(ISO) $(DISK_BIN_STAMP) | $(DISK)
 	@echo "QEMU থেমে আছে — অন্য টার্মিনালে 'make gdb' চালান"
-	$(QEMU) $(QEMU_FLAGS) $(QEMU_DISK) -cdrom $(ISO) -boot d $(QEMU_SERIAL) -s -S -d int,cpu_reset -D $(BUILD)/qemu.log
+	$(QEMU) $(QEMU_FLAGS) $(QEMU_NET) $(QEMU_DISK) -cdrom $(ISO) -boot d $(QEMU_SERIAL) -s -S -d int,cpu_reset -D $(BUILD)/qemu.log
 
 gdb: $(KERNEL)
 	gdb $(KERNEL) -ex "target remote localhost:1234" -ex "break kmain" -ex "continue"

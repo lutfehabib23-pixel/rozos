@@ -1,0 +1,6 @@
+# nslookup - find the address of a name
+  `nslookup google.com`
+Looks in /etc/hosts first, then asks the DNS server from
+/etc/resolv.conf (UDP port 53, 2 seconds, 3 tries).
+Errors: "name not found" (the name does not exist) or "DNS server did
+not answer". Back to [[network]].

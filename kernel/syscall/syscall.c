@@ -80,4 +80,5 @@ void syscall_init(void)
     sys_fs_register();
     sys_proc_register();
     sys_mm_register();
+    sys_net_register();
 }

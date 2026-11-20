@@ -20,12 +20,17 @@ Type [[help|how to use this viewer]] if you are new here.
   [[edit]]            the text editor
   [[tcc]]             the C compiler - build programs inside rozOS
   [[kmon]]            the kernel monitor (debugging)
-  [[systest]]         the self-test (36 checks)
+  [[systest]]         the self-test (43 checks)
 
 == Writing software ==
   [[c-programming]]   write, compile and run a C program, step by step
   [[rozlibc]]         the C library: headers and what is in them
   [[self-hosting]]    rebuilding TCC with TCC, and the road ahead
+
+== Network ==
+  [[network]]         how rozOS talks TCP/IP (lwIP, DHCP, DNS)
+  [[ifconfig]] [[ping]] [[nslookup]] [[http-get]]   the network programs
+  [[sockets]]         network programming in C
 
 == How rozOS works ==
   [[files]]           the directory layout (/bin, /usr, /tmp, /dev ...)

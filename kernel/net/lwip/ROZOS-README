@@ -1,0 +1,4 @@
+lwIP 2.2.1 (STABLE-2_2_1_RELEASE, commit 77dcd25a) — https://github.com/lwip-tcpip/lwip
+rozOS-এর জন্য দরকারি অংশ শুধু (IPv4: ARP, IP, ICMP, UDP, TCP, DHCP, DNS; ethernet)।
+কোনো ফাইল বদলানো হয়নি; rozOS-এর মানিয়ে নেওয়া অংশ kernel/net/port/-এ।
+লাইসেন্স: BSD (COPYING দেখুন)।

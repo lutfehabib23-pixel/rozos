@@ -6,7 +6,8 @@ source). Its parts, from the bottom up:
   arch      GDT, IDT, interrupts, APIC timer at 1000 Hz, syscalls
   memory    page bitmap (PMM), page tables per process (VMM), kmalloc
   drivers   serial, framebuffer/VGA console with ANSI colours, PS/2
-            keyboard and mouse, ACPI, PCI, AHCI disks
+            keyboard and mouse, ACPI, PCI, AHCI disks, e1000 network
+  net       lwIP TCP/IP and sockets ([[network]])
   fs        VFS + ext2, tmpfs, devfs, initrd ([[disks]])
   proc      threads, scheduler, processes, ELF loader ([[processes]])
   syscall   the system call layer ([[syscalls]])

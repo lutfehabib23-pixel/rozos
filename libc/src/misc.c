@@ -51,6 +51,27 @@ char *strerror(int err)
     case ENOSYS:       return "function not implemented";
     case ENOTEMPTY:    return "directory not empty";
     case ETIMEDOUT:    return "timed out";
+    case ENOTSOCK:      return "not a socket";
+    case EDESTADDRREQ:  return "destination address required";
+    case EMSGSIZE:      return "message too long";
+    case EPROTOTYPE:    return "wrong protocol type";
+    case ENOPROTOOPT:   return "protocol option not available";
+    case EPROTONOSUPPORT: return "protocol not supported";
+    case EOPNOTSUPP:    return "operation not supported";
+    case EAFNOSUPPORT:  return "address family not supported";
+    case EADDRINUSE:    return "address already in use";
+    case EADDRNOTAVAIL: return "address not available";
+    case ENETDOWN:      return "network is down";
+    case ENETUNREACH:   return "network unreachable";
+    case ECONNABORTED:  return "connection aborted";
+    case ECONNRESET:    return "connection reset by peer";
+    case ENOBUFS:       return "no buffer space";
+    case EISCONN:       return "already connected";
+    case ENOTCONN:      return "not connected";
+    case ECONNREFUSED:  return "connection refused";
+    case EHOSTUNREACH:  return "host unreachable";
+    case EALREADY:      return "operation already in progress";
+    case EINPROGRESS:   return "operation in progress";
     }
     snprintf(unknown, sizeof(unknown), "error %d", err);
     return unknown;

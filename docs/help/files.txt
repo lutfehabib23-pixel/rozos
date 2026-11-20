@@ -1,6 +1,7 @@
 # Files and directories
   /bin            programs ([[programs]])
-  /etc            settings: motd (boot message), hostname
+  /etc            settings: motd (boot message), hostname, hosts,
+                  resolv.conf (DNS server, written at boot)
   /home           your home directory (~), .rozshrc, .rozsh_history
   /src            sample sources (hello.c)
   /usr/include    C headers ([[rozlibc]])

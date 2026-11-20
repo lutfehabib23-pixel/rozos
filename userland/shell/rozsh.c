@@ -523,7 +523,7 @@ static void help_text(void)
 static int help(int argc, char **argv)
 {
     struct stat st;
-    if (stat("/bin/rozhelp", &st) == 0 && isatty(1)) {
+    if (stat("/bin/rozhelp", &st) == 0) {             /* কনসোল না হলে rozhelp সাধারণ লেখা ছাপে */
         char *args[3];
         int status;
         pid_t pid;

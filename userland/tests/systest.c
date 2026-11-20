@@ -16,6 +16,10 @@
 #include <sys/utsname.h>
 #include <time.h>
 #include <signal.h>
+#include <ctype.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <rozos.h>
 
 #define SYS_getpid 39
@@ -251,6 +255,63 @@ static void test_libc(void)
     remove("/tmp/libc-test.txt");
 }
 
+/* ধাপ ৯: TCP সার্ভার + ক্লায়েন্ট (loopback), UDP, DNS-ছাড়া ঠিকানা */
+static void test_net(void)
+{
+    struct sockaddr_in a;
+    socklen_t al = sizeof(a);
+    char buf[64];
+    int ls, c, st, pid, one = 1;
+
+    check(inet_addr("10.0.2.15") == htonl(0x0A00020F), "inet_addr / htonl");
+    ls = socket(AF_INET, SOCK_STREAM, 0);
+    check(ls >= 0, "socket(AF_INET, SOCK_STREAM)");
+    if (ls < 0) return;
+    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_port = htons(7777);
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    check(bind(ls, (struct sockaddr *)&a, sizeof(a)) == 0 && listen(ls, 4) == 0, "bind + listen on 127.0.0.1:7777");
+    fflush(stdout);
+    pid = fork();
+    if (pid == 0) {
+        int s = socket(AF_INET, SOCK_STREAM, 0);
+        if (connect(s, (struct sockaddr *)&a, sizeof(a)) < 0) _exit(1);
+        send(s, "ping over tcp", 13, 0);
+        if (recv(s, buf, sizeof(buf), 0) != 13 || memcmp(buf, "PING OVER TCP", 13)) _exit(2);
+        close(s);
+        _exit(0);
+    }
+    c = accept(ls, (struct sockaddr *)&a, &al);
+    check(c >= 0, "accept a connection");
+    if (c >= 0) {
+        int n = (int)recv(c, buf, sizeof(buf), 0), i;
+        for (i = 0; i < n; i++) buf[i] = (char)toupper((unsigned char)buf[i]);
+        check(n == 13, "recv on the server side");
+        send(c, buf, (size_t)(n > 0 ? n : 0), 0);
+        close(c);
+    }
+    check(waitpid(pid, &st, 0) == pid && WIFEXITED(st) && WEXITSTATUS(st) == 0, "TCP client got the echo back");
+    close(ls);
+
+    {
+        int u1 = socket(AF_INET, SOCK_DGRAM, 0), u2 = socket(AF_INET, SOCK_DGRAM, 0);
+        struct sockaddr_in b, from;
+        socklen_t fl = sizeof(from);
+        memset(&b, 0, sizeof(b));
+        b.sin_family = AF_INET;
+        b.sin_port = htons(7778);
+        b.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        bind(u1, (struct sockaddr *)&b, sizeof(b));
+        sendto(u2, "udp!", 4, 0, (struct sockaddr *)&b, sizeof(b));
+        check(recvfrom(u1, buf, sizeof(buf), 0, (struct sockaddr *)&from, &fl) == 4 && !memcmp(buf, "udp!", 4),
+              "UDP datagram over loopback");
+        close(u1);
+        close(u2);
+    }
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -260,6 +321,7 @@ int main(int argc, char **argv)
     test_files();
     test_processes();
     test_libc();
+    test_net();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

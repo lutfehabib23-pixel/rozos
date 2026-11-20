@@ -1,0 +1,13 @@
+# ifconfig - network card settings
+  `ifconfig`                      show every card
+  `ifconfig eth0`                 show one card
+  `ifconfig eth0 10.0.2.20 gw 10.0.2.2 dns 10.0.2.3`
+                                  set an address by hand (netmask
+                                  defaults to 255.255.255.0)
+  `ifconfig eth0 10.0.2.20 netmask 255.255.0.0`
+  `ifconfig eth0 dhcp`            ask DHCP again
+
+The output shows the driver, link state, MAC address (ether), the IPv4
+address, netmask, gateway and DNS server, and packet counters (RX =
+received, TX = sent). `kmon` has the same in its `net` command.
+Back to [[network]].

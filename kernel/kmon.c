@@ -6,7 +6,8 @@
  * ধাপ ৪: pwd, cd, ls, cat, mkdir, touch, write, append, rm, rmdir, stat, tree, mount
  * ধাপ ৫: lspci, disks, df, sync, date, cp, fill
  * ধাপ ৬: ps, run, spawn, kill
- * ধাপ ৭: shell থেকে /bin/kmon দিয়ে ডাকা যায় (kmon_session) — "exit" দিলে shell-এ ফেরে */
+ * ধাপ ৭: shell থেকে /bin/kmon দিয়ে ডাকা যায় (kmon_session) — "exit" দিলে shell-এ ফেরে
+ * ধাপ ৯: net */
 
 #include <stdint.h>
 #include <stddef.h>
@@ -28,6 +29,7 @@
 #include <rozos/sched.h>
 #include <rozos/proc.h>
 #include <rozos/syscall.h>
+#include <rozos/net.h>
 #include <rozos/pci.h>
 #include <rozos/block.h>
 #include <rozos/clock.h>
@@ -605,6 +607,35 @@ static void cmd_kill(int argc, char **argv)
     }
 }
 
+/* ---------- ধাপ ৯: নেটওয়ার্ক ---------- */
+
+static void print_ip(const char *label, uint32_t a)
+{
+    kprintf("%s%u.%u.%u.%u", label, a & 0xFF, (a >> 8) & 0xFF, (a >> 16) & 0xFF, a >> 24);
+}
+
+static void cmd_net(void)
+{
+    struct rozos_netinfo ni;
+    int i;
+    for (i = 0; net_get_info(i, &ni) == 0; i++) {
+        kprintf("  %s  %s  %02x:%02x:%02x:%02x:%02x:%02x  link %s  %s\n", ni.name, ni.driver,
+                ni.mac[0], ni.mac[1], ni.mac[2], ni.mac[3], ni.mac[4], ni.mac[5],
+                ni.link_up ? "up" : "down", ni.dhcp ? "DHCP" : "static");
+        print_ip("     inet ", ni.ip);
+        print_ip("  mask ", ni.netmask);
+        print_ip("  gw ", ni.gateway);
+        print_ip("  dns ", ni.dns);
+        kprintf("\n     rx %llu pkts %llu bytes (%llu dropped), tx %llu pkts %llu bytes (%llu errors)\n",
+                (unsigned long long)ni.rx_packets, (unsigned long long)ni.rx_bytes,
+                (unsigned long long)ni.rx_dropped, (unsigned long long)ni.tx_packets,
+                (unsigned long long)ni.tx_bytes, (unsigned long long)ni.tx_errors);
+    }
+    if (i == 0) {
+        kprintf("no network card\n");
+    }
+}
+
 static void cmd_date(void)
 {
     char buf[40];
@@ -757,6 +788,7 @@ static void cmd_help(void)
             "  spawn <p> ...  run a program in the background\n"
             "  kill <pid> [s] end a process (default signal 9)\n"
             "  exit           back to the shell (when started as /bin/kmon)\n"
+            "  net            network cards, addresses and counters\n"
             "  echo <text>    print text\n"
             "  int3           breakpoint exception test (returns)\n"
             "  fault          invalid opcode test (panics)\n"
@@ -906,6 +938,8 @@ static void run_command(int argc, char **argv)
         cmd_cp(argc, argv);
     } else if (!strcmp(cmd, "fill")) {
         cmd_fill(argc, argv);
+    } else if (!strcmp(cmd, "net")) {
+        cmd_net();
     } else if (!strcmp(cmd, "ps")) {
         cmd_ps();
     } else if (!strcmp(cmd, "run")) {

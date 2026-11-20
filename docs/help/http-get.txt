@@ -1,0 +1,14 @@
+# http-get - download a web page
+  `http-get http://example.com/`          print the page
+  `http-get -h http://example.com/`       only the response headers
+  `http-get -o page.html http://host/x`   save the page to a file
+  `http-get http://10.0.2.2:8000/file`    another port
+
+It connects with TCP, sends an HTTP/1.0 GET request and copies the
+answer: headers go to the screen (stderr), the body to the output.
+At the end it prints the size and the time taken.
+https:// addresses need TLS, which comes in phase 10.
+
+Tip: on the PC, `python3 -m http.server 8000` in a folder makes it
+reachable from rozOS as http://10.0.2.2:8000/ .
+Back to [[network]].

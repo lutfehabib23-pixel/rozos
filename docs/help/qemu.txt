@@ -20,6 +20,12 @@ The framebuffer is 142x50 characters, but your terminal may be smaller.
 Find its size on the host with `stty size`, then in rozOS run
 `stty 30 120` (rows, columns) so [[edit]] and [[help]] fit. See [[stty]].
 
+== Network ==
+QEMU gives rozOS a private network: rozOS is 10.0.2.15, your PC is
+10.0.2.2, and connections to the internet go out through the PC. Try
+`python3 -m http.server 8000` on the PC and in rozOS
+`http-get http://10.0.2.2:8000/`. See [[network]].
+
 == Boot menu ==
 Limine shows two entries for 3 seconds: "rozOS" and "rozOS (no init)".
 The second skips the shell and starts [[kmon]] directly. See [[boot]].

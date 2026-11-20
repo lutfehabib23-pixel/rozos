@@ -38,6 +38,7 @@ struct linux_stat {
 typedef char linux_stat_size_check[(sizeof(struct linux_stat) == 144) ? 1 : -1];
 
 #define S_IFCHR 0020000
+#define S_IFSOCK 0140000
 #define S_IFDIR 0040000
 #define S_IFREG 0100000
 
@@ -227,7 +228,8 @@ static int fill_linux_stat(const struct vfs_stat *st, uint64_t ust)
     ls.st_ino = st->inode;
     ls.st_nlink = st->nlink;
     ls.st_mode = (st->mode & 07777) |
-                 (st->type == VNODE_DIR ? S_IFDIR : st->type == VNODE_CHARDEV ? S_IFCHR : S_IFREG);
+                 (st->type == VNODE_DIR ? S_IFDIR : st->type == VNODE_CHARDEV ? S_IFCHR :
+                  st->type == VNODE_SOCKET ? S_IFSOCK : S_IFREG);
     ls.st_size = (int64_t)st->size;
     ls.st_blksize = 4096;
     ls.st_blocks = (int64_t)((st->size + 511) / 512);

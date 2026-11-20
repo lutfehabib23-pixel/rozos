@@ -39,7 +39,8 @@
 enum vnode_type {
     VNODE_FILE = 1,
     VNODE_DIR  = 2,
-    VNODE_CHARDEV = 3
+    VNODE_CHARDEV = 3,
+    VNODE_SOCKET = 4             /* ধাপ ৯: নেটওয়ার্ক socket (kernel/net/socket.c) */
 };
 
 struct vnode;
@@ -150,6 +151,11 @@ int  vfs_fdtable_used(const struct vfs_fdtable *t);   /* NULL = কার্ন�
 int  vfs_dup(int oldfd);
 int  vfs_dup2(int oldfd, int newfd);
 uint64_t vfs_lock_contended(void);
+/* ধাপ ৯: ফাইলসিস্টেমের বাইরের vnode (যেমন socket) চলমান টেবিলে fd হিসেবে বসানো —
+ * vnode-এর একটা ref fd নিয়ে নেয়; ফেরত fd বা -ERRNO */
+int  vfs_install_vnode(struct vnode *vn, int flags);
+/* fd-এর vnode (ref বাড়িয়ে; শেষে vnode_unref) — না থাকলে NULL */
+struct vnode *vfs_fd_vnode(int fd);
 
 /* ---------- পাথ অপারেশন ---------- */
 int vfs_stat(const char *path, struct vfs_stat *st);

@@ -43,6 +43,7 @@
 #include <rozos/sched.h>
 #include <rozos/proc.h>
 #include <rozos/syscall.h>
+#include <rozos/net.h>
 #ifdef ROZOS_KCXX
 #include <rozos/kcxx.h>
 #endif
@@ -53,7 +54,7 @@
 #include <arch/x86_64/pit.h>
 #include <arch/x86_64/apic.h>
 
-#define ROZOS_VERSION "0.8.0-phase8"
+#define ROZOS_VERSION "0.9.0-phase9"
 
 /* linker.ld থেকে */
 extern char __kernel_start[], __kernel_end[];
@@ -388,6 +389,23 @@ static void start_init(void)
     }
 }
 
+/* ধাপ ৯: নেটওয়ার্ক — NIC খোঁজা, lwIP, DHCP (ঠিকানা পরে netd থ্রেড জানায়) */
+static void init_network(void)
+{
+    char msg[96];
+    int n = net_init();
+    struct rozos_netinfo ni;
+
+    if (n <= 0) {
+        print_warn("no supported network card (e1000/e1000e): networking off");
+        return;
+    }
+    net_get_info(0, &ni);
+    ksnprintf(msg, sizeof(msg), "Network: %s (%s) %02x:%02x:%02x:%02x:%02x:%02x, lwIP, DHCP started",
+              ni.name, ni.driver, ni.mac[0], ni.mac[1], ni.mac[2], ni.mac[3], ni.mac[4], ni.mac[5]);
+    print_ok(msg);
+}
+
 /* ধাপ ৫: ডিস্ক। VFS আর devfs আগে তৈরি হয়, কারণ ডিস্ক ড্রাইভার নিজেকে /dev-এ
  * (sda ...) নিবন্ধন করে। */
 static void init_storage(void)
@@ -565,6 +583,7 @@ void kmain(void)
     init_processes();
     init_storage();
     init_vfs();
+    init_network();
 
     print_boot_info(revision);
     print_memory_map();
@@ -581,7 +600,7 @@ void kmain(void)
     }
 
     tty_set_color(TTY_COLOR_LIGHT_GREEN, TTY_COLOR_BLACK);
-    kprintf("\nrozOS booted. Phase 8: TCC compiler, rozhelp and rozlibc math.\n");
+    kprintf("\nrozOS booted. Phase 9: e1000 network card, lwIP TCP/IP and sockets.\n");
     tty_set_color(TTY_COLOR_LIGHT_GREY, TTY_COLOR_BLACK);
 
     /* /etc/motd থাকলে দেখানো — initrd থেকে আসা প্রথম "ফাইল" */

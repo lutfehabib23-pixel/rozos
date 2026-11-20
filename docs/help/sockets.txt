@@ -1,0 +1,23 @@
+# Network programming in C
+rozlibc has the usual BSD socket API ([[rozlibc]]):
+  `sys/socket.h`  socket connect bind listen accept send recv sendto
+                  recvfrom shutdown setsockopt getsockname ...
+  `netinet/in.h`  struct sockaddr_in, htons, htonl, INADDR_ANY
+  `arpa/inet.h`   inet_addr, inet_aton, inet_ntoa, inet_ntop
+  `netdb.h`       getaddrinfo, freeaddrinfo, gethostbyname
+
+== A small client ==
+     struct addrinfo h = {0}, *ai;
+     h.ai_family = AF_INET; h.ai_socktype = SOCK_STREAM;
+     getaddrinfo("example.com", "80", &h, &ai);
+     int fd = socket(AF_INET, SOCK_STREAM, 0);
+     connect(fd, ai->ai_addr, ai->ai_addrlen);
+     send(fd, "GET / HTTP/1.0\r\n\r\n", 18, 0);
+     char buf[512]; int n = recv(fd, buf, sizeof buf, 0);
+
+== Supported ==
+TCP (client and server), UDP, raw ICMP; IPv4 only. Sockets are file
+descriptors, so read(), write() and close() work too.
+SO_RCVTIMEO / SO_SNDTIMEO set time limits, MSG_DONTWAIT and MSG_PEEK
+work. Not yet: select/poll, IPv6, TLS. Full source: /bin is built from
+userland/net/ (ping.c, http-get.c ...). Back to [[network]].

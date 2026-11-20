@@ -1,0 +1,14 @@
+# ping - is a computer answering?
+  `ping host`          4 tries, one per second
+  `ping -c 10 host`    10 tries
+host can be an address (`ping 10.0.2.2`) or a name (`ping google.com`).
+
+Each answer shows its size, the sender, the "time to live" and the
+round-trip time; at the end a summary with the packet loss.
+"Request timeout" means no answer within 1 second; "unknown host"
+means the name could not be found (see [[nslookup]]).
+
+ping uses a raw ICMP socket: it sends an ICMP echo request and waits
+for the echo reply with the same id and sequence number.
+Note: in QEMU, pinging the internet works only if your PC allows it.
+Back to [[network]].

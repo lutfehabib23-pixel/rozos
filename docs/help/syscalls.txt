@@ -8,6 +8,9 @@ rozOS uses the Linux x86-64 numbers, for example:
  32 dup    33 dup2    35 nanosleep 39 getpid 57 fork  59 execve
  60 exit   61 wait4   62 kill    63 uname   79 getcwd 80 chdir
  83 mkdir  84 rmdir   87 unlink 217 getdents64  228 clock_gettime
+ 41 socket 42 connect 43 accept 44 sendto 45 recvfrom 48 shutdown
+ 49 bind   50 listen  54 setsockopt 55 getsockopt   ([[sockets]])
 500 rozos_kmon (rozOS only: starts [[kmon]])
+501 rozos_netinfo, 502 rozos_netconfig ([[ifconfig]])
 [[rozlibc]] wraps these in normal C functions (write(), fork() ...).
 The kernel checks every pointer a program passes before using it.

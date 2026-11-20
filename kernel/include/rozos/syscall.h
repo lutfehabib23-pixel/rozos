@@ -28,6 +28,20 @@
 #define SYS_sched_yield     24
 #define SYS_dup             32
 #define SYS_dup2            33
+/* ধাপ ৯: নেটওয়ার্ক */
+#define SYS_socket          41
+#define SYS_connect         42
+#define SYS_accept          43
+#define SYS_sendto          44
+#define SYS_recvfrom        45
+#define SYS_shutdown        48
+#define SYS_bind            49
+#define SYS_listen          50
+#define SYS_getsockname     51
+#define SYS_getpeername     52
+#define SYS_setsockopt      54
+#define SYS_getsockopt      55
+#define SYS_accept4         288
 #define SYS_nanosleep       35
 #define SYS_getpid          39
 #define SYS_fork            57
@@ -50,6 +64,8 @@
 
 /* rozOS-এর নিজস্ব (Linux-এর সংখ্যার অনেক ওপরে, যাতে কখনো না মেলে) — ধাপ ৭ */
 #define SYS_rozos_kmon      500     /* কার্নেল মনিটর চালানো, "exit" পর্যন্ত অপেক্ষা */
+#define SYS_rozos_netinfo   501     /* ধাপ ৯: interface-এর তথ্য (struct rozos_netinfo) */
+#define SYS_rozos_netconfig 502     /* ধাপ ৯: হাতে IP বসানো / আবার DHCP */
 
 #define SYSCALL_MAX         512
 
@@ -67,5 +83,6 @@ void syscall_register(unsigned nr, syscall_fn_t fn, const char *name);
 void sys_fs_register(void);
 void sys_proc_register(void);
 void sys_mm_register(void);
+void sys_net_register(void);
 
 #endif

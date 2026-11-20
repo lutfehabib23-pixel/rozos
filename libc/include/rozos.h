@@ -11,8 +11,25 @@ long __syscall_int80(long n, long a, long b, long c);   /* int 0x80 পথ (প�
 long __syscall_ret(long r);
 
 #define ROZOS_SYS_KMON 500
+#define ROZOS_SYS_NETINFO 501
+#define ROZOS_SYS_NETCONFIG 502
 
 int  rozos_kmon(void);                 /* কার্নেল মনিটর; "exit" দিলে ফেরে */
+
+/* ধাপ ৯: নেটওয়ার্ক interface (ঠিকানা network byte order-এ) */
+struct rozos_netinfo {
+    char     name[8];
+    char     driver[16];
+    unsigned char mac[6];
+    unsigned char link_up;
+    unsigned char configured;
+    unsigned char dhcp;
+    unsigned char reserved[3];
+    unsigned int ip, netmask, gateway, dns;
+    unsigned long rx_packets, tx_packets, rx_bytes, tx_bytes, rx_dropped, tx_errors;
+};
+int  rozos_netinfo(int index, struct rozos_netinfo *out);      /* -1 + errno ENODEV = নেই */
+int  rozos_netconfig(unsigned ip, unsigned mask, unsigned gw, unsigned dns); /* ip 0 = DHCP */
 long rozos_now_ms(void);               /* CLOCK_MONOTONIC, মিলিসেকেন্ড */
 
 #endif
