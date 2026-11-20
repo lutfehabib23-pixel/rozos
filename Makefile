@@ -1,6 +1,7 @@
 # rozOS — টপ-লেভেল Makefile
 #
 #   make            কার্নেল বিল্ড (build/rozos.elf)
+#   make initrd     sysroot/ থেকে build/initrd.tar (USTAR)
 #   make iso        বুটযোগ্য ISO (rozos.iso) — BIOS ও UEFI দুটোতেই চলে
 #   make run        QEMU-তে BIOS মোডে চালানো (জানালা + serial টার্মিনালে)
 #   make run-uefi   QEMU-তে UEFI (OVMF) মোডে চালানো
@@ -16,6 +17,9 @@ KERNEL     := $(BUILD)/rozos.elf
 ISO        := rozos.iso
 ISO_ROOT   := $(BUILD)/iso_root
 LIMINE_DIR := limine
+SYSROOT    := sysroot
+INITRD     := $(BUILD)/initrd.tar
+SYSROOT_FILES := $(shell find $(SYSROOT) -type f -o -type d 2>/dev/null)
 
 # ---------- সোর্স ফাইল খোঁজা ----------
 # kernel/cxx/ বাদে সব .c আর .S; C++ শুধু ENABLE_KCXX=1 হলে
@@ -30,7 +34,7 @@ endif
 OBJS := $(patsubst %,$(BUILD)/%.o,$(C_SRCS) $(S_SRCS) $(CXX_SRCS))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all kernel iso run run-uefi run-serial debug gdb clean check-tools info
+.PHONY: all kernel initrd iso run run-uefi run-serial debug gdb clean check-tools info
 
 all: kernel
 
@@ -60,6 +64,16 @@ $(KERNEL): $(OBJS) kernel/linker.ld
 
 -include $(DEPS)
 
+# ---------- initrd ----------
+# USTAR ফরম্যাট (কার্নেলের initrd.c এটাই পড়ে); মালিক root, যাতে হোস্টের ইউজার নাম না ঢোকে
+initrd: $(INITRD)
+
+$(INITRD): $(SYSROOT_FILES)
+	@mkdir -p $(dir $@)
+	@echo "  TAR     $@"
+	@tar --format=ustar --owner=0 --group=0 --numeric-owner --sort=name \
+	    -cf $@ -C $(SYSROOT) .
+
 # ---------- ISO ----------
 LIMINE_FILES := $(LIMINE_DIR)/limine-bios.sys $(LIMINE_DIR)/limine-bios-cd.bin \
                 $(LIMINE_DIR)/limine-uefi-cd.bin $(LIMINE_DIR)/BOOTX64.EFI \
@@ -70,11 +84,12 @@ $(LIMINE_DIR)/limine:
 
 iso: $(ISO)
 
-$(ISO): $(KERNEL) limine.conf $(LIMINE_DIR)/limine $(LIMINE_FILES)
+$(ISO): $(KERNEL) $(INITRD) limine.conf $(LIMINE_DIR)/limine $(LIMINE_FILES)
 	@echo "  ISO     $@"
 	@rm -rf $(ISO_ROOT)
 	@mkdir -p $(ISO_ROOT)/boot/limine $(ISO_ROOT)/EFI/BOOT
 	@cp $(KERNEL) $(ISO_ROOT)/boot/rozos.elf
+	@cp $(INITRD) $(ISO_ROOT)/boot/initrd.tar
 	@cp limine.conf $(LIMINE_DIR)/limine-bios.sys $(LIMINE_DIR)/limine-bios-cd.bin \
 	    $(LIMINE_DIR)/limine-uefi-cd.bin $(ISO_ROOT)/boot/limine/
 	@cp $(LIMINE_DIR)/BOOTX64.EFI $(LIMINE_DIR)/BOOTIA32.EFI $(ISO_ROOT)/EFI/BOOT/

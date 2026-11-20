@@ -124,8 +124,14 @@ int boot_base_revision(int *ok)
 
 uint64_t boot_hhdm_offset(void)
 {
-    struct limine_hhdm_response *r = limine_hhdm_req.response;
-    return r ? r->offset : 0;
+    /* প্রথমবার পড়ে মনে রাখা হয় — response-এর মেমোরি (bootloader-reclaimable)
+     * ধাপ ৩-এ PMM ফেরত নিলেও এই মান ঠিক থাকে */
+    static uint64_t cached;
+    if (!cached) {
+        struct limine_hhdm_response *r = limine_hhdm_req.response;
+        cached = r ? r->offset : 0;
+    }
+    return cached;
 }
 
 const char *boot_memmap_type_name(uint64_t type)

@@ -7,16 +7,26 @@
 #include <rozos/string.h>
 #include <rozos/console.h>
 
-/* আউটপুট বাফার: শেষে '\0' নিশ্চিত, size ছাড়িয়ে গেলেও মোট দৈর্ঘ্য গোনা চলে */
+/* আউটপুট বাফার: শেষে '\0' নিশ্চিত, size ছাড়িয়ে গেলেও মোট দৈর্ঘ্য গোনা চলে।
+ * flush থাকলে (kvprintf) বাফার ভরে গেলে লেখা সেখানে পাঠিয়ে বাফার খালি করা হয় —
+ * ফলে যত লম্বা আউটপুটই হোক কাটা পড়ে না। ksnprintf-এ flush নেই (আগের মতো কাটে)। */
 struct outbuf {
     char  *buf;
     size_t size;
-    size_t len;
+    size_t len;        /* মোট (ফ্লাশ করা সহ) */
+    size_t pos;        /* বাফারে এখন কত */
+    void (*flush)(const char *s, size_t n);
 };
 
 static void out_char(struct outbuf *o, char c)
 {
-    if (o->len + 1 < o->size) {
+    if (o->flush) {
+        if (o->pos + 1 >= o->size) {
+            o->flush(o->buf, o->pos);
+            o->pos = 0;
+        }
+        o->buf[o->pos++] = c;
+    } else if (o->len + 1 < o->size) {
         o->buf[o->len] = c;
     }
     o->len++;
@@ -87,18 +97,32 @@ static void out_num(struct outbuf *o, uint64_t value, int is_negative, unsigned 
     }
 }
 
+static int format_into(struct outbuf *op, const char *fmt, va_list ap);
+
 int kvsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
 {
     struct outbuf o;
+    int n;
     o.buf = buf;
     o.size = size;
     o.len = 0;
+    o.pos = 0;
+    o.flush = NULL;
+    n = format_into(&o, fmt, ap);
+    if (size) {
+        o.buf[(o.len < size) ? o.len : size - 1] = '\0';
+    }
+    return n;
+}
+
+static int format_into(struct outbuf *op, const char *fmt, va_list ap)
+{
 
     while (*fmt) {
         int left = 0, zero_pad = 0, width = 0, precision = -1, length = 0;
 
         if (*fmt != '%') {
-            out_char(&o, *fmt++);
+            out_char(op, *fmt++);
             continue;
         }
         fmt++;
@@ -151,9 +175,9 @@ int kvsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
             else if (length == 3) v = (int64_t)va_arg(ap, size_t);
             else                  v = va_arg(ap, int);
             if (v < 0) {
-                out_num(&o, (uint64_t)0 - (uint64_t)v, 1, 10, 0, width, zero_pad, left, NULL);
+                out_num(op, (uint64_t)0 - (uint64_t)v, 1, 10, 0, width, zero_pad, left, NULL);
             } else {
-                out_num(&o, (uint64_t)v, 0, 10, 0, width, zero_pad, left, NULL);
+                out_num(op, (uint64_t)v, 0, 10, 0, width, zero_pad, left, NULL);
             }
             break;
         }
@@ -167,42 +191,39 @@ int kvsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
             else if (length == 2) v = va_arg(ap, unsigned long long);
             else if (length == 3) v = va_arg(ap, size_t);
             else                  v = va_arg(ap, unsigned int);
-            out_num(&o, v, 0, base, *fmt == 'X', width, zero_pad, left, NULL);
+            out_num(op, v, 0, base, *fmt == 'X', width, zero_pad, left, NULL);
             break;
         }
         case 'p': {
             uintptr_t v = (uintptr_t)va_arg(ap, void *);
-            out_num(&o, v, 0, 16, 0, width ? width : 18, 1, left, "0x");
+            out_num(op, v, 0, 16, 0, width ? width : 18, 1, left, "0x");
             break;
         }
         case 's':
-            out_str(&o, va_arg(ap, const char *), width, precision, left);
+            out_str(op, va_arg(ap, const char *), width, precision, left);
             break;
         case 'c':
-            if (!left) out_pad(&o, ' ', width - 1);
-            out_char(&o, (char)va_arg(ap, int));
-            if (left) out_pad(&o, ' ', width - 1);
+            if (!left) out_pad(op, ' ', width - 1);
+            out_char(op, (char)va_arg(ap, int));
+            if (left) out_pad(op, ' ', width - 1);
             break;
         case '%':
-            out_char(&o, '%');
+            out_char(op, '%');
             break;
         case '\0':
             /* ফরম্যাটের শেষে একা '%' */
             goto done;
         default:
             /* অচেনা specifier — যেমন আছে তেমন দেখাই */
-            out_char(&o, '%');
-            out_char(&o, *fmt);
+            out_char(op, '%');
+            out_char(op, *fmt);
             break;
         }
         fmt++;
     }
 
 done:
-    if (size) {
-        o.buf[(o.len < size) ? o.len : size - 1] = '\0';
-    }
-    return (int)o.len;
+    return (int)op->len;
 }
 
 int ksnprintf(char *buf, size_t size, const char *fmt, ...)
@@ -217,9 +238,18 @@ int ksnprintf(char *buf, size_t size, const char *fmt, ...)
 
 int kvprintf(const char *fmt, va_list ap)
 {
-    char buf[512];
-    int n = kvsnprintf(buf, sizeof(buf), fmt, ap);
-    tty_write(buf, strlen(buf));
+    char buf[256];
+    struct outbuf o;
+    int n;
+    o.buf = buf;
+    o.size = sizeof(buf);
+    o.len = 0;
+    o.pos = 0;
+    o.flush = tty_write;
+    n = format_into(&o, fmt, ap);
+    if (o.pos) {
+        tty_write(buf, o.pos);
+    }
     return n;
 }
 

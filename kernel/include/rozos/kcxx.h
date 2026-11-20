@@ -24,6 +24,8 @@ void   kcxx_set_allocator(kcxx_alloc_fn alloc, kcxx_free_fn free_fn);
 int    kcxx_has_allocator(void);
 /* গ্লোবাল কনস্ট্রাক্টর ঠিকমতো চলেছে কিনা যাচাই (selftest.cpp) — সফল হলে 1 */
 int    kcxx_selftest(void);
+/* heap চালু হওয়ার পর: new/delete, new[]/delete[] ও virtual destructor যাচাই — সফল হলে 1 */
+int    kcxx_heap_selftest(void);
 
 #ifdef __cplusplus
 }
