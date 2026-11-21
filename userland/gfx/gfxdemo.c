@@ -12,7 +12,7 @@ int main(void)
     gfx_ttf *ttf;
     gfx_event ev;
     int W, H, bx, by, vx = 5, vy = 4, r = 22, running = 1, frames = 0;
-    long t0;
+    long t0, frame_at;
     char buf[96];
 
     if (gfx_init_window("Graphics demo", 1000, 680) < 0) {
@@ -27,6 +27,7 @@ int main(void)
     bx = W / 2;
     by = H / 2;
     t0 = gfx_ticks_ms();
+    frame_at = t0;
 
     while (running) {
         int mx, my;
@@ -73,10 +74,23 @@ int main(void)
         gfx_present();
         frames++;
 
-        while (gfx_poll_event(&ev, frames == 1 ? 0 : 16)) {
-            if (ev.type == GFX_EV_KEY && (ev.key == 'q' || ev.key == GFX_KEY_ESC)) running = 0;
-            if (ev.type == GFX_EV_CLOSE) running = 0;          /* ধাপ ১৪: উইন্ডোর [X] */
-            if (ev.type == GFX_EV_MOUSE_DOWN && ev.button == GFX_BUTTON_LEFT && ev.y > 320) { bx = ev.x; by = ev.y; }
+        /* ধাপ ১৪খ: প্রতি ফ্রেম ~16 ms — মাউস নড়লেও; জমা ঘটনা সব একসাথে নিয়ে পরের ফ্রেমে যাওয়া
+         * (আগে প্রতিটা মাউস-ঘটনায় আবার ১৬ ms অপেক্ষা হত, তাই নড়াচড়ায় বল আটকে যেত) */
+        {
+            long due = frame_at + 16, now;
+            for (;;) {
+                now = gfx_ticks_ms();
+                if (now > due + 40) break;                 /* ঘটনার বন্যাতেও ছবি চলবে */
+                if (!gfx_poll_event(&ev, now >= due ? 0 : (int)(due - now))) {
+                    if (gfx_ticks_ms() >= due) break;
+                    continue;
+                }
+                if (ev.type == GFX_EV_KEY && (ev.key == 'q' || ev.key == GFX_KEY_ESC)) running = 0;
+                if (ev.type == GFX_EV_CLOSE) running = 0;          /* ধাপ ১৪: উইন্ডোর [X] */
+                if (ev.type == GFX_EV_RESIZE) { W = gfx_width(); H = gfx_height(); }
+                if (ev.type == GFX_EV_MOUSE_DOWN && ev.button == GFX_BUTTON_LEFT && ev.y > 320) { bx = ev.x; by = ev.y; }
+            }
+            frame_at = gfx_ticks_ms();
         }
     }
     gfx_quit();

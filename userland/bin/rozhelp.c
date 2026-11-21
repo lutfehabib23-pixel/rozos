@@ -22,6 +22,7 @@
 #include <errno.h>
 #include <dirent.h>
 #include <sys/ioctl.h>
+#include <poll.h>
 
 #define HELP_DIR   "/usr/share/help"
 #define MAX_LINES  2000
@@ -29,7 +30,9 @@
 #define HIST_MAX   32
 #define NAME_MAX_  64
 
-enum { K_UP = 1000, K_DOWN, K_LEFT, K_RIGHT, K_HOME, K_END, K_PGUP, K_PGDN, K_BTAB, K_ESC, K_MOUSE };
+enum { K_UP = 1000, K_DOWN, K_LEFT, K_RIGHT, K_HOME, K_END, K_PGUP, K_PGDN, K_BTAB, K_ESC, K_MOUSE, K_RESIZE };
+#define MINROWS 5
+#define MINCOLS 20
 /* ধাপ ১২: শেষ মাউস-ঘটনা (xterm SGR) */
 static int mouse_b, mouse_x, mouse_y, mouse_release;
 
@@ -168,9 +171,41 @@ static int read_byte(void)
     return read(0, &c, 1) == 1 ? c : -1;
 }
 
+/* ধাপ ১৪খ: টার্মিনাল-উইন্ডো বড়/ছোট হলে নিজে নতুন মাপে বসা — কী না এলে ৪০০ ms পরপর
+ * TIOCGWINSZ দেখা; বদলালে rows/cols নতুন, পর্দা পুরো নতুন করে আঁকা (K_RESIZE) */
+static int ws_rows = -1, ws_cols = -1, need_clear;
+
+static void ws_remember(void)
+{
+    struct winsize ws;
+    if (ioctl(1, TIOCGWINSZ, &ws) == 0) { ws_rows = ws.ws_row; ws_cols = ws.ws_col; }
+}
+
+static int wait_byte(void)
+{
+    for (;;) {
+        struct pollfd p;
+        struct winsize ws;
+        p.fd = 0;
+        p.events = POLLIN;
+        p.revents = 0;
+        if (poll(&p, 1, 400) > 0) return read_byte();
+        if (ioctl(1, TIOCGWINSZ, &ws) == 0 && ws.ws_row >= MINROWS && ws.ws_col >= MINCOLS &&
+            (ws.ws_row != ws_rows || ws.ws_col != ws_cols)) {
+            ws_rows = ws.ws_row;
+            ws_cols = ws.ws_col;
+            rows = ws.ws_row;
+            cols = ws.ws_col;
+            need_clear = 1;
+            return -2;
+        }
+    }
+}
+
 static int read_key(void)
 {
-    int c = read_byte(), num = 0;
+    int c = wait_byte(), num = 0;
+    if (c == -2) return K_RESIZE;
     if (c != 0x1B) return c;
     c = read_byte();
     if (c != '[' && c != 'O') return K_ESC;
@@ -249,6 +284,7 @@ static void draw(void)
     char buf[512];
     int r, w = cols - 1;
 
+    if (need_clear) { outs("\x1b[0m\x1b[2J"); need_clear = 0; }   /* ধাপ ১৪খ: নতুন মাপ */
     outs("\x1b[?25l\x1b[H");
     snprintf(buf, sizeof(buf), " rozOS help: %s", title);
     {
@@ -405,6 +441,7 @@ int main(int argc, char **argv)
         rows = ws.ws_row;
         cols = ws.ws_col;
     }
+    ws_remember();
     /* ধাপ ১২: আলাদা পর্দা (বন্ধ করলে আগেরটা ফেরে) আর মাউস (ক্লিক, চাকা) */
     outs("\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[0m\x1b[2J");
     for (;;) {

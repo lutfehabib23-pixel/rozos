@@ -29,6 +29,7 @@ static int same_format;            /* পর্দা XRGB8888 (red 16, green 8,
 static int wm_fd = -1;             /* >= 0 মানে উইন্ডো-মোড */
 static uint32_t wm_win;
 static uint32_t *wm_px;
+static uint32_t *wm_back;            /* ধাপ ১৪খ: অ্যাপের নিজের back buffer (shm-এ শুধু present-এ কপি) */
 static size_t wm_px_size;
 static unsigned char wm_rbuf[sizeof(struct wm_msg) * 8];
 static size_t wm_rlen;
@@ -106,12 +107,18 @@ static int wm_connect(const char *title, int w, int h)
     wm_px = (uint32_t *)mmap(NULL, wm_px_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm, 0);
     close(shm);
     if (wm_px == (uint32_t *)MAP_FAILED) goto fail;
-    back = gfx_surface_wrap(wm_px, m.a, m.b, m.c);
+    /* ধাপ ১৪খ: আঁকা হয় আলাদা মেমোরিতে, gfx_present তখন তৈরি ছবি shm-এ কপি করে — rozwm
+     * কখনো আধা-আঁকা ফ্রেম দেখায় না (লেখার সময়/ডায়ালগে ঝিকমিক বন্ধ) */
+    wm_back = (uint32_t *)calloc(wm_px_size / 4, 4);
+    if (!wm_back) goto fail;
+    back = gfx_surface_wrap(wm_back, m.a, m.b, m.c);
     if (!back) goto fail;
     return 0;
 fail:
     if (wm_px && wm_px != (uint32_t *)MAP_FAILED) munmap(wm_px, wm_px_size);
     wm_px = NULL;
+    free(wm_back);
+    wm_back = NULL;
     close(fd);
     wm_fd = -1;
     return -1;
@@ -175,11 +182,13 @@ void gfx_quit(void)
 {
     if (wm_fd >= 0) {
         wm_send(WM_DESTROY, 0, 0, 0, 0, 0, NULL);
-        if (back) back->px = NULL;                    /* shm-এর মেমোরি — free নয় */
+        if (back) back->px = NULL;                    /* wm_back নিচে আলাদা free */
         gfx_surface_free(back);
         back = NULL;
         munmap(wm_px, wm_px_size);
         wm_px = NULL;
+        free(wm_back);
+        wm_back = NULL;
         close(wm_fd);
         wm_fd = -1;
         return;
@@ -215,7 +224,11 @@ void gfx_present_rect(int x, int y, int w, int h)
         if (y < 0) { h += y; y = 0; }
         if (x + w > back->w) w = back->w - x;
         if (y + h > back->h) h = back->h - y;
-        if (w > 0 && h > 0) wm_send(WM_DAMAGE, x, y, w, h, 0, NULL);
+        if (w > 0 && h > 0) {
+            for (row = y; row < y + h; row++)          /* তৈরি ছবি → shm */
+                memcpy(wm_px + (size_t)row * back->stride + x, back->px + (size_t)row * back->stride + x, (size_t)w * 4);
+            wm_send(WM_DAMAGE, x, y, w, h, 0, NULL);
+        }
         return;
     }
     if (!back || !fb_mem) return;

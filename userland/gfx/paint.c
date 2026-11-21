@@ -1,11 +1,15 @@
 /* rozOS — paint: মাউস দিয়ে আঁকা (ধাপ ১৩)
  *   বাঁ বোতাম টেনে আঁকা, ডান বোতাম মোছা (সাদা)। ওপরের সারি: রঙ, তুলির মাপ, বালতি (ভরাট),
  *   মুছে ফেলা, সংরক্ষণ।  কী: 1-9 রঙ, [ ] তুলি, f ভরাট, c মোছা, s সংরক্ষণ, q বের হওয়া
- *   paint FILE.bmp    ওই ছবি খুলে আঁকা (সংরক্ষণ সেখানেই); নইলে ~/drawing.bmp */
+ *   paint FILE.bmp    ওই ছবি খুলে আঁকা (সংরক্ষণ সেখানেই); নইলে ~/drawing.bmp
+ *   ধাপ ১৪খ: প্রথম সংরক্ষণে (বা S = Save as) ফাইল-ডায়ালগে নাম/ফোল্ডার বাছাই, তারপর
+ *   ঠিক হল কিনা বার্তা-বাক্সে; o = অন্য ছবি খোলা (.bmp .png .jpg ...)। সংরক্ষণ BMP-তে। */
 
 #include <stdio.h>
 #include <string.h>
 #include <rozgfx.h>
+#include <rozui.h>
+#include <errno.h>
 
 #define BAR 44
 
@@ -18,8 +22,9 @@ static const uint32_t palette[9] = {
 static gfx_surface *canvas;
 static uint32_t color = GFX_RGB(0, 0, 0);
 static int brush = 4, fill_mode;
-static char status[160] = "draw with the left button - right button erases - s saves - q quits";
-static const char *path = "/home/drawing.bmp";
+static char status[160] = "left: draw  right: erase  s: save  S: save as  o: open  q: quit";
+static char path[512] = "/home/drawing.bmp";
+static int named;                       /* ধাপ ১৪খ: নাম বাছাই হয়েছে (বা কমান্ডে দেওয়া) */
 
 static void draw_bar(gfx_surface *s)
 {
@@ -52,10 +57,59 @@ static int bar_click(int x)
     return 0;
 }
 
-static void save(void)
+/* ধাপ ১৪খ: .bmp না থাকলে যোগ করা (সংরক্ষণ সবসময় BMP) */
+static void force_bmp(char *p, size_t size)
 {
-    if (gfx_save_bmp(canvas, path) == 0) snprintf(status, sizeof(status), "saved %s", path);
-    else snprintf(status, sizeof(status), "cannot save %s", path);
+    size_t n = strlen(p);
+    if (n < 4 || strcasecmp(p + n - 4, ".bmp")) {
+        char *dot = strrchr(p, '.'), *sl = strrchr(p, '/');
+        if (dot && (!sl || dot > sl)) *dot = '\0';
+        strncat(p, ".bmp", size - strlen(p) - 1);
+    }
+}
+
+static void save(int ask)
+{
+    char m[700];
+    if (ask || !named) {
+        char p[512];
+        snprintf(p, sizeof(p), "%s", path);
+        if (!ui_filedlg("Save picture (BMP)", p, sizeof(p), 1)) { snprintf(status, sizeof(status), "not saved"); return; }
+        force_bmp(p, sizeof(p));
+        snprintf(path, sizeof(path), "%s", p);
+        named = 1;
+    }
+    if (gfx_save_bmp(canvas, path) == 0) {
+        snprintf(status, sizeof(status), "saved %s", path);
+        snprintf(m, sizeof(m), "Saved:\n%s (%dx%d)", path, canvas->w, canvas->h);
+        ui_msgbox("Paint", m, UI_MB_OK | UI_MB_INFO);
+    } else {
+        snprintf(status, sizeof(status), "cannot save %s", path);
+        snprintf(m, sizeof(m), "Cannot save %s:\n%s", path, strerror(errno));
+        ui_msgbox("Paint", m, UI_MB_OK | UI_MB_ERROR);
+    }
+}
+
+static void open_picture(void)
+{
+    char p[512];
+    gfx_surface *img;
+    snprintf(p, sizeof(p), "%s", path);
+    if (!ui_filedlg("Open picture", p, sizeof(p), 0)) return;
+    img = gfx_load_image(p);
+    if (!img) {
+        char m[700];
+        snprintf(m, sizeof(m), "Cannot open %s:\n%s", p, gfx_image_error() ? gfx_image_error() : "unknown format");
+        ui_msgbox("Paint", m, UI_MB_OK | UI_MB_ERROR);
+        return;
+    }
+    gfx_clear(canvas, GFX_WHITE);
+    gfx_blit(canvas, 0, 0, img, 0, 0, -1, -1);
+    gfx_surface_free(img);
+    snprintf(path, sizeof(path), "%s", p);
+    force_bmp(path, sizeof(path));             /* .png খুললে সংরক্ষণ হবে একই নামের .bmp-তে */
+    named = 1;
+    snprintf(status, sizeof(status), "opened %s", p);
 }
 
 int main(int argc, char **argv)
@@ -64,7 +118,7 @@ int main(int argc, char **argv)
     gfx_event ev;
     int running = 1, down = 0, lx = 0, ly = 0, W, H;
 
-    if (argc > 1) path = argv[1];
+    if (argc > 1) { snprintf(path, sizeof(path), "%s", argv[1]); named = 1; }
     if (gfx_init_window("Paint", 0, 0) < 0) {
         perror("paint: /dev/fb0");
         return 1;
@@ -110,10 +164,12 @@ int main(int argc, char **argv)
                 else if (k == ']') brush = brush < 40 ? brush + 1 : 40;
                 else if (k == 'f') fill_mode = !fill_mode;
                 else if (k == 'c') gfx_clear(canvas, GFX_WHITE);
-                else if (k == 's') save();
+                else if (k == 's') save(0);
+                else if (k == 'S') save(1);            /* ধাপ ১৪খ: অন্য নামে */
+                else if (k == 'o') open_picture();
             } else if (ev.type == GFX_EV_MOUSE_DOWN) {
                 if (ev.y < BAR) {
-                    if (ev.button == GFX_BUTTON_LEFT && bar_click(ev.x) == 2) save();
+                    if (ev.button == GFX_BUTTON_LEFT && bar_click(ev.x) == 2) save(0);
                 } else if (fill_mode && ev.button == GFX_BUTTON_LEFT) {
                     gfx_flood_fill(canvas, cx, cy, color);
                 } else {

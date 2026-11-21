@@ -2,5 +2,5 @@
 name: Self-test
 category: System
 run: systest
-about: 50 checks of the kernel and libc
+about: 74 checks of the kernel and libc
 wait: yes

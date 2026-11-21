@@ -1228,6 +1228,7 @@ int ui_filedlg(const char *title, char *path, int size, int save)
         if (ui_do_button(&d.u, d.x + d.w - 192, d.y + d.h - 40, 84, 28, save ? "Save" : "Open")) accept = 1;
         if (ui_do_button(&d.u, d.x + d.w - 100, d.y + d.h - 40, 84, 28, "Cancel")) answer = 0;
         if (d.u.key == GFX_KEY_ESC) answer = 0;
+        if (d.u.key == '\n') accept = 1;              /* কোনো ঘরে ফোকাস নেই: Enter = Open/Save */
         if (d.u.closing) { close_flag = 1; answer = 0; }
         if (accept && name[0]) {
             char full[512];

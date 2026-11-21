@@ -2,5 +2,5 @@
 name: Paint
 category: Graphics
 run: paint
-about: draw with the mouse; s saves ~/drawing.bmp, q quits
+about: draw with the mouse; s saves (asks for a name), o opens a picture, q quits
 window: yes
