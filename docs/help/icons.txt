@@ -1,0 +1,15 @@
+# Icons with pictures (phase 14b)
+Every icon is drawn by rozOS, but a picture in /usr/share/icons takes
+its place: name.png (with transparency), .bmp, .jpg, .gif, .tga or
+.ppm, any size (scaled to 32x32 on the desktop, 16x16 elsewhere).
+  Desktop      terminal files code calculator paint images help
+  Files        folder file c-file image-file program
+  Toolbars     back up home new-folder rename delete copy paste
+               new open save compile run find
+  Start menu   the "icon:" line of a .app file in /usr/share/apps,
+               e.g.  icon: code   (or a full path: icon: /home/me/x.png)
+Example:  `cp /home/pics/folder.png /usr/share/icons/`  then restart
+Files (pictures are read once per program). For the desktop icons:
+Start > Restart, or `textmode` and `desktop`.
+In your own program: `ui_draw_icon(s, x, y, 32, "myicon", 'p');` -
+the picture if it exists, otherwise the drawn symbol ([[rozui]]).

@@ -29,6 +29,7 @@
 #include <sys/random.h>
 #include <rozos.h>
 #include "rozhttp.h"
+#include "rozui.h"
 
 #define SYS_getpid 39
 
@@ -528,6 +529,39 @@ static void test_phase14(void)
     check(WIFSIGNALED(st) && WTERMSIG(st) == SIGTERM, "SIG_IGN ignores SIGINT to a process group, SIGTERM still works");
 }
 
+/* ধাপ ১৪খ: Files, Code, rozui উইজেট-লাইব্রেরি, আইকন */
+static void test_phase14b(void)
+{
+    int st = 0, n = 0;
+    char *c;
+    FILE *f;
+    check(access("/bin/code", X_OK) == 0 && access("/bin/files", X_OK) == 0, "Code editor and Files are installed");
+    check(ui_shortcut_key("Ctrl+S") == 19 && ui_shortcut_key("F5") == GFX_KEY_F5 && ui_shortcut_key("Del") == GFX_KEY_DELETE,
+          "rozui: menu shortcuts (Ctrl+S, F5, Del)");
+    c = NULL;
+    if (ui_clip_set("rozui-clip", 10) == 0) c = ui_clip_get(&n);
+    check(c && n == 10 && !memcmp(c, "rozui-clip", 10), "rozui: clipboard round trip (/tmp/.clipboard)");
+    free(c);
+    check(access("/usr/share/icons/README.txt", R_OK) == 0 && ui_icon_image("no-such-icon", 32) == NULL,
+          "icons folder exists; a missing icon falls back to the drawn symbol");
+    f = fopen("/tmp/st-ui.c", "w");
+    if (f) {
+        fputs("#include <rozui.h>\nint main(void){ui_ctx u; if(gfx_init_window(\"t\",200,100)<0)return 1;\n"
+              "ui_init(&u); while(ui_run(&u)){ if(ui_do_button(&u,10,10,80,28,\"OK\")) ui_quit(&u);\n"
+              "if(ui_msgbox(\"t\",\"x\",UI_MB_OK)) ui_quit(&u);} gfx_quit(); return 0;}\n", f);
+        fclose(f);
+    }
+    if (access("/bin/tcc", X_OK) == 0) {
+        static char *const argv[] = { "tcc", "-o", "/tmp/st-ui", "/tmp/st-ui.c", "-lrozui", "-lrozgfx", NULL };
+        check(run("/bin/tcc", argv, &st) > 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0 && access("/tmp/st-ui", X_OK) == 0,
+              "tcc compiles a rozui program (buttons + message box)");
+    } else {
+        check(1, "tcc not installed - rozui compile test skipped");
+    }
+    unlink("/tmp/st-ui.c");
+    unlink("/tmp/st-ui");
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -542,6 +576,7 @@ int main(int argc, char **argv)
     test_phase12();
     test_phase13();
     test_phase14();
+    test_phase14b();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

@@ -1,7 +1,8 @@
 # The desktop (phase 14)
 rozOS starts in the desktop (use `make run` to see the QEMU window):
   top panel     rozOS, the name of the front window, date and time
-  icons         Terminal, Calculator, Paint, Images, Help - double-click
+  icons         Terminal, Files, Code, Calculator, Paint, Images, Help -
+                double-click (pictures: [[icons]])
   taskbar       Start, then one button per window (click = front,
                 click again = minimise)
   Start menu    the programs of /usr/share/apps by category, then
@@ -32,4 +33,7 @@ it once; for always: `mode=text` in /etc/rozos.conf ([[boot-menu]]).
 While the desktop runs, the keyboard belongs to it; the serial line
 (`make run-serial`, or the terminal next to the QEMU window) gets its
 own shell. [[kmon]] needs the text console - not a terminal window.
-More: [[rozwm]], [[rozterm]], [[signals]], [[rozui]].
+Colours (phase 14b): Ebony title bars, Obsidian desktop, Black panels,
+Onyx / Dark Charcoal / Jet Black faces, White text, Grey lines.
+The terminal cursor is a blinking white block.
+More: [[rozwm]], [[rozterm]], [[signals]], [[rozui]], [[code]], [[filemanager]].

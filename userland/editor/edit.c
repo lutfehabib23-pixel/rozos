@@ -15,6 +15,9 @@
  *   Ctrl+W                   অন্য নামে সংরক্ষণ (Save as)  Ctrl+R  C ফাইল: সংরক্ষণ, tcc দিয়ে
  *                            কম্পাইল করে চালানো, Enter দিলে এডিটরে ফেরা (ধাপ ১২ক)
  *   মাউস: ক্লিকে কার্সর, টেনে সিলেক্ট, চাকায় স্ক্রল, ডানের স্ক্রলবারে ক্লিকে লাফ
+ *   ধাপ ১৪খ: F10 (বা ওপরের লাইনে ক্লিক) = মেনু (File Edit Search Build View Help), প্রতিটা
+ *   কাজের পাশে তার শর্টকাট; Ctrl+O অন্য ফাইল খোলা; F1 সব কী-র তালিকা। টার্মিনাল-উইন্ডো
+ *   বড়/ছোট (পুরো পর্দা) করলে এডিটর নিজেই নতুন মাপে বসে যায় (Ctrl+L লাগে না)।
  *   Backspace/Delete, Enter, Tab  যেমন হওয়ার কথা (সিলেক্ট থাকলে সেটা মোছে/বদলায়)
  *
  * স্ক্রিন ANSI escape দিয়ে আঁকা হয় (কার্নেলের tty আর serial টার্মিনাল দুটোই বোঝে)।
@@ -34,6 +37,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <termios.h>
+#include <poll.h>
 
 #define TAB_STOP   4
 #define MSG_MAX    160
@@ -42,7 +46,8 @@
 #define UNDO_BYTES (8 * 1024 * 1024)
 
 enum {
-    K_UP = 1000, K_DOWN, K_LEFT, K_RIGHT, K_HOME, K_END, K_PGUP, K_PGDN, K_DEL, K_ESC, K_MOUSE
+    K_UP = 1000, K_DOWN, K_LEFT, K_RIGHT, K_HOME, K_END, K_PGUP, K_PGDN, K_DEL, K_ESC, K_MOUSE,
+    K_F1, K_F10, K_NEWFILE, K_NONE           /* ধাপ ১৪খ */
 };
 #define K_SHIFT 0x10000                /* বিশেষ কী-র সাথে Shift */
 #define K_CTRLM 0x20000                /* ... Ctrl */
@@ -426,6 +431,8 @@ static int read_key(void)
     case 'D': key = K_LEFT; break;
     case 'H': key = K_HOME; break;
     case 'F': key = K_END; break;
+    case 'P': key = K_F1; break;                  /* ধাপ ১৪খ: ESC O P = F1 */
+    case 'Q': case 'R': case 'S': return K_NONE;  /* F2-F4: এখনো কাজ নেই */
     case '~':
         switch (num) {
         case 1: case 7: key = K_HOME; break;
@@ -433,6 +440,9 @@ static int read_key(void)
         case 3: key = K_DEL; break;
         case 5: key = K_PGUP; break;
         case 6: key = K_PGDN; break;
+        case 21: key = K_F10; break;              /* ধাপ ১৪খ: মেনু */
+        case 2: case 15: case 17: case 18: case 19: case 20: case 23: case 24:
+            return K_NONE;                        /* Insert, অন্য F-কী: উপেক্ষা */
         default: return K_ESC;
         }
         break;
@@ -657,8 +667,9 @@ static void draw(void)
     thumb(&ttop, &tlen);
     ostr("\x1b[?25l");
 
-    /* শিরোনাম */
-    snprintf(txt, (size_t)screen_cols, "  edit  %s%s%s", filename[0] ? filename : "[no name]",
+    /* শিরোনাম — ধাপ ১৪খ: বাঁয়ে মেনুর নাম (F10 বা ক্লিক), তারপর ফাইলের নাম */
+    snprintf(txt, (size_t)screen_cols, " File  Edit  Search  Build  View  Help  |  %s%s%s",
+             filename[0] ? filename : "[no name]",
              untitled ? "  [new - not saved yet]" : "", modified ? "  [modified]" : "");
     snprintf(buf, bsz, "\x1b[7m%-*.*s\x1b[0m", w, w, txt);
     put_row(0, buf);
@@ -692,7 +703,7 @@ static void draw(void)
     }
     put_row(screen_rows - 2, buf);
     snprintf(txt, (size_t)screen_cols,
-             "^S Save ^W SaveAs ^R Run ^Q Quit ^F Find ^G Go ^C/^X/^V Copy/Cut/Paste ^Z/^Y Undo/Redo ^N Num");
+             "F10 Menu ^S Save ^O Open ^R Run ^Q Quit ^F Find ^G Go ^C/^X/^V Copy/Cut/Paste ^Z Undo F1 Keys");
     snprintf(buf, bsz, "\x1b[7m%-*.*s\x1b[0m", w, w, txt);
     put_row(screen_rows - 1, buf);
 
@@ -1112,6 +1123,257 @@ static void start_new(const char *tmpl)
     set_message("%s", "New file - ^S asks for a name, ^R compile & run, ^Q quit");
 }
 
+/* ---------- ধাপ ১৪খ: মেনু (F10 বা ওপরের লাইনে ক্লিক) ---------- */
+struct emenu_item { const char *label, *keys; int key; };
+struct emenu { const char *title; const struct emenu_item *items; int n; };
+static const struct emenu_item em_file[] = {
+    { "New", "", K_NEWFILE }, { "Open...", "^O", CTRL('o') }, { "Save", "^S", CTRL('s') },
+    { "Save As...", "^W", CTRL('w') }, { "Quit", "^Q", CTRL('q') }
+};
+static const struct emenu_item em_edit[] = {
+    { "Undo", "^Z", CTRL('z') }, { "Redo", "^Y", CTRL('y') }, { "Cut", "^X", CTRL('x') },
+    { "Copy", "^C", CTRL('c') }, { "Paste", "^V", CTRL('v') }, { "Cut line", "^K", CTRL('k') },
+    { "Paste line", "^U", CTRL('u') }, { "Select all", "^A", CTRL('a') }
+};
+static const struct emenu_item em_search[] = {
+    { "Find / find next", "^F", CTRL('f') }, { "Go to line...", "^G", CTRL('g') }
+};
+static const struct emenu_item em_build[] = {
+    { "Save, compile and run", "^R", CTRL('r') }
+};
+static const struct emenu_item em_view[] = {
+    { "Line numbers on/off", "^N", CTRL('n') }, { "Redraw / fit window", "^L", CTRL('l') }
+};
+static const struct emenu_item em_help[] = { { "Keyboard shortcuts", "F1", K_F1 } };
+static const struct emenu emenus[] = {
+    { "File", em_file, 5 }, { "Edit", em_edit, 8 }, { "Search", em_search, 2 },
+    { "Build", em_build, 1 }, { "View", em_view, 2 }, { "Help", em_help, 1 }
+};
+#define NEMENU 6
+
+/* শিরোনাম-লাইনে মেনুর নামের কলাম (0 থেকে): " File  Edit  Search ..." */
+static int emenu_col(int m)
+{
+    int i, c = 1;
+    for (i = 0; i < m; i++) c += (int)strlen(emenus[i].title) + 2;
+    return c;
+}
+
+static int emenu_at(int col)
+{
+    int i;
+    for (i = 0; i < NEMENU; i++) {
+        int c = emenu_col(i);
+        if (col >= c - 1 && col < c + (int)strlen(emenus[i].title) + 1) return i;
+    }
+    return -1;
+}
+
+static int emenu_width(int m)
+{
+    int i, w = 0;
+    for (i = 0; i < emenus[m].n; i++) {
+        int k = (int)strlen(emenus[m].items[i].label) + (int)strlen(emenus[m].items[i].keys) + 6;
+        if (k > w) w = k;
+    }
+    return w;
+}
+
+static void emenu_draw(int m, int sel)
+{
+    int i, col = emenu_col(m) - 1, w = emenu_width(m);
+    char b[160];
+    if (col + w > screen_cols) col = screen_cols - w;
+    if (col < 0) col = 0;
+    /* খোলা মেনুর নাম উজ্জ্বল */
+    snprintf(b, sizeof(b), "\x1b[1;%dH\x1b[0;30;47m %s \x1b[0m", emenu_col(m), emenus[m].title);
+    ostr(b);
+    for (i = 0; i < emenus[m].n && i + 2 < screen_rows; i++) {
+        const struct emenu_item *it = &emenus[m].items[i];
+        snprintf(b, sizeof(b), "\x1b[%d;%dH%s  %-*s%s  \x1b[0m", i + 2, col + 1,
+                 i == sel ? "\x1b[0;30;47m" : "\x1b[0;97;100m",
+                 w - 4 - (int)strlen(it->keys), it->label, it->keys);
+        ostr(b);
+    }
+    ostr("\x1b[?25l");
+    oflush();
+}
+
+static void forget_frame(void)
+{
+    int r;
+    for (r = 0; r < screen_rows; r++) { free(frame[r]); frame[r] = NULL; }
+}
+
+/* মেনু চালানো: বেছে নেওয়া কাজের কী-কোড, নইলে 0 */
+static int run_menu(int m)
+{
+    int sel = 0;
+    for (;;) {
+        int k, kb, col, w;
+        forget_frame();
+        draw();
+        emenu_draw(m, sel);
+        k = read_key();
+        kb = KEYBASE(k);
+        if (k == K_MOUSE) {
+            int wheel = (mouse_b & 64) != 0, motion = (mouse_b & 32) != 0;
+            col = emenu_col(m) - 1;
+            w = emenu_width(m);
+            if (col + w > screen_cols) col = screen_cols - w;
+            if (col < 0) col = 0;
+            if (wheel || mouse_release) continue;
+            if (mouse_y == 0) {
+                int t = emenu_at(mouse_x);
+                if (motion) { if (t >= 0 && t != m) { m = t; sel = 0; } continue; }
+                if (t >= 0 && t != m) { m = t; sel = 0; continue; }
+                break;
+            }
+            if (mouse_x >= col && mouse_x < col + w && mouse_y >= 1 && mouse_y <= emenus[m].n) {
+                sel = mouse_y - 1;
+                if (!motion) { forget_frame(); return emenus[m].items[sel].key; }
+                continue;
+            }
+            if (motion) continue;
+            break;                                    /* বাইরে ক্লিক = বন্ধ */
+        }
+        if (kb == K_ESC || kb == K_F10 || k == CTRL('q')) break;
+        if (kb == K_DOWN) sel = (sel + 1) % emenus[m].n;
+        else if (kb == K_UP) sel = (sel + emenus[m].n - 1) % emenus[m].n;
+        else if (kb == K_RIGHT) { m = (m + 1) % NEMENU; sel = 0; }
+        else if (kb == K_LEFT) { m = (m + NEMENU - 1) % NEMENU; sel = 0; }
+        else if (k == '\r' || k == '\n') { forget_frame(); return emenus[m].items[sel].key; }
+    }
+    forget_frame();
+    return 0;
+}
+
+/* F1: সব কী — পর্দার মাঝখানে বাক্স, যেকোনো কী-তে বন্ধ */
+static void show_keys(void)
+{
+    static const char *const t[] = {
+        " Keyboard shortcuts (F10 = menu, click the top line too)  ",
+        "",
+        "  ^S save        ^W save as      ^O open        ^Q quit",
+        "  ^Z undo        ^Y redo         ^A select all",
+        "  ^C copy        ^X cut          ^V paste",
+        "  ^K cut line    ^U paste line   ^F find (again = next)",
+        "  ^G go to line  ^N line numbers ^L redraw / fit window",
+        "  ^R save, compile with tcc and run (C files)",
+        "  Shift+arrows select, mouse click/drag/wheel",
+        "",
+        "                    press any key"
+    };
+    int i, n = (int)(sizeof(t) / sizeof(t[0])), w = 60, r0 = (screen_rows - n) / 2, c0 = (screen_cols - w) / 2;
+    char b[200];
+    if (r0 < 0) r0 = 0;
+    if (c0 < 0) c0 = 0;
+    forget_frame();
+    draw();
+    for (i = 0; i < n && r0 + i < screen_rows; i++) {
+        snprintf(b, sizeof(b), "\x1b[%d;%dH\x1b[0;%sm%-*.*s\x1b[0m", r0 + i + 1, c0 + 1,
+                 i == 0 ? "30;47" : "97;100", w, w, t[i]);
+        ostr(b);
+    }
+    ostr("\x1b[?25l");
+    oflush();
+    while (read_key() == K_MOUSE && mouse_release) { }
+    forget_frame();
+}
+
+/* ধাপ ১৪খ: টার্মিনালের মাপ বদলেছে কিনা (TIOCGWINSZ আগের বারের সাথে মেলানো) */
+static int last_ws_row = -1, last_ws_col = -1;
+
+static void remember_winsize(void)
+{
+    struct winsize ws;
+    if (ioctl(1, TIOCGWINSZ, &ws) == 0) { last_ws_row = ws.ws_row; last_ws_col = ws.ws_col; }
+}
+
+static int winsize_changed(void)
+{
+    struct winsize ws;
+    const char *l = getenv("LINES"), *c = getenv("COLUMNS");
+    if ((l && atoi(l) > 0) || (c && atoi(c) > 0)) return 0;   /* হাতে বসানো মাপ */
+    if (ioctl(1, TIOCGWINSZ, &ws) != 0 || ws.ws_row == 0 || ws.ws_col == 0) return 0;
+    return ws.ws_row != last_ws_row || ws.ws_col != last_ws_col;
+}
+
+static void refit_screen(void)
+{
+    screen_size();
+    remember_winsize();
+    free(frame);
+    frame = (char **)calloc((size_t)screen_rows, sizeof(char *));
+    if (!frame) leave(1);
+    full_redraw();
+}
+
+/* কী আসার অপেক্ষা; মাঝে মাঝে মাপ দেখা (উইন্ডো বড় করলে নিজে মানিয়ে নেওয়া) */
+static int wait_key(void)
+{
+    for (;;) {
+        struct pollfd p;
+        p.fd = 0;
+        p.events = POLLIN;
+        p.revents = 0;
+        if (poll(&p, 1, 400) > 0) return read_key();
+        if (winsize_changed()) refit_screen();
+    }
+}
+
+static void open_other(void)
+{
+    char name[1024] = "";
+    if (modified) {
+        int a;
+        set_message("%s", "Save changes first? y = save, n = discard, Esc = cancel");
+        draw();
+        do { a = read_key(); } while (a == K_MOUSE);
+        if (a == 'y' || a == 'Y') { if (save_file() < 0) return; }
+        else if (a != 'n' && a != 'N') { set_message("%s", "Cancelled"); return; }
+    }
+    if (prompt_input("Open file: ", name, sizeof(name)) <= 0) { set_message("%s", "Cancelled"); return; }
+    free_all_lines();
+    if (load_file(name) < 0) {
+        char m[MSG_MAX];
+        snprintf(m, sizeof(m), "Cannot open %s: %s", name, strerror(errno));
+        insert_line(0, "", 0);
+        set_message("%s", m);
+        filename[0] = '\0';
+        untitled = 1;
+        modified = 0;
+        return;
+    }
+    strncpy(filename, name, sizeof(filename) - 1);
+    untitled = 0;
+    modified = 0;
+    cx = cy = rowoff = coloff = 0;
+    sel_active = 0;
+    while (n_undo > 0) snap_free(&undo_st[--n_undo]);
+    clear_redo();
+    set_message("%s", "Opened");
+}
+
+static void new_other(void)
+{
+    if (modified) {
+        int a;
+        set_message("%s", "Save changes first? y = save, n = discard, Esc = cancel");
+        draw();
+        do { a = read_key(); } while (a == K_MOUSE);
+        if (a == 'y' || a == 'Y') { if (save_file() < 0) return; }
+        else if (a != 'n' && a != 'N') { set_message("%s", "Cancelled"); return; }
+    }
+    free_all_lines();
+    modified = 0;
+    cx = cy = rowoff = coloff = 0;
+    sel_active = 0;
+    while (n_undo > 0) snap_free(&undo_st[--n_undo]);
+    clear_redo();
+    start_new(NULL);
+}
+
 /* কার্সর-সরানো কী: Shift থাকলে সিলেক্ট বাড়ে, না থাকলে সিলেক্ট বাতিল */
 static void before_move(int k)
 {
@@ -1154,10 +1416,27 @@ int main(int argc, char **argv)
     set_isig(0);                        /* ধাপ ১৪ */
     /* ধাপ ১২: আলাদা পর্দা + মাউস (ক্লিক, টানা, SGR ভাষা) */
     ostr("\x1b[?1049h\x1b[?1000h\x1b[?1002h\x1b[?1006h");
+    remember_winsize();                 /* ধাপ ১৪খ */
     full_redraw();
 
     for (;;) {
-        int k = read_key(), kb = KEYBASE(k), edit_key = 0;
+        int k = wait_key(), kb, edit_key = 0;
+        /* ধাপ ১৪খ: মেনু — F10, বা ওপরের লাইনে মেনুর নামে ক্লিক */
+        if (k == K_F10) {
+            k = run_menu(0);
+            if (!k) { draw(); continue; }
+        } else if (k == K_MOUSE && mouse_y == 0 && !mouse_release && !(mouse_b & (32 | 64)) && (mouse_b & 3) == 0) {
+            int m = emenu_at(mouse_x);
+            if (m >= 0) {
+                k = run_menu(m);
+                if (!k) { draw(); continue; }
+            }
+        }
+        if (k == K_NONE) continue;
+        if (k == K_F1) { show_keys(); full_redraw(); continue; }
+        if (k == K_NEWFILE) { new_other(); full_redraw(); continue; }
+        if (k == CTRL('o')) { open_other(); full_redraw(); continue; }
+        kb = KEYBASE(k);
         if (k != CTRL('q')) quit_warned = 0;
 
         switch (k) {
@@ -1227,11 +1506,7 @@ int main(int argc, char **argv)
             full_redraw();
             continue;
         case CTRL('l'):
-            screen_size();
-            free(frame);
-            frame = (char **)calloc((size_t)screen_rows, sizeof(char *));
-            if (!frame) leave(1);
-            full_redraw();
+            refit_screen();                  /* ধাপ ১৪খ: একই কাজ, মাপও মনে রাখে */
             continue;
         case K_MOUSE:
             handle_mouse();

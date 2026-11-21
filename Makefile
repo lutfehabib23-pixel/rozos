@@ -170,6 +170,8 @@ TEMPLATE_FILES := $(wildcard sysroot/usr/share/templates/*)
 # ধাপ ১৩: ফন্ট (PSF কনসোল-ফন্ট, TrueType) আর গ্রাফিক্স ডেমোর ছবি
 FONT_FILES   := $(wildcard sysroot/usr/share/fonts/*)
 IMAGE_FILES  := $(wildcard sysroot/usr/share/images/*)
+# ধাপ ১৪খ: আইকনের ছবি (/usr/share/icons/<নাম>.png — না থাকলে আঁকা চিহ্ন)
+ICON_FILES   := $(wildcard sysroot/usr/share/icons/*)
 # ধাপ ১৩: গ্রাফিক্স ডেমোর সোর্স /usr/src/gfx-এ (নিজে বদলে tcc দিয়ে চালানোর জন্য)
 GFX_SRC_FILES := $(wildcard userland/gfx/*.c)
 
@@ -484,7 +486,7 @@ disk-check: $(DISK)
 # ভেতরে লেখা বাকি সব ফাইল থাকে। QEMU চলার সময় চালাবেন না।
 disk-update: $(DISK_BIN_STAMP)
 
-$(DISK_BIN_STAMP): $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(APP_FILES) $(TEMPLATE_FILES) $(FONT_FILES) $(IMAGE_FILES) $(GFX_SRC_FILES) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES) $(KERNEL) $(INITRD) | $(DISK)
+$(DISK_BIN_STAMP): $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(APP_FILES) $(TEMPLATE_FILES) $(FONT_FILES) $(IMAGE_FILES) $(ICON_FILES) $(GFX_SRC_FILES) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES) $(KERNEL) $(INITRD) | $(DISK)
 	@command -v debugfs >/dev/null || { echo "debugfs নেই — sudo apt install e2fsprogs"; exit 1; }
 	@if [ "$$(./toolchain/disk-offsets.sh $(DISK))" = old ]; then $(MAKE) --no-print-directory disk-migrate; fi
 	@./toolchain/disk-grow.sh $(DISK) $(DISK_MIB)
@@ -511,6 +513,8 @@ $(DISK_BIN_STAMP): $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EX
 	   echo "mkdir /usr/share/fonts"; echo "mkdir /usr/share/images"; \
 	   for f in $(FONT_FILES); do echo "rm /usr/share/fonts/$$(basename $$f)"; echo "write $$f /usr/share/fonts/$$(basename $$f)"; done; \
 	   for f in $(IMAGE_FILES); do echo "rm /usr/share/images/$$(basename $$f)"; echo "write $$f /usr/share/images/$$(basename $$f)"; done; \
+	   echo "mkdir /usr/share/icons"; \
+	   for f in $(ICON_FILES); do echo "rm /usr/share/icons/$$(basename $$f)"; echo "write $$f /usr/share/icons/$$(basename $$f)"; done; \
 	   echo "mkdir /usr/src"; echo "mkdir /usr/src/gfx"; \
 	   for f in $(GFX_SRC_FILES); do echo "rm /usr/src/gfx/$$(basename $$f)"; echo "write $$f /usr/src/gfx/$$(basename $$f)"; done; \
 	   echo "mkdir /usr/src"; echo "mkdir /usr/src/rozos"; \

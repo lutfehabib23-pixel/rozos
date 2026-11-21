@@ -256,7 +256,20 @@ static const char *key_sequence(int key)
     case KEY_DELETE:    return "\x1b[3~";
     case KEY_PAGE_UP:   return "\x1b[5~";
     case KEY_PAGE_DOWN: return "\x1b[6~";
-    default:            return NULL;      /* F-কী এখনো নয় — /dev/kbd-তে পাওয়া যায় */
+    /* ধাপ ১৪খ: F-কী — xterm-এর মতো (এডিটরের F10 মেনু, F1 সাহায্য) */
+    case KEY_F1:        return "\x1bOP";
+    case KEY_F2:        return "\x1bOQ";
+    case KEY_F3:        return "\x1bOR";
+    case KEY_F4:        return "\x1bOS";
+    case KEY_F5:        return "\x1b[15~";
+    case KEY_F6:        return "\x1b[17~";
+    case KEY_F7:        return "\x1b[18~";
+    case KEY_F8:        return "\x1b[19~";
+    case KEY_F9:        return "\x1b[20~";
+    case KEY_F10:       return "\x1b[21~";
+    case KEY_F11:       return "\x1b[23~";
+    case KEY_F12:       return "\x1b[24~";
+    default:            return NULL;
     }
 }
 

@@ -1,0 +1,40 @@
+# Code - the graphical C editor (phase 14b)
+  `code`            new file (untitled.c; Ctrl+S asks for a name)
+  `code hello.c`    open (or start) hello.c
+Also: the Code icon on the desktop, Start > Development, or double-click
+a .c file in [[filemanager|Files]].
+
+== Menus (every entry shows its key) ==
+  File    New Ctrl+N, Open... Ctrl+O, Save Ctrl+S, Save As... F12, Quit Ctrl+Q
+  Edit    Undo Ctrl+Z, Redo Ctrl+Y, Cut Ctrl+X, Copy Ctrl+C, Paste Ctrl+V,
+          Select All Ctrl+A
+  Search  Find... Ctrl+F, Find Next F3, Replace... Ctrl+E, Go to Line Ctrl+G
+  Build   Compile Ctrl+B (F7), Compile and Run Ctrl+R (F5)
+  View    line numbers, Output panel F8, text size 16 / 20 / 24
+  Help    Keyboard shortcuts F1
+F10 opens the menu from the keyboard (arrows, Enter, Esc).
+
+== Editing ==
+C colours (keywords, types, strings, numbers, comments, #include),
+line numbers, the current line lit. Mouse: click = cursor, drag =
+select, double-click = word, wheel scrolls, scroll bar on the right.
+Shift+arrows select, Ctrl+Left/Right jump words, Home goes to the
+first letter (again: column 1), Ctrl+Home/End = file start/end.
+Enter keeps the indentation (one step more after `{`), Tab = 4
+spaces (a real tab in a Makefile), `}` on an empty line steps back.
+The clipboard is shared with the terminal windows (/tmp/.clipboard).
+Bengali and other UTF-8 letters are kept exactly, but shown as a dot
+(the screen font has no Bengali yet).
+
+== Compile and run ==
+Compile saves, then runs `tcc -o NAME NAME.c -lrozui -lrozgfx` in the
+file's folder; the messages appear in the Output panel - click an
+error line to jump to it. Run (Ctrl+R / F5) compiles, then starts
+./NAME in a new terminal window ([[rozterm]] -w: it waits for a key at
+the end). Graphics programs ([[rozgfx]], [[rozui]]) open their own window.
+
+== Window ==
+Maximise or resize and everything (text, panel, scroll bar) fits the
+new size. [X] with unsaved changes asks Save / Don't save / Cancel.
+Source: /usr/src/gfx/code.c - written with [[rozui]], so it is also an
+example of menus and dialogs.

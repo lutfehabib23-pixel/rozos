@@ -119,6 +119,12 @@ fail:
 
 int gfx_windowed(void) { return wm_fd >= 0; }
 
+/* ধাপ ১৪খ: [X]-এর পর প্রোগ্রাম নিজে প্রশ্ন করবে — rozwm যেন ৩ সেকেন্ডে বন্ধ না করে */
+void gfx_keep_open(void)
+{
+    if (wm_fd >= 0) wm_send(WM_KEEP_OPEN, 0, 0, 0, 0, 0, NULL);
+}
+
 void gfx_set_title(const char *title)
 {
     if (wm_fd >= 0) wm_send(WM_TITLE, 0, 0, 0, 0, 0, title);

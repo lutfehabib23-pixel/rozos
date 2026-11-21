@@ -1,0 +1,26 @@
+# Files - the file manager (phase 14b)
+  `files`           start in your home folder
+  `files /usr/src`  start somewhere else
+Also: the Files icon on the desktop, or Start > System.
+
+== Window ==
+Toolbar: Back, Up, Home | New folder, Rename, Delete | Copy, Paste,
+Terminal (a terminal window in this folder). Location: type a path,
+Enter goes there. Left: places (Home, /, Programs, Sources, Images,
+Help pages, Icons, Temp). Right: the folder - name, size, type.
+
+== Mouse and keys ==
+  click             select              double-click / Enter   open
+  right click       properties          Backspace              up a folder
+  F2                rename              Del                    delete (asks)
+  Ctrl+C / Ctrl+X   copy / cut          Ctrl+V                 paste here
+  Ctrl+N            new folder          Ctrl+T                 terminal here
+  F5                read again          a letter               jump to a name
+Opening: folders go inside; .c .h .txt .md .conf and other text go to
+[[code]]; pictures to [[imgview]]; programs run in a terminal window.
+File > Open with Code opens anything as text.
+Folders are copied, moved and deleted with everything inside (delete
+asks first). Renaming and moving copy, then delete the old one (the
+file system has no rename yet - like [[mv]]).
+View > Hidden files shows names starting with a dot.
+Icons can be pictures: [[icons]]. Source: /usr/src/gfx/files.c

@@ -1,11 +1,57 @@
-# rozui - the 3D look (phase 14)
-  `#include <rozui.h>`    link: `tcc app.c -lrozui -lrozgfx`
-Colours of the desktop theme (dark, like the wallpaper the desktop was
-designed from; raised and sunken 3D edges): `ui_theme_get()`.
-  ui_bevel(s, x, y, w, h, raised)       two-step 3D edge
-  ui_panel / ui_sunken                  filled raised / sunken box
-  ui_button(s, x, y, w, h, "OK", UI_NORMAL|UI_HOVER|UI_DOWN|UI_DISABLED)
-  ui_label, ui_label_center, ui_menu_item, ui_separator
-  ui_icon(s, x, y, 't', color)          small 16x16 symbols
-Phase 14b adds text fields, lists, scroll bars and file dialogs (for
-the graphical editor and the file manager). See [[rozgfx]].
+# rozui - widgets for your own programs (phase 14, 14b)
+  `#include <rozui.h>`    link: `tcc app.c -lrozui -lrozgfx -o app`
+The desktop look in your own windows: buttons, text boxes, lists,
+menus with shortcuts, message boxes, file dialogs.
+
+== A whole program ==
+  #include <rozui.h>
+  int main(void) {
+      ui_ctx ui; char name[64] = ""; int big = 0;
+      if (gfx_init_window("Hello", 360, 200) < 0) return 1;
+      ui_init(&ui);
+      while (ui_run(&ui)) {                  /* wait, then draw again */
+          gfx_clear(ui.s, ui_theme_get()->window_bg);
+          ui_label(ui.s, 16, 20, "Your name:", ui_theme_get()->text);
+          ui_do_textbox(&ui, 110, 16, 220, name, sizeof(name));
+          ui_do_check(&ui, 16, 56, "Big letters", &big);
+          if (ui_do_button(&ui, 16, 100, 100, 28, "Hello"))
+              ui_msgbox("Hi", name, UI_MB_OK | UI_MB_INFO);
+          if (ui_do_button(&ui, 130, 100, 100, 28, "Quit")) ui_quit(&ui);
+      }
+      gfx_quit(); return 0;
+  }
+"Immediate mode": every frame you call the widgets again; a widget
+returns 1 when it was clicked or changed - no callbacks to register.
+
+== Widgets (ui_ctx *u first) ==
+  ui_do_button(u, x,y,w,h, "OK")          1 = clicked
+  ui_do_tool(u, x,y,w,h, "icon", 'f', "Open")   toolbar button
+  ui_do_check(u, x,y, "label", &v)        ui_do_radio(u, x,y, "A", &v, 1)
+  ui_do_textbox(u, x,y,w, buf, size)      1 changed, 2 Enter
+  ui_do_list(u, x,y,w,h, items, n, &sel, &top)   1 select, 2 double-click
+  ui_do_vscroll(u, x,y,w,h, &pos, total, page)   ui_do_slider(...)
+  ui_menubar(u, 0, 0, w, menus, n)        id of the chosen entry (or 0)
+     struct ui_menuitem items[] = { {"Save", "Ctrl+S", 1}, {"-",0,0}, ... };
+     struct ui_menu menus[] = { {"File", items, 2} };
+     call it first in the frame; pressing Ctrl+S also returns 1; F10 opens it
+  ui_hover / ui_clicked(u, x,y,w,h)       your own clickable areas
+  u->key, u->mods, u->mx, u->my, u->dclick, u->wheel   this frame's input
+  ui_ask_before_close(u, 1): [X] sets u->closing - ask, then ui_quit(u)
+
+== Dialogs (wait for the answer) ==
+  ui_msgbox("Title", "text\nmore", UI_MB_YESNOCANCEL | UI_MB_QUESTION)
+      → UI_YES / UI_NO / UI_CANCEL / UI_OK   (also UI_MB_OK, UI_MB_OKCANCEL,
+      UI_MB_YESNO; icons UI_MB_INFO, UI_MB_WARN, UI_MB_ERROR)
+  ui_inputbox("Rename", "New name:", buf, size)          1 = OK
+  ui_filedlg("Open", path, size, 0)   1 = path holds the chosen file
+                                      (last argument 1 = Save, asks Replace?)
+
+== Drawing only ==
+  ui_panel, ui_sunken, ui_bevel, ui_button(s,..., UI_HOVER), ui_label,
+  ui_groupbox, ui_progress, ui_statusbar, ui_separator, ui_menu_item,
+  ui_icon(s, x, y, 'f', color), ui_draw_icon(s, x, y, 32, "name", 'f')
+  ([[icons]]); colours: ui_theme_get() - Ebony, Obsidian, Black, Dark
+  Charcoal, Onyx, Jet Black, White, Grey.
+  ui_launch(argv, dir) starts a program, ui_clip_set/ui_clip_get = the
+  shared clipboard. Bigger examples: /usr/src/gfx/code.c and files.c.
+See [[rozgfx]].

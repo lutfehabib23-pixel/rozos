@@ -73,6 +73,9 @@ int  gfx_init_window(const char *title, int w, int h);
 int  gfx_init_fullscreen(void);    /* সবসময় সরাসরি /dev/fb0 (rozwm নিজে এটা ব্যবহার করে) */
 int  gfx_windowed(void);           /* 1 = rozwm-এর উইন্ডোতে আছি */
 void gfx_set_title(const char *title);
+/* ধাপ ১৪খ: GFX_EV_CLOSE পেয়ে যদি আগে প্রশ্ন করো ("Save changes?"), এটা ডাকো — নইলে
+ * rozwm ৩ সেকেন্ড পরে প্রোগ্রাম বন্ধ করে দেয়। পরে নিজে gfx_quit()/exit করো। */
+void gfx_keep_open(void);
 /* poll()-এ নিজের fd-এর সাথে নজর রাখার জন্য (যেমন টার্মিনালের PTY): ঘটনার fd-গুলো;
  * এগুলোর কোনোটায় POLLIN হলে gfx_poll_event(&ev, 0) দিয়ে ঘটনা তুলে নাও। ফেরত: কয়টা */
 int  gfx_event_fds(int *fds, int max);

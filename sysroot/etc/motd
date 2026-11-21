@@ -3,5 +3,5 @@ A self-hosting 64-bit operating system, built from scratch.
 
 This file came from sysroot/etc/motd on the build host.
 Shell tips: menu, ls /bin | wc -l, edit notes.txt, systest, kmon, help
-Desktop: Start menu, Terminal icon; textmode / desktop switch; help desktop
+Desktop: Start menu, Terminal, Files, Code icons; textmode / desktop switch; help desktop
 Graphics (make run window): gfxdemo, paint, imgview, gcalc, setfont, help graphics

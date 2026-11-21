@@ -10,6 +10,8 @@ shown, so there is no flicker.
   `-t`           open a terminal at once
   `-k`           keys only from the PS/2 keyboard (the serial line
                  keeps its own shell)
-Programs use it through [[rozgfx]] - no extra code. The message format
+Programs use it through [[rozgfx]] - no extra code. A program that asks
+"Save changes?" after [X] calls gfx_keep_open() (rozui does it), so it
+is not stopped after 3 seconds. The message format
 is in /usr/include/rozwm_proto.h. Source: /usr/src/gfx/rozwm.c.
 See [[desktop]].

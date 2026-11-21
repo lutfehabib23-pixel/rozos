@@ -30,6 +30,8 @@
 == Desktop ([[desktop]]) ==
   [[rozwm]]    the window server (starts at boot)
   [[rozterm]]  terminal window          [[desktop|desktop, textmode]] switch
+  [[code]]     graphical C editor (menus, compile, run)
+  [[filemanager|files]]    file manager (open, copy, rename, delete)
 
 == Graphics ([[graphics]]) ==
   [[gfxdemo]]  shapes, images, fonts     [[paint]]    draw with the mouse
@@ -37,7 +39,7 @@
   gfxevents   show keyboard/mouse events as text ([[rozgfx]])
 
 == Tests and demos ==
-  [[systest]]  69 kernel and libc tests  [[demos|hello, spin, crash]]
+  [[systest]]  74 kernel and libc tests  [[demos|hello, spin, crash]]
 
 Every program is a normal ELF file built from userland/ in the source
 tree; you can write your own with [[c-programming|tcc]].

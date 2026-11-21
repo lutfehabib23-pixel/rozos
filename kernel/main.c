@@ -59,7 +59,7 @@
 #include <arch/x86_64/pit.h>
 #include <arch/x86_64/apic.h>
 
-#define ROZOS_VERSION "0.14.0-phase14a"
+#define ROZOS_VERSION "0.14.1-phase14b"
 
 #ifdef __TINYC__
 /* ধাপ ১১: TCC-র লিংকারে linker.ld নেই — শুরু = Limine-এর দেওয়া virtual base,
@@ -684,7 +684,7 @@ void kmain(void)
     }
 
     tty_set_color(TTY_COLOR_LIGHT_GREEN, TTY_COLOR_BLACK);
-    kprintf("\nrozOS booted. Phase 14a: desktop (rozwm), terminal windows, PTY, Unix sockets, Ctrl+C.\n");
+    kprintf("\nrozOS booted. Phase 14b: desktop (rozwm), Files, Code editor, rozui widgets, PTY, Unix sockets, Ctrl+C.\n");
     tty_set_color(TTY_COLOR_LIGHT_GREY, TTY_COLOR_BLACK);
 
     /* /etc/motd থাকলে দেখানো — initrd থেকে আসা প্রথম "ফাইল" */

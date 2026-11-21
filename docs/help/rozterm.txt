@@ -9,6 +9,7 @@ console (colours, cursor, the editor's own screen, its mouse).
   right click                    paste  (clipboard: /tmp/.clipboard,
                                  shared by all terminals)
   Ctrl+C                         stop the running program ([[signals]])
+The cursor is a white block that blinks while the window is in front.
 Resize the window and the terminal gets more rows/columns (programs
 see it with TIOCGWINSZ; in the editor press Ctrl+L).
 Source: /usr/src/gfx/rozterm.c. See [[desktop]].

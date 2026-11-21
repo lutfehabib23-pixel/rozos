@@ -11,6 +11,8 @@
  *   WM_TITLE     win, text                       (উইন্ডোর ভেতরের স্থানাঙ্ক), c = buttons,
  *   WM_DESTROY   win                              d = button বা wheel
  *   WM_QUIT      a = 't'/'r'/'p' — ডেস্কটপ বন্ধ (textmode কমান্ড)
+ *   WM_KEEP_OPEN win — ধাপ ১৪খ: [X]-এর পর অ্যাপ প্রশ্ন করছে ("Save?"),
+ *                ৩ সেকেন্ডের kill বাতিল
  *                                         WM_CLOSE    [X] চাপা হয়েছে (৩ সেকেন্ডে না গেলে kill)
  *                                         WM_RESIZE   a=w b=h (বাফার একই; শুধু মাপ বদলায়)
  *                                         WM_FOCUS    a = 1 সামনে / 0 পেছনে
@@ -28,6 +30,7 @@
 enum {
     WM_HELLO = 1, WM_CREATE, WM_DAMAGE, WM_TITLE, WM_DESTROY,
     WM_QUIT,                       /* a = 't' টেক্সট মোড, 'r' restart, 'p' poweroff (textmode প্রোগ্রাম) */
+    WM_KEEP_OPEN,                  /* ধাপ ১৪খ: WM_CLOSE-এর পর জোর করে বন্ধ করা বাতিল */
     WM_CREATED = 100, WM_KEY, WM_MOUSE, WM_CLOSE, WM_RESIZE, WM_FOCUS
 };
 

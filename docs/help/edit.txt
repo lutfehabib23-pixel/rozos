@@ -8,8 +8,17 @@
 It opens on its own screen; when you quit, the shell screen comes
 back exactly as it was. It finds the terminal size by itself ([[stty]]).
 
+== Menu (phase 14b) ==
+`F10`, or a click on a name in the top line, opens the menu: File (New,
+Open..., Save, Save As..., Quit), Edit, Search, Build (save, compile and
+run), View, Help. Every entry shows its key (^S = Ctrl+S). Arrows move,
+Enter chooses, Esc closes. `Ctrl+O` opens another file, `F1` lists all
+keys. In a terminal window the editor follows the window size by itself
+(maximise it and the text fills the screen) - no Ctrl+L needed.
+The graphical editor is [[code]].
+
 == Screen ==
-Top line: file name, [new - not saved yet] for `edit --new`, and
+Top line: the menu names, the file name, [new - not saved yet] for `edit --new`, and
 [modified]. Right edge: a scroll bar. Bottom:
 messages, line:column and how far into the file you are, then the
 key reminder. `<` and `>` at the edges mean the line goes on there.

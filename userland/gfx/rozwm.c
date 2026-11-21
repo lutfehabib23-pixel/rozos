@@ -137,7 +137,7 @@ static void title_button_rect(const struct window *w, int which, int *bx, int *b
     *bw = 22;
     *bh = 18;
     *bx = w->x + w->w - (which + 1) * 24 + 2;
-    *by = w->y - TITLE_H + 3;
+    *by = w->y - TITLE_H + (TITLE_H - 2 - 18) / 2;     /* ধাপ ১৪খ: ফিতার ঠিক মাঝখানে */
 }
 
 /* ---------- সময় ---------- */
@@ -264,7 +264,7 @@ static void create_window(struct client *c, const struct wm_msg *m)
         w->x = m->c;
         w->y = m->d;
     } else {
-        w->x = 60 + cascade * 28;
+        w->x = 120 + cascade * 28;                   /* ধাপ ১৪খ: ডেস্কটপ-আইকনের ডানে */
         w->y = work_top() + TITLE_H + BORDER + 20 + cascade * 28;
         cascade = (cascade + 1) % 8;
         if ((m->flags & WMF_CENTER) || w->x + w->w > W - 10) {
@@ -341,6 +341,10 @@ static void handle_msg(struct client *c, const struct wm_msg *m)
         exit_action = (char)m->a;
         running = 0;
         break;
+    case WM_KEEP_OPEN:                               /* ধাপ ১৪খ: অ্যাপ "Save?" জিজ্ঞেস করছে */
+        i = find_win(c, m->win);
+        if (i >= 0) wins[i].close_at = 0;
+        break;
     }
 }
 
@@ -395,6 +399,7 @@ static void spawn_terminal(const char *cmd, int wait_key)
 #define MAXCATS 12
 struct app {
     char name[48], category[24], run[160], about[96];
+    char icon[64];                    /* ধাপ ১৪খ: icon: নাম (/usr/share/icons/নাম.png) বা পুরো পথ */
     int wait, window;
 };
 static struct app apps[MAXAPPS];
@@ -430,6 +435,7 @@ static void load_apps(void)
             else if (!strcmp(line, "about")) strncpy(a->about, v, sizeof(a->about) - 1);
             else if (!strcmp(line, "wait")) a->wait = (v[0] == 'y');
             else if (!strcmp(line, "window")) a->window = (v[0] == 'y');
+            else if (!strcmp(line, "icon")) strncpy(a->icon, v, sizeof(a->icon) - 1);
         }
         fclose(f);
         if (!a->name[0] || !a->run[0]) continue;
@@ -545,8 +551,16 @@ static void draw_menu(void)
         ui_panel(S, sub_x, sub_y, SUB_W, sub_h, T->face, 1);
         for (i = 0; i < sub_n; i++) {
             int a = sub_app(i);
-            if (a >= 0) ui_menu_item(S, sub_x + 4, sub_y + 4 + i * ITEM_H, SUB_W - 8, ITEM_H,
-                                     apps[a].name, i == sub_hover);
+            if (a >= 0) {
+                int iy = sub_y + 4 + i * ITEM_H;
+                char lbl[64];
+                /* ধাপ ১৪খ: নামের আগে ছোট আইকন (ছবি থাকলে ছবি) */
+                snprintf(lbl, sizeof(lbl), "   %s", apps[a].name);
+                ui_menu_item(S, sub_x + 4, iy, SUB_W - 8, ITEM_H, lbl, i == sub_hover);
+                ui_draw_icon(S, sub_x + 9, iy + (ITEM_H - 16) / 2, 16, apps[a].icon,
+                             !strcmp(apps[a].icon, "code") ? 'e' : !strcmp(apps[a].icon, "files") ? 'f'
+                             : apps[a].window ? 'g' : 't');
+            }
         }
     }
 }
@@ -607,21 +621,26 @@ static int menu_mouse(int type, int x, int y)
 }
 
 /* ---------- ডেস্কটপের আইকন ---------- */
-struct dicon { const char *label; char kind; const char *cmd; int term; };
+/* ধাপ ১৪খ: image = /usr/share/icons/<image>.png (বা .bmp/.jpg) থাকলে সেই ছবি, না থাকলে আঁকা চিহ্ন */
+struct dicon { const char *label; char kind; const char *cmd; int term; const char *image; };
 static const struct dicon icons[] = {
-    { "Terminal",   't', NULL, 1 },
-    { "Calculator", 'g', "gcalc", 0 },
-    { "Paint",      'g', "paint", 0 },
-    { "Images",     'g', "imgview", 0 },
-    { "Help",       'e', "help", 1 },
+    { "Terminal",   't', NULL, 1, "terminal" },
+    { "Files",      'f', "files", 0, "files" },
+    { "Code",       'e', "code", 0, "code" },
+    { "Calculator", 'g', "gcalc", 0, "calculator" },
+    { "Paint",      'g', "paint", 0, "paint" },
+    { "Images",     'g', "imgview", 0, "images" },
+    { "Help",       'e', "help", 1, "help" },
 };
 #define NICONS ((int)(sizeof(icons) / sizeof(icons[0])))
 static int icon_sel = -1;
 
 static void icon_rect(int i, int *x, int *y, int *w, int *h)
 {
-    *x = 16;
-    *y = PANEL_H + 16 + i * 76;
+    int per = (H - TASK_H - PANEL_H - 12) / 72;       /* ধাপ ১৪খ: জায়গা না হলে পাশের কলামে */
+    if (per < 1) per = 1;
+    *x = 16 + (i / per) * 84;
+    *y = PANEL_H + 12 + (i % per) * 72;
     *w = 72;
     *h = 66;
 }
@@ -632,10 +651,9 @@ static void draw_icons(void)
     for (i = 0; i < NICONS; i++) {
         int x, y, w, h, tw;
         icon_rect(i, &x, &y, &w, &h);
-        if (i == icon_sel) gfx_fill_round_rect(S, x, y, w, h, 6, GFX_RGBA(97, 175, 239, 255));
-        ui_panel(S, x + 20, y + 6, 32, 32, T->face, 1);
-        /* 16x16 আইকন দ্বিগুণ করে আঁকার বদলে মাঝখানে বসানো */
-        ui_icon(S, x + 28, y + 14, icons[i].kind, T->text);
+        if (i == icon_sel) gfx_fill_round_rect(S, x, y, w, h, 6, T->select);
+        /* ধাপ ১৪খ: ছবি থাকলে ৩২x৩২ ছবি, নইলে 3D বাক্সে আঁকা চিহ্ন */
+        ui_draw_icon(S, x + 20, y + 6, 32, icons[i].image, icons[i].kind);
         tw = gfx_text_width(NULL, icons[i].label);
         gfx_text(S, NULL, x + (w - tw) / 2, y + 44, icons[i].label, i == icon_sel ? GFX_WHITE : T->text);
     }
@@ -671,13 +689,13 @@ static void draw_window(int idx)
     /* শিরোনাম-ফিতা */
     gfx_gradient_v(S, w->x, w->y - TITLE_H, w->w, TITLE_H - 2,
                    active ? T->title_a1 : T->title_i1, active ? T->title_a2 : T->title_i2);
-    ui_icon(S, w->x + 4, w->y - TITLE_H + 3, 'p', T->text);
+    ui_icon(S, w->x + 4, w->y - TITLE_H + (TITLE_H - 2 - 16) / 2, 'p', T->text);
     {
         char t[64];
         int maxc = (w->w - 24 - 3 * 24 - 8) / 8;
         if (maxc < 0) maxc = 0;
         snprintf(t, sizeof(t), "%.*s", maxc > 63 ? 63 : maxc, w->title);
-        gfx_text(S, NULL, w->x + 26, w->y - TITLE_H + 4, t, active ? GFX_WHITE : T->text_dim);
+        gfx_text(S, NULL, w->x + 26, w->y - TITLE_H + (TITLE_H - 2 - 16) / 2, t, active ? GFX_WHITE : T->text_dim);
     }
     for (b = 0; b < 3; b++) {
         int bx, by, bw, bh, hover;
@@ -689,7 +707,7 @@ static void draw_window(int idx)
         } else {
             ui_button(S, bx, by, bw, bh, NULL, hover ? ((mbuttons & 1) ? UI_DOWN : UI_HOVER) : UI_NORMAL);
         }
-        ui_icon(S, bx + 3, by + 1, b == 0 ? 'x' : b == 1 ? (w->maximized ? 'r' : 'o') : '_', T->text);
+        ui_icon(S, bx + (bw - 16) / 2, by + (bh - 16) / 2, b == 0 ? 'x' : b == 1 ? (w->maximized ? 'r' : 'o') : '_', T->text);
     }
     /* ভেতরের অংশ: বসানো ধার, তারপর অ্যাপের পিক্সেল */
     ui_bevel(S, w->x - 2, w->y - 2, w->w + 4, w->h + 4, 0);

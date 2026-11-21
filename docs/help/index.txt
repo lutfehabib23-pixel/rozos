@@ -37,7 +37,9 @@ Type [[help|how to use this viewer]] if you are new here.
   [[desktop]]         the desktop: windows, Start menu, text mode and back
   [[rozterm]]         terminal windows    [[rozwm]] the window server
   [[signals]]         Ctrl+C, process groups    [[pty]] PTYs and Unix sockets
-  [[rozui]]           the 3D look for your own programs
+  [[rozui]]           widgets for your own programs: buttons, menus, dialogs
+  [[code]]            Code - the graphical C editor   [[filemanager]] Files
+  [[icons]]           put your own pictures on the icons
 
 == Graphics (phase 13) ==
   [[graphics]]        the graphics programs, and how to write your own

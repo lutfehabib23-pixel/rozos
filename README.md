@@ -1,10 +1,12 @@
 # rozOS
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 **A 64-bit, self-hosting operating system for x86_64, written from scratch in C and assembly.**
 
 rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphical desktop. It includes a C compiler, a text editor, `make`, a TCP/IP stack with HTTPS, and a package manager, so you can write, compile and even rebuild the rozOS kernel **from inside rozOS itself**.
 
-> Status: hobby / educational OS, under active development (current: **0.14.0-phase14a**).
+> Status: hobby / educational OS, under active development (current: **0.14.1-phase14b**).
 > It runs in QEMU. Real hardware has not been tested yet.
 
 ---
@@ -21,12 +23,14 @@ rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphica
 | **Drivers** | PCI, ACPI, PS/2 keyboard and mouse, serial, VGA/framebuffer console with PSF2 fonts, AHCI (SATA) disk, e1000/e1000e network |
 | **Network** | lwIP TCP/IP, DHCP, DNS, BSD sockets, BearSSL TLS (HTTPS) |
 | **libc** | own C library, *rozlibc* (stdio, stdlib, string, math, time, sockets, termios, …) |
-| **Toolchain in the OS** | TinyCC (`tcc`), `make` (pdpmake), editor `edit` (syntax colours, Ctrl+R = compile and run) |
+| **Toolchain in the OS** | TinyCC (`tcc`), `make` (pdpmake), Code (graphical) and `edit` (terminal, F10 menu) editors |
 | **Packages** | `rozpkg`, which downloads C libraries over HTTPS and links them |
-| **Graphics** | `/dev/fb0`, *librozgfx* (shapes, TrueType text via stb_truetype, BMP/PNG/JPEG via stb_image), *librozui* (3D-style widgets) |
-| **Desktop** | **rozwm** compositing window manager: flicker-free damage-based drawing, movable/resizable windows with minimise/maximise/close, Start menu, taskbar, clock; **rozterm** terminal windows (VT100, scrollback, copy and paste) |
+| **Graphics** | `/dev/fb0`, *librozgfx* (shapes, TrueType text via stb_truetype, BMP/PNG/JPEG via stb_image) |
+| **Widgets** | *librozui*: immediate-mode buttons, check boxes, text boxes, lists, scroll bars, menu bars with shortcuts, message boxes, input and file dialogs; icons can be replaced by pictures |
+| **Desktop** | **rozwm** compositing window manager: flicker-free damage-based drawing, movable/resizable windows with minimise/maximise/close, Start menu, taskbar, clock; **rozterm** terminal windows (VT100, scrollback, copy and paste, blinking cursor); dark 3D theme (Ebony, Obsidian, Onyx, Jet Black) |
+| **Desktop apps** | **Code** (graphical C editor: menus, syntax colours, compile and run with tcc, clickable errors), **Files** (file manager), calculator, paint, image viewer |
 | **Shell** | `rozsh`: pipes, redirection, `&&`/`||`, job control, history; about 50 programs in `/bin` |
-| **Docs** | 90 built-in help pages (`help`, `help desktop`, `help syscalls`, …) |
+| **Docs** | 93 built-in help pages (`help`, `help desktop`, `help syscalls`, …) |
 
 ---
 
@@ -42,7 +46,7 @@ sudo apt install build-essential git python3 xorriso qemu-system-x86 ovmf \
 
 ### 2. Get the sources and third-party code
 ```sh
-git clone https://github.com/<your-user>/rozOS.git
+git clone https://github.com/lutfehabib23-pixel/rozos.git rozOS
 cd rozOS
 ./toolchain/get-limine.sh      # Limine bootloader + limine.h
 ./toolchain/get-tcc.sh         # TinyCC   (C compiler inside rozOS)
@@ -72,8 +76,9 @@ KVM is off by default (see *Known issues*). Turn it on with `make run KVM=1`. Me
 ### Inside rozOS
 ```
 help            index of all help pages
-systest         self-test (69 tests should pass)
-edit hello.c    editor; Ctrl+R compiles and runs
+systest         self-test (74 tests should pass)
+code hello.c    graphical editor (F5 runs);  edit hello.c in a terminal
+files           file manager
 tcc hello.c -o hello && ./hello
 textmode        leave the desktop for the text console;  desktop  to go back
 ```
@@ -107,7 +112,7 @@ config.mk      build settings (CROSS, KVM, QEMU flags, memory)
 Contributions of all sizes are welcome: bug reports, help pages, drivers, ported programs.
 
 **Good places to start**
-- **Desktop (phase 14b, in progress):** file manager, graphical code editor, more rozui widgets (text field, list, scroll bar, file dialog).
+- **Desktop:** more apps (settings, text viewer, games), drag and drop in Files, Bengali text shaping, icon pictures (`/usr/share/icons`).
 - **Drivers:** NVMe, USB (xHCI + HID + mass storage), more network cards.
 - **Kernel:** user signal handlers + `SIGWINCH`, loadable kernel modules, SMP.
 - **libc:** more POSIX coverage, eventually musl compatibility.
@@ -134,8 +139,13 @@ Contributions of all sizes are welcome: bug reports, help pages, drivers, ported
 - No `SIGWINCH`; resize a terminal window, then press Ctrl+L in the editor.
 - User signal handlers are not yet invoked (only default / ignore).
 - `kmon` (kernel monitor) works only on the text console or serial line.
+- The VFS has no `rename()` yet: `mv` and Files move/rename by copy + delete.
+- The screen fonts have no Bengali glyphs yet (UTF-8 text is kept, shown as dots).
 
 ---
+
+## License
+rozOS is released under the [MIT License](LICENSE). Third-party components keep their own licenses (below).
 
 ## Third-party components
 | Component | Use | License |

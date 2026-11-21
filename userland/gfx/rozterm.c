@@ -39,7 +39,7 @@ struct cell {
 };
 
 static uint32_t palette[16] = {
-    GFX_RGB(24, 26, 32),   GFX_RGB(60, 110, 200), GFX_RGB(110, 170, 90),  GFX_RGB(70, 170, 180),
+    GFX_RGB(11, 18, 21),   GFX_RGB(60, 110, 200),   /* ধাপ ১৪খ: পটভূমি Obsidian #0B1215 */ GFX_RGB(110, 170, 90),  GFX_RGB(70, 170, 180),
     GFX_RGB(200, 80, 80),  GFX_RGB(170, 100, 190), GFX_RGB(190, 140, 70), GFX_RGB(200, 204, 212),
     GFX_RGB(95, 100, 112), GFX_RGB(97, 175, 239), GFX_RGB(152, 195, 121), GFX_RGB(86, 182, 194),
     GFX_RGB(224, 108, 117), GFX_RGB(198, 120, 221), GFX_RGB(229, 192, 123), GFX_RGB(240, 242, 246)
@@ -65,6 +65,8 @@ static int master = -1;
 static pid_t child;
 static int child_done, wait_key, exit_status;
 static int focused = 1;
+static int blink_on = 1;                /* ধাপ ১৪খ: কার্সর ঝলকানো (৫০০ ms) */
+static long blink_at;
 
 /* নির্বাচন (স্ক্রিনের সারি/কলাম, view সহ যা দেখা যাচ্ছে) */
 static int sel_on, sel_active, sel_x0, sel_y0, sel_x1, sel_y1;
@@ -314,14 +316,16 @@ static void draw_row(int r)
         unsigned char c = ln ? ln[x].ch : ' ', fg = ln ? ln[x].fg : 7, bg = ln ? ln[x].bg : 0;
         uint32_t f = palette[fg & 15], b = palette[bg & 15];
         if (c == 0) c = ' ';
-        if (in_sel(x, r)) { f = GFX_WHITE; b = GFX_RGB(74, 52, 128); }
+        if (in_sel(x, r)) { f = GFX_WHITE; b = GFX_RGB(85, 93, 80); }      /* Ebony */
         gfx_glyph(S, font, PAD + x * cw, y, c, f, b);
     }
-    /* কার্সর: নিচে দাগ (উইন্ডো সামনে থাকলে ভরা ঘর) */
+    /* কার্সর: সামনে থাকলে ঝলকানো সাদা ভরা ঘর, পেছনে থাকলে ফাঁপা বাক্স */
     if (r == cy + view && view >= 0 && cy + view < rows && !cursor_hidden && !child_done) {
         if (focused) {
-            unsigned char c = grid[cy][cx < cols ? cx : cols - 1].ch;
-            gfx_glyph(S, font, PAD + cx * cw, y, c ? c : ' ', palette[0], palette[7]);
+            if (blink_on) {
+                unsigned char c = grid[cy][cx < cols ? cx : cols - 1].ch;
+                gfx_glyph(S, font, PAD + cx * cw, y, c ? c : ' ', palette[0], GFX_WHITE);
+            }
         } else {
             gfx_rect(S, PAD + cx * cw, y, cw, ch, palette[7]);
         }
@@ -614,7 +618,19 @@ int main(int argc, char **argv)
         gfx_event ev;
         for (k = 0; k < nev; k++) { p[np].fd = evfd[k]; p[np].events = POLLIN; p[np].revents = 0; np++; }
         if (!child_done) { p[np].fd = master; p[np].events = POLLIN; p[np].revents = 0; np++; }
-        poll(p, (unsigned long)np, -1);
+        /* ধাপ ১৪খ: সামনে থাকলে ৫০০ ms পরপর জেগে কার্সর ঝলকানো */
+        {
+            int tmo = -1;
+            if (focused && !child_done && !cursor_hidden) {
+                tmo = 500 - (int)(gfx_ticks_ms() - blink_at);
+                if (tmo < 0) tmo = 0;
+            }
+            if (poll(p, (unsigned long)np, tmo) == 0 && tmo >= 0) {
+                blink_on = !blink_on;
+                blink_at = gfx_ticks_ms();
+                if (cy + view < rows) dirty[cy + view] = 1;
+            }
+        }
 
         if (!child_done && (p[np - 1].revents & (POLLIN | POLLHUP))) {
             unsigned char buf[4096];
@@ -643,6 +659,8 @@ int main(int argc, char **argv)
                 break;
             case GFX_EV_KEY:
                 if (child_done) { running = 0; break; }
+                blink_on = 1;                            /* টাইপের সময় কার্সর সবসময় দেখা যায় */
+                blink_at = gfx_ticks_ms();
                 if (sel_on) { sel_on = 0; mark_all(); }
                 send_key(ev.key, ev.mods);
                 break;
