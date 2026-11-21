@@ -32,4 +32,11 @@ int  rozos_netinfo(int index, struct rozos_netinfo *out);      /* -1 + errno ENO
 int  rozos_netconfig(unsigned ip, unsigned mask, unsigned gw, unsigned dns); /* ip 0 = DHCP */
 long rozos_now_ms(void);               /* CLOCK_MONOTONIC, মিলিসেকেন্ড */
 
+/* ধাপ ১৫ক: কার্নেল মডিউল (insmod/rmmod/lsmod) */
+int  rozos_init_module(const void *image, unsigned long len, const char *name);
+int  rozos_delete_module(const char *name);
+long rozos_module_list(char *buf, unsigned long len, int kernel_symbols);   /* লেখা বাইট */
+long rozos_usb_list(char *buf, unsigned long len);   /* ধাপ ১৫খ: lsusb */
+long rozos_mounts(char *buf, unsigned long len);   /* "ডিভাইস পথ ফাইলসিস্টেম\n" সারি */
+
 #endif

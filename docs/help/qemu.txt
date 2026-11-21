@@ -24,11 +24,23 @@ Without KVM, QEMU imitates every CPU instruction in software - building
 the kernel inside rozOS ([[kernel-build]]) is then slow. With KVM the
 real CPU runs rozOS and it is many times faster.
 Since phase 13 KVM is OFF by default: building the kernel inside rozOS
-under KVM can crash (#GP in interrupt return - a known bug, to be fixed).
+under KVM crashed (#GP in interrupt return). Phase 15a: that fault no
+longer stops the kernel - it prints "[kernel] iretq to user failed"
+with the details, repairs the GDT if it was damaged, otherwise only the
+one program ends. Please try `make run KVM=1`, build the kernel, and
+report those lines. kmon's `gdtcheck` shows the repair working.
   `make run-serial KVM=1`      fast; fine for the shell, edit, graphics
   `make run-serial KVM=auto`   on when /dev/kvm can be used
   `make run-serial`            no KVM (safe for kernel builds)
 The first lines say "KVM (fast)" or "TCG emulation".
+
+== USB (phase 15b) ==
+  `make run USB=1`    adds USB: a pen drive (usb-disk.img), keyboard, mouse
+  `make run USB=1 USB_DEV=/dev/sdd`   your real pen drive ([[usb]])
+
+== Extra NVMe disk (phase 15a) ==
+  `make run NVME=1`   adds a 64 MiB NVMe SSD (nvme-disk.img, FAT32, made
+                      the first time); in rozOS: `mount /dev/nvmea /mnt/nvme`
 On WSL2, once:  `sudo usermod -aG kvm $USER`  then in Windows
 PowerShell `wsl --shutdown` and open WSL again. Check: `ls -l /dev/kvm`.
 rozOS uses one CPU core for now (more cores come later).

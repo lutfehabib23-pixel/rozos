@@ -937,6 +937,88 @@ static int ext2_unlink(struct vnode *dirvn, const char *name)
     return 0;
 }
 
+/* ধাপ ১৫ক: ডিরেক্টরির ".." নতুন parent-এ */
+static int set_dotdot(struct ext2_vnode *dir, uint32_t parent_ino)
+{
+    struct ext2_fs *fs = dir->fs;
+    uint32_t pblk = get_block(dir, 0, 0), pos = 0;
+    uint8_t *buf;
+    int done = 0;
+    if (!pblk) return -EIO;
+    buf = (uint8_t *)kmalloc(fs->block_size);
+    if (!buf) return -ENOMEM;
+    if (read_block(fs, pblk, buf) == 0) {
+        while (pos + 8 <= fs->block_size) {
+            struct ext2_dirent *e = (struct ext2_dirent *)(buf + pos);
+            if (e->rec_len < 8) break;
+            if (e->inode && e->name_len == 2 && e->name[0] == '.' && e->name[1] == '.') {
+                e->inode = parent_ino;
+                done = write_block(fs, pblk, buf) == 0;
+                break;
+            }
+            pos += e->rec_len;
+        }
+    }
+    kfree(buf);
+    return done ? 0 : -EIO;
+}
+
+/* ধাপ ১৫ক: নাম বদল / সরানো — নতুন এন্ট্রি যোগ, পুরোনোটা সরানো (inode একই থাকে) */
+static int ext2_rename(struct vnode *odvn, const char *oname, struct vnode *ndvn, const char *nname)
+{
+    struct ext2_vnode *od = EV(odvn), *nd = EV(ndvn), *c;
+    struct ext2_fs *fs = od->fs;
+    struct find_ctx f, g;
+    struct ext2_inode ino;
+    size_t nl = strlen(nname);
+    int is_dir, err;
+
+    if (fs->read_only) return -EROFS;
+    if (nd->fs != fs) return -EXDEV;
+    if (nl == 0 || nl > 255 || strchr(nname, '/')) return -EINVAL;
+    f.name = oname; f.len = strlen(oname); f.ino = 0;
+    if (walk_dir(od, find_visit, &f) <= 0 || !f.ino) return -ENOENT;
+    if (read_inode(fs, f.ino, &ino) < 0) return -EIO;
+    is_dir = (ino.mode & S_IFMT) == S_IFDIR;
+    g.name = nname; g.len = nl; g.ino = 0;
+    if (walk_dir(nd, find_visit, &g) > 0 && g.ino) {
+        struct ext2_inode t;
+        if (g.ino == f.ino) return 0;
+        if (read_inode(fs, g.ino, &t) < 0) return -EIO;
+        if ((t.mode & S_IFMT) == S_IFDIR || is_dir) return -EEXIST;
+        err = ext2_unlink(ndvn, nname);          /* আগের ফাইল বদলে যায় */
+        if (err < 0) return err;
+    }
+    err = add_entry(nd, nname, f.ino, f.type);
+    if (err < 0) return err;
+    err = remove_entry(od, oname);
+    if (err < 0) {
+        remove_entry(nd, nname);
+        return err;
+    }
+    if (is_dir && od != nd) {
+        for (c = fs->vnodes; c; c = c->next) {
+            if (c->ino == f.ino) { c->vn.parent = ndvn; break; }
+        }
+        if (!c) {
+            struct ext2_vnode *tmp = get_vnode(fs, f.ino, ndvn);
+            if (tmp) {
+                set_dotdot(tmp, nd->ino);
+                vnode_unref(&tmp->vn);
+            }
+        } else {
+            set_dotdot(c, nd->ino);
+        }
+        if (od->inode.links > 2) od->inode.links--;
+        od->vn.nlink = od->inode.links;
+        write_inode(od);
+        nd->inode.links++;
+        nd->vn.nlink = nd->inode.links;
+        write_inode(nd);
+    }
+    return 0;
+}
+
 static void ext2_release(struct vnode *vn)
 {
     struct ext2_vnode *ev = EV(vn);
@@ -947,7 +1029,8 @@ static void ext2_release(struct vnode *vn)
 
 static const struct vnode_ops ext2_ops = {
     ext2_read, ext2_write, ext2_truncate, ext2_lookup, ext2_create,
-    ext2_unlink, ext2_readdir, ext2_release, NULL
+    ext2_unlink, ext2_readdir, ext2_release, NULL,
+    ext2_rename                                         /* ধাপ ১৫ক */
 };
 
 /* ---------- mount / statfs ---------- */
@@ -974,6 +1057,9 @@ static int ext2_mount(const void *arg, struct vnode **root)
     }
     if (fs->sb->feature_ro_compat & ~(EXT2_RO_SPARSE_SUPER | EXT2_RO_LARGE_FILE | EXT2_RO_BTREE_DIR)) {
         fs->read_only = 1;
+    }
+    if (block_is_read_only(dev)) {
+        fs->read_only = 1;                              /* ধাপ ১৫খ: সুরক্ষিত ডিস্ক */
     }
 
     fs->block_size = 1024u << fs->sb->log_block_size;
@@ -1084,4 +1170,14 @@ static void ext2_info(struct vnode *root)
     kprintf("      created by      %s\n", sb->creator_os < 5 ? os[sb->creator_os] : "?");
 }
 
-const struct filesystem ext2_filesystem = { "ext2", ext2_mount, ext2_statfs, ext2_info };
+/* ধাপ ১৫ক: umount-এর আগে — root ছাড়া কোনো vnode কেউ ধরে রাখলে ব্যস্ত */
+static int ext2_umount(struct vnode *root)
+{
+    struct ext2_vnode *ev;
+    for (ev = EV(root)->fs->vnodes; ev; ev = ev->next) {
+        if (&ev->vn != root && ev->vn.refcount > 0) return -EBUSY;
+    }
+    return 0;
+}
+
+const struct filesystem ext2_filesystem = { "ext2", ext2_mount, ext2_statfs, ext2_info, ext2_umount };

@@ -239,6 +239,64 @@ static int tmpfs_readdir(struct vnode *dir, uint64_t index, struct vfs_dirent *o
     return 1;
 }
 
+/* ধাপ ১৫ক: শুধু এন্ট্রি এক তালিকা থেকে অন্য তালিকায় (নাম বদলে) */
+static int tmpfs_rename(struct vnode *od, const char *oname, struct vnode *nd, const char *nname)
+{
+    struct tmpfs_node *o = TN(od), *n = TN(nd);
+    struct tmpfs_dirent **pp, *e, *t, **tail;
+    size_t len = strlen(nname);
+    char *nm;
+
+    if (len == 0 || len > VFS_NAME_MAX || strchr(nname, '/')) {
+        return -EINVAL;
+    }
+    for (pp = &o->entries; (e = *pp) != NULL; pp = &e->next) {
+        if (!strcmp(e->name, oname)) {
+            break;
+        }
+    }
+    if (!e) {
+        return -ENOENT;
+    }
+    for (t = n->entries; t; t = t->next) {
+        if (!strcmp(t->name, nname)) {
+            if (t->vn == e->vn) {
+                return 0;
+            }
+            if (t->vn->type == VNODE_DIR) {
+                return -EEXIST;
+            }
+            break;
+        }
+    }
+    nm = (char *)kmalloc(len + 1);
+    if (!nm) {
+        return -ENOSPC;
+    }
+    memcpy(nm, nname, len + 1);
+    if (t) {
+        tmpfs_unlink(nd, nname);                 /* আগের ফাইল বদলে যায় */
+    }
+    for (pp = &o->entries; *pp != e; pp = &(*pp)->next) {
+    }
+    *pp = e->next;                               /* পুরোনো তালিকা থেকে খোলা */
+    o->entry_count--;
+    od->size = o->entry_count;
+    kfree(e->name);
+    e->name = nm;
+    e->next = NULL;
+    for (tail = &n->entries; *tail; tail = &(*tail)->next) {
+    }
+    *tail = e;
+    n->entry_count++;
+    nd->size = n->entry_count;
+    if (e->vn->type == VNODE_DIR) {
+        e->vn->parent = nd;
+    }
+    od->mtime = nd->mtime = (uint64_t)clock_unix_time();
+    return 0;
+}
+
 static void tmpfs_release(struct vnode *vn)
 {
     struct tmpfs_node *n = TN(vn);
@@ -255,7 +313,8 @@ static const struct vnode_ops tmpfs_ops = {
     tmpfs_unlink,
     tmpfs_readdir,
     tmpfs_release,
-    NULL
+    NULL,
+    tmpfs_rename                          /* ধাপ ১৫ক */
 };
 
 /* ---------- mount ---------- */
@@ -288,4 +347,4 @@ static int tmpfs_statfs(struct vnode *r, struct vfs_statfs *out)
     return 0;
 }
 
-const struct filesystem tmpfs_filesystem = { "tmpfs", tmpfs_mount, tmpfs_statfs, NULL };
+const struct filesystem tmpfs_filesystem = { "tmpfs", tmpfs_mount, tmpfs_statfs, NULL, NULL };

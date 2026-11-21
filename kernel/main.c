@@ -39,6 +39,8 @@
 #include <rozos/pci.h>
 #include <rozos/block.h>
 #include <rozos/ahci.h>
+#include <rozos/nvme.h>
+#include <rozos/usb.h>
 #include <rozos/fat.h>
 #include <rozos/buildinfo.h>
 #include <rozos/ext2.h>
@@ -59,7 +61,7 @@
 #include <arch/x86_64/pit.h>
 #include <arch/x86_64/apic.h>
 
-#define ROZOS_VERSION "0.14.2-phase14b"
+#define ROZOS_VERSION "0.15.1-phase15b"
 
 #ifdef __TINYC__
 /* ধাপ ১১: TCC-র লিংকারে linker.ld নেই — শুরু = Limine-এর দেওয়া virtual base,
@@ -237,7 +239,7 @@ static void init_interrupts_and_devices(void)
             print_warn("no PS/2 mouse");
         }
     } else {
-        print_warn("no PS/2 controller: keyboard input via serial only");
+        print_warn("no PS/2 controller: keyboard via USB (if any) or serial");
     }
 
     /* এখান থেকে হার্ডওয়্যার ইন্টারাপ্ট চালু। টাইমার না এলে timer_sleep_ms()
@@ -444,6 +446,49 @@ static void init_network(void)
 
 /* ধাপ ৫: ডিস্ক। VFS আর devfs আগে তৈরি হয়, কারণ ডিস্ক ড্রাইভার নিজেকে /dev-এ
  * (sda ...) নিবন্ধন করে। */
+/* ধাপ ১৫খ: QEMU/KVM/VirtualBox-এর ভেতরে কিনা — CPUID-এর hypervisor বিট, আর ডিস্কের মডেল */
+static int cpu_is_virtual(void)
+{
+    uint32_t a = 1, b, c, d;
+    __asm__ __volatile__("cpuid" : "+a"(a), "=b"(b), "=c"(c), "=d"(d));
+    return (c >> 31) & 1;
+}
+
+static int model_is_virtual(const char *m)
+{
+    return !strncmp(m, "QEMU", 4) || !strncmp(m, "VBOX", 4) || !strncmp(m, "VMware", 6) ||
+           !strncmp(m, "Virtual", 7);
+}
+
+/* ধাপ ১৫খ: আসল কম্পিউটারে অন্য OS-এর ডিস্ক (যেমন Windows-এর NVMe) শুধু পড়া যাবে —
+ * rozOS-এর partition ("rozOS root"/"rozOS boot") নেই এমন অভ্যন্তরীণ ডিস্ক। পেন ড্রাইভ
+ * (removable) আর virtual machine-এর ডিস্কে লেখা যায়। বুট-মেনুর কমান্ড লাইনে "diskwrite"
+ * দিলে সুরক্ষা বন্ধ। */
+static void protect_foreign_disks(void)
+{
+    char msg[160];
+    size_t i, k;
+    int vm = cpu_is_virtual();
+    if (cmdline_has("diskwrite")) {
+        print_warn("diskwrite: every disk is writable (protection off)");
+        return;
+    }
+    for (i = 0; i < block_device_count(); i++) {
+        struct block_device *d = block_device_at(i);
+        int ours = 0;
+        if (d->parent || d->removable || vm || model_is_virtual(d->model)) continue;
+        for (k = 0; k < block_device_count(); k++) {
+            struct block_device *p = block_device_at(k);
+            if (p->parent == d && !strncmp(p->part_label, "rozOS", 5)) ours = 1;
+        }
+        if (ours) continue;
+        d->read_only = 1;
+        ksnprintf(msg, sizeof(msg), "/dev/%s is READ-ONLY (not a rozOS disk on a real computer; boot option diskwrite allows writing)",
+                  d->name);
+        print_warn(msg);
+    }
+}
+
 static void init_storage(void)
 {
     char msg[128];
@@ -468,6 +513,23 @@ static void init_storage(void)
                   (unsigned)ai.command_slots, ai.supports_64bit ? "64-bit" : "32-bit");
         print_ok(msg);
     }
+    /* ধাপ ১৫ক: NVMe SSD */
+    {
+        struct nvme_info ni;
+        n = nvme_init();
+        nvme_get_info(&ni);
+        if (ni.controllers) {
+            ksnprintf(msg, sizeof(msg), "NVMe %u.%u: %d disk(s) on %d controller(s), \"%s\"",
+                      (unsigned)(ni.version >> 16), (unsigned)((ni.version >> 8) & 0xFF), n, ni.controllers, ni.model);
+            print_ok(msg);
+        }
+    }
+    /* ধাপ ১৫খ: USB (xHCI) — পেন ড্রাইভ এখানেই চেনা হলে নিচের তালিকায় partition-সহ আসে */
+    n = usb_init();
+    if (n > 0) {
+        ksnprintf(msg, sizeof(msg), "USB: %d xHCI controller(s); keyboard, mouse and pen drives (lsusb)", n);
+        print_ok(msg);
+    }
     {
         size_t disks = block_device_count();          /* partition যোগ হওয়ার আগের সংখ্যা */
         for (i = 0; i < disks; i++) {
@@ -489,6 +551,7 @@ static void init_storage(void)
             }
         }
     }
+    protect_foreign_disks();                         /* ধাপ ১৫খ */
 }
 
 /* ext2 পাওয়া প্রথম ডিস্ক "/"-এ; সফল হলে 1
@@ -497,10 +560,17 @@ static int mount_disk_root(void)
 {
     char msg[128];
     size_t i;
+    int pass;
+    /* ধাপ ১৫খ: আগে "rozOS root" নামের partition (আসল কম্পিউটারে অন্য Linux-এর ext2 নয়),
+     * না পেলে আগের মতো প্রথম ext2 */
+    for (pass = 0; pass < 2; pass++)
     for (i = 0; i < block_device_count(); i++) {
         struct block_device *d = block_device_at(i);
         struct vfs_statfs sf;
         if (!d->parent && d->partitions) {
+            continue;
+        }
+        if (pass == 0 && strcmp(d->part_label, "rozOS root")) {
             continue;
         }
         if (vfs_mount("/", "ext2", d->name) == 0) {
@@ -524,11 +594,14 @@ static void mount_boot_partition(void)
     char msg[128];
     size_t i;
     int pass;
-    for (pass = 0; pass < 2; pass++) {
+    /* ধাপ ১৫খ: pass 0 = "rozOS boot" নামের partition (আসল কম্পিউটারে Windows-এর EFI
+     * partition নয়), 1 = যেকোনো "EFI System", 2 = প্রথম FAT */
+    for (pass = 0; pass < 3; pass++) {
         for (i = 0; i < block_device_count(); i++) {
             struct block_device *d = block_device_at(i);
             struct vfs_statfs sf;
-            if (!d->parent || (pass == 0 && strcmp(d->part_type, "EFI System"))) {
+            if (!d->parent || (pass == 0 && strcmp(d->part_label, "rozOS boot")) ||
+                (pass == 1 && strcmp(d->part_type, "EFI System"))) {
                 continue;
             }
             vfs_mkdir_p("/boot");
@@ -609,6 +682,7 @@ static void init_vfs(void)
         print_ok("devfs mounted on /dev");
         fbdev_init();                        /* ধাপ ১৩: /dev/fb0 */
     }
+    usb_storage_ready();                     /* ধাপ ১৫খ: পেন ড্রাইভ এখন /mnt/usb-তে */
 }
 
 void kmain(void)
@@ -684,7 +758,7 @@ void kmain(void)
     }
 
     tty_set_color(TTY_COLOR_LIGHT_GREEN, TTY_COLOR_BLACK);
-    kprintf("\nrozOS booted. Phase 14b: desktop (rozwm), Files, Code editor, rozui widgets, PTY, Unix sockets, Ctrl+C.\n");
+    kprintf("\nrozOS booted. Phase 15b: USB (pen drives, keyboard, mouse), disk protection; modules, NVMe, mount, rename; desktop.\n");
     tty_set_color(TTY_COLOR_LIGHT_GREY, TTY_COLOR_BLACK);
 
     /* /etc/motd থাকলে দেখানো — initrd থেকে আসা প্রথম "ফাইল" */

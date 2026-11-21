@@ -42,6 +42,24 @@ ESP_STAGE  := $(BUILD)/esp-stage
 DISK_STAGE := $(BUILD)/disk-root
 # q35-এ index=0 মানে AHCI-র প্রথম পোর্ট (CD-ROM থাকে index 2-এ)
 QEMU_DISK  = -drive file=$(DISK),format=raw,index=0,media=disk
+# ধাপ ১৫ক: make run NVME=1 — ৬৪ MiB-এর একটা NVMe SSD (nvme-disk.img, FAT32; প্রথমবার বানানো হয়)
+NVME       ?= 0
+NVME_IMG   ?= nvme-disk.img
+ifeq ($(NVME),1)
+QEMU_DISK += -drive file=$(NVME_IMG),format=raw,if=none,id=nvme0 -device nvme,serial=rozos-nvme,drive=nvme0
+NVME_DEP   := $(NVME_IMG)
+endif
+# ধাপ ১৫খ: make run USB=1 — xHCI কন্ট্রোলার + পেন ড্রাইভ (usb-disk.img, ৬৪ MiB, MBR + FAT32)
+# + USB কিবোর্ড ও মাউস। আসল পেন ড্রাইভ: make run USB=1 USB_DEV=/dev/sdX (WSL-এ usbipd দিয়ে
+# জোড়া ডিস্ক; help usb)
+USB        ?= 0
+USB_IMG    ?= usb-disk.img
+USB_DEV    ?=
+ifeq ($(USB),1)
+QEMU_DISK += -device qemu-xhci,id=xhci -drive file=$(if $(USB_DEV),$(USB_DEV),$(USB_IMG)),format=raw,if=none,id=usbstick \
+             -device usb-storage,bus=xhci.0,drive=usbstick -device usb-kbd,bus=xhci.0 -device usb-mouse,bus=xhci.0
+USB_DEP    := $(if $(USB_DEV),,$(USB_IMG))
+endif
 
 # ---------- rozlibc ও ইউজার প্রোগ্রাম (ধাপ ৬-৭) ----------
 # rozlibc (libc/): নিজস্ব ছোট C লাইব্রেরি → build/libc/libc.a + crt0.o। হোস্টের কোনো
@@ -172,6 +190,9 @@ FONT_FILES   := $(wildcard sysroot/usr/share/fonts/*)
 IMAGE_FILES  := $(wildcard sysroot/usr/share/images/*)
 # ধাপ ১৪খ: আইকনের ছবি (/usr/share/icons/<নাম>.png — না থাকলে আঁকা চিহ্ন)
 ICON_FILES   := $(wildcard sysroot/usr/share/icons/*)
+# ধাপ ১৫ক: উদাহরণ কার্নেল মডিউল (modules/*.c → /lib/modules/*.ko, সোর্স /usr/src/modules)
+MOD_SRCS     := $(wildcard modules/*.c)
+MOD_KOS      := $(patsubst modules/%.c,$(BUILD)/modules/%.ko,$(MOD_SRCS))
 # ধাপ ১৩: গ্রাফিক্স ডেমোর সোর্স /usr/src/gfx-এ (নিজে বদলে tcc দিয়ে চালানোর জন্য)
 GFX_SRC_FILES := $(wildcard userland/gfx/*.c)
 
@@ -194,7 +215,7 @@ DEPS := $(OBJS:.o=.d)
 
 .PHONY: all kernel libc userland tcc-check disk-update initrd iso disk disk-reset disk-check run run-uefi run-serial debug gdb clean check-tools info self-iso run-self disk-migrate run-iso run-iso-serial run-uefi-iso disk-grow
 
-all: kernel userland
+all: kernel userland $(MOD_KOS)
 
 kernel: $(KERNEL)
 
@@ -368,6 +389,11 @@ tcc-check:
 .SECONDARY: $(PDPMAKE_OBJS) $(BEARSSL_OBJS) $(ROZHTTP_OBJS) $(ROZGFX_OBJS) $(ROZUI_OBJS) $(LIBC_OBJS) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_LIB1_OBJS) $(TCC_RUNMAIN) $(TCC_BUILD)/tcc.o $(patsubst %,$(USER_BUILD)/obj/%.o,$(USER_PROGS)) $(USER_BINS)
 
 # sysroot + /bin-এর প্রোগ্রাম + rozlibc (/usr/include, /usr/lib — ধাপ ৮-এর TCC-র জন্য)
+$(BUILD)/modules/%.ko: modules/%.c kernel/include/rozos/module.h
+	@mkdir -p $(dir $@)
+	@echo "  MOD     $@"
+	@$(CC) $(filter-out -ffunction-sections -fdata-sections -MMD -MP -g,$(KERNEL_CFLAGS)) -c $< -o $@
+
 define stage_root
 	@rm -rf $(1) && mkdir -p $(1)
 	@tar -C $(SYSROOT) --exclude=.keep -cf - . | tar -C $(1) -xf -
@@ -380,6 +406,7 @@ define stage_root
 	@mkdir -p $(1)/etc/ssl $(1)/var/cache/rozpkg $(1)/var/lib/rozpkg/installed && cp $(CA_PEM) $(1)/etc/ssl/certs.pem
 	@cp $(DEV_LIBS) $(1)/usr/lib/ && cp $(DEV_HEADERS) $(1)/usr/include/
 	@mkdir -p $(1)/usr/src/gfx && cp $(GFX_SRC_FILES) $(1)/usr/src/gfx/
+	@mkdir -p $(1)/lib/modules $(1)/usr/src/modules && cp $(MOD_KOS) $(1)/lib/modules/ && cp $(MOD_SRCS) $(1)/usr/src/modules/
 	@mkdir -p $(1)/usr/src/rozos && cp -r kernel $(1)/usr/src/rozos/ && cp $(KSRC_MK) $(1)/usr/src/rozos/Makefile && cp $(KSRC_OBJS) $(1)/usr/src/rozos/objs.list && (cat $(BUILD_NUMBER_FILE) 2>/dev/null || echo 0) > $(1)/usr/src/rozos/.build-base
 	$(if $(HAVE_TCC),@mkdir -p $(1)/usr/lib/tcc/include && cp $(TCC_SRC)/include/*.h $(1)/usr/lib/tcc/include/ && cp $(TCC_LIB1) $(TCC_RUNMAIN) $(1)/usr/lib/tcc/)
 	$(if $(HAVE_TCC),@mkdir -p $(1)/usr/src/tcc && cp $(TCC_SRC_FILES) ports/tcc/config.h ports/tcc/build-in-rozos.sh $(1)/usr/src/tcc/ && cp -r $(TCC_SRC)/include $(TCC_SRC)/lib $(1)/usr/src/tcc/)
@@ -419,7 +446,7 @@ $(CA_PEM): $(wildcard $(CA_BUNDLE)) $(CA_EXTRA)
 # USTAR ফরম্যাট (কার্নেলের initrd.c এটাই পড়ে); মালিক root, যাতে হোস্টের ইউজার নাম না ঢোকে
 initrd: $(INITRD)
 
-$(INITRD): $(SYSROOT_FILES) $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES)
+$(INITRD): $(SYSROOT_FILES) $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES) $(MOD_KOS)
 	@mkdir -p $(dir $@)
 	@echo "  TAR     $@"
 	$(call stage_root,$(ROOT_STAGE))
@@ -433,7 +460,7 @@ disk: $(DISK)
 
 # প্রোগ্রামগুলো order-only: প্রোগ্রাম বদলালে পুরো ডিস্ক নতুন হয় না (disk-update দেখুন)
 # ধাপ ১১খ: GPT ডিস্ক — toolchain/mkdisk.sh (sgdisk, mkfs.fat, mtools লাগে)
-$(DISK): | $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRTS) $(TCC_EXTRA) $(CA_PEM) $(DEV_LIBS) $(KSRC_MK) $(KERNEL) $(INITRD) $(LIMINE_FILES)
+$(DISK): | $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRTS) $(TCC_EXTRA) $(CA_PEM) $(DEV_LIBS) $(KSRC_MK) $(KERNEL) $(INITRD) $(LIMINE_FILES) $(MOD_KOS)
 	@command -v mke2fs >/dev/null || { echo "mke2fs নেই — sudo apt install e2fsprogs"; exit 1; }
 	@echo "  MKDISK  $@ ($(DISK_MIB) MiB: FAT32 boot $(ESP_MIB) MiB + ext2 root, from $(SYSROOT)/ + build/userland/bin)"
 	$(call stage_root,$(DISK_STAGE))
@@ -470,6 +497,25 @@ disk-grow: | $(DISK)
 	@rm -f $(DISK_BIN_STAMP)
 	@$(MAKE) --no-print-directory disk-update
 
+# ধাপ ১৫ক: NVMe পরীক্ষার ডিস্ক — পুরোটা FAT32 (পেন ড্রাইভের মতো), ভেতরে README.TXT
+$(NVME_IMG):
+	@echo "  NVME    $@ (64 MiB FAT32, label ROZNVME)"
+	@rm -f $@ && truncate -s 64M $@ && mkfs.fat -F 32 -n ROZNVME $@ >/dev/null
+	@printf 'Hello from the NVMe disk!\nmount /dev/nvmea /mnt/nvme  then  ls /mnt/nvme\n' > $(BUILD)/nvme-readme.txt 2>/dev/null || { mkdir -p $(BUILD); printf 'Hello from the NVMe disk!\n' > $(BUILD)/nvme-readme.txt; }
+	@mcopy -i $@ $(BUILD)/nvme-readme.txt ::README.TXT
+
+# ধাপ ১৫খ: পরীক্ষার পেন ড্রাইভ — MBR, একটা FAT32 partition (১ MiB থেকে), ভেতরে README.TXT
+$(USB_IMG):
+	@echo "  USB     $@ (64 MiB, MBR + FAT32 partition, label ROZUSB)"
+	@rm -f $@ && truncate -s 64M $@
+	@mkdir -p $(BUILD)
+	@# MBR হাতে: partition 1 = টাইপ 0x0C (FAT32 LBA), LBA 2048 থেকে 129024 sector; শেষে 55 AA
+	@printf '\000\040\041\000\014\376\377\377\000\010\000\000\000\370\001\000' | dd of=$@ bs=1 seek=446 conv=notrunc status=none
+	@printf '\125\252' | dd of=$@ bs=1 seek=510 conv=notrunc status=none
+	@mkfs.fat -F 32 -n ROZUSB --offset=2048 $@ >/dev/null
+	@printf 'Hello from the USB pen drive!\nrozOS mounts it on /mnt/usb - umount /mnt/usb before pulling it out.\n' > $(BUILD)/usb-readme.txt
+	@mcopy -i $@@@1M $(BUILD)/usb-readme.txt ::README.TXT
+
 disk-reset:
 	rm -f $(DISK)
 	@$(MAKE) --no-print-directory disk
@@ -486,7 +532,7 @@ disk-check: $(DISK)
 # ভেতরে লেখা বাকি সব ফাইল থাকে। QEMU চলার সময় চালাবেন না।
 disk-update: $(DISK_BIN_STAMP)
 
-$(DISK_BIN_STAMP): $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(APP_FILES) $(TEMPLATE_FILES) $(FONT_FILES) $(IMAGE_FILES) $(ICON_FILES) $(GFX_SRC_FILES) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES) $(KERNEL) $(INITRD) | $(DISK)
+$(DISK_BIN_STAMP): $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(APP_FILES) $(TEMPLATE_FILES) $(FONT_FILES) $(IMAGE_FILES) $(ICON_FILES) $(GFX_SRC_FILES) $(MOD_KOS) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES) $(KERNEL) $(INITRD) | $(DISK)
 	@command -v debugfs >/dev/null || { echo "debugfs নেই — sudo apt install e2fsprogs"; exit 1; }
 	@if [ "$$(./toolchain/disk-offsets.sh $(DISK))" = old ]; then $(MAKE) --no-print-directory disk-migrate; fi
 	@./toolchain/disk-grow.sh $(DISK) $(DISK_MIB)
@@ -514,6 +560,10 @@ $(DISK_BIN_STAMP): $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EX
 	   for f in $(FONT_FILES); do echo "rm /usr/share/fonts/$$(basename $$f)"; echo "write $$f /usr/share/fonts/$$(basename $$f)"; done; \
 	   for f in $(IMAGE_FILES); do echo "rm /usr/share/images/$$(basename $$f)"; echo "write $$f /usr/share/images/$$(basename $$f)"; done; \
 	   echo "mkdir /usr/share/icons"; \
+	   echo "mkdir /lib"; echo "mkdir /lib/modules"; echo "mkdir /usr/src/modules"; \
+	   echo "mkdir /mnt"; \
+	   for f in $(MOD_KOS); do echo "rm /lib/modules/$$(basename $$f)"; echo "write $$f /lib/modules/$$(basename $$f)"; done; \
+	   for f in $(MOD_SRCS); do echo "rm /usr/src/modules/$$(basename $$f)"; echo "write $$f /usr/src/modules/$$(basename $$f)"; done; \
 	   for f in $(ICON_FILES); do echo "rm /usr/share/icons/$$(basename $$f)"; echo "write $$f /usr/share/icons/$$(basename $$f)"; done; \
 	   echo "mkdir /usr/src"; echo "mkdir /usr/src/gfx"; \
 	   for f in $(GFX_SRC_FILES); do echo "rm /usr/src/gfx/$$(basename $$f)"; echo "write $$f /usr/src/gfx/$$(basename $$f)"; done; \
@@ -614,11 +664,11 @@ QEMU_SERIAL = -chardev stdio,id=con0,mux=on,signal=off -serial chardev:con0
 # ---------- QEMU ----------
 # ধাপ ১১খ: ডিস্ক থেকেই boot (Limine ডিস্কে, মেনুতে kinstall-এর kernel-গুলো)।
 # ISO থেকে আগের মতো: make run-iso / run-iso-serial (rescue)।
-run: $(DISK_BIN_STAMP) | $(DISK)
+run: $(DISK_BIN_STAMP) | $(DISK) $(NVME_DEP) $(USB_DEP)
 	@echo "  QEMU    $(QEMU_MEM) RAM, $(if $(filter 1,$(KVM)),KVM (fast),TCG emulation - no KVM: help qemu)"
 	$(QEMU) $(QEMU_FLAGS) $(QEMU_NET) $(QEMU_DISK) -boot c $(QEMU_SERIAL)
 
-run-serial: $(DISK_BIN_STAMP) | $(DISK)
+run-serial: $(DISK_BIN_STAMP) | $(DISK) $(NVME_DEP) $(USB_DEP)
 	@echo "  QEMU    $(QEMU_MEM) RAM, $(if $(filter 1,$(KVM)),KVM (fast),TCG emulation - no KVM: help qemu)"
 	$(QEMU) $(QEMU_FLAGS) $(QEMU_NET) $(QEMU_DISK) -boot c -display none $(QEMU_SERIAL)
 
@@ -632,7 +682,7 @@ $(BUILD)/ovmf_vars.fd:
 	@mkdir -p $(BUILD)
 	@cp $(OVMF_VARS) $@
 
-run-uefi: $(BUILD)/ovmf_vars.fd $(DISK_BIN_STAMP) | $(DISK)
+run-uefi: $(BUILD)/ovmf_vars.fd $(DISK_BIN_STAMP) | $(DISK) $(NVME_DEP) $(USB_DEP)
 	@echo "  QEMU    $(QEMU_MEM) RAM, $(if $(filter 1,$(KVM)),KVM (fast),TCG emulation - no KVM: help qemu)"
 	$(QEMU) $(QEMU_FLAGS) $(QEMU_NET) $(QEMU_DISK) \
 	    -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \

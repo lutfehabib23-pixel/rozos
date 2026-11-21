@@ -20,5 +20,6 @@ uint64_t timer_uptime_ms(void);
 void     timer_sleep_ms(uint64_t ms); /* ইন্টারাপ্ট চালু থাকতে হবে */
 void     timer_set_tick_hook(timer_tick_hook_t hook);
 int      timer_add_tick_hook(timer_tick_hook_t hook);   /* ধাপ ১৪: আরও (সর্বোচ্চ ৪টা) */
+int      timer_remove_tick_hook(timer_tick_hook_t hook); /* ধাপ ১৫ক: মডিউল বের হওয়ার সময় */
 
 #endif

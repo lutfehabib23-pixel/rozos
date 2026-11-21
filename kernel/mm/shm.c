@@ -184,7 +184,7 @@ static void shm_release(struct vnode *vn)
 }
 
 static const struct vnode_ops shm_ops = {
-    shm_read, shm_write, shm_truncate, NULL, NULL, NULL, NULL, shm_release, NULL
+    shm_read, shm_write, shm_truncate, NULL, NULL, NULL, NULL, shm_release, NULL, NULL /* rename (ধাপ ১৫ক) */
 };
 
 /* ---------- vmm hook: ম্যাপ/আনম্যাপের হিসাব ---------- */

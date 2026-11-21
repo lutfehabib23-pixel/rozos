@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <rozos/vfs.h>
+#include <rozos/block.h>
 #include <rozos/errno.h>
 #include <rozos/string.h>
 #include <rozos/heap.h>
@@ -110,11 +111,22 @@ static const struct filesystem *find_fs(const char *name)
     return NULL;
 }
 
-size_t vfs_mount_count(void) { return mount_count; }
+/* ধাপ ১৫ক: শুধু চালু mount গোনা (umount করা ঘর বাদ) */
+size_t vfs_mount_count(void)
+{
+    size_t i, n = 0;
+    for (i = 0; i < mount_count; i++) if (mounts[i].active) n++;
+    return n;
+}
 
 const struct mount *vfs_mount_at(size_t index)
 {
-    return index < mount_count ? &mounts[index] : NULL;
+    size_t i;
+    for (i = 0; i < mount_count; i++) {
+        if (!mounts[i].active) continue;
+        if (index-- == 0) return &mounts[i];
+    }
+    return NULL;
 }
 
 /* ---------- পাথ সমাধান ---------- */
@@ -302,8 +314,12 @@ static int do_vfs_mount(const char *path, const char *fs_name, const void *arg)
     if (!fs) {
         return -ENODEV;
     }
-    if (mount_count >= VFS_MAX_MOUNTS) {
-        return -ENOMEM;
+    {
+        size_t i;
+        for (i = 0; i < mount_count && mounts[i].active; i++) { }
+        if (i == mount_count && mount_count >= VFS_MAX_MOUNTS) {
+            return -ENOMEM;
+        }
     }
     if (strnlen(path, VFS_PATH_MAX) >= VFS_PATH_MAX) {
         return -ENAMETOOLONG;
@@ -332,14 +348,24 @@ static int do_vfs_mount(const char *path, const char *fs_name, const void *arg)
         return err;
     }
 
-    m = &mounts[mount_count++];
+    {
+        size_t i;
+        for (i = 0; i < mount_count && mounts[i].active; i++) { }
+        if (i == mount_count) mount_count++;
+        m = &mounts[i];                   /* ধাপ ১৫ক: umount করা ঘর আবার */
+        memset(m, 0, sizeof(*m));
+        m->active = 1;
+    }
     strncpy(m->path, path, sizeof(m->path) - 1);
+    if (arg && (!strcmp(fs->name, "ext2") || !strcmp(fs->name, "fat"))) strncpy(m->source, (const char *)arg, sizeof(m->source) - 1);
+    else strncpy(m->source, fs->name, sizeof(m->source) - 1);
     m->fs = fs;
     m->root = root;
     m->covered = covered;                 /* covered-এর ref mount যতক্ষণ আছে ততক্ষণ থাকে */
     root->mount = m;
     root->parent = covered ? covered->parent : NULL;
     vnode_ref(root);
+    m->base_ref = root->refcount;
     (void)parent_mount;
 
     if (covered) {
@@ -842,6 +868,56 @@ static int remove_entry(const char *path, int want_dir)
     return err;
 }
 
+/* ধাপ ১৫ক: নাম বদল / সরানো (একই ফাইলসিস্টেমে) */
+static int do_vfs_rename(const char *oldpath, const char *newpath)
+{
+    struct vnode *od, *nd, *child;
+    char on[VFS_NAME_MAX + 1], nn[VFS_NAME_MAX + 1];
+    size_t ol = strnlen(oldpath, VFS_PATH_MAX);
+    int err;
+
+    if (!strcmp(oldpath, newpath)) {
+        return 0;
+    }
+    if (!strncmp(newpath, oldpath, ol) && newpath[ol] == '/') {
+        return -EINVAL;                          /* ডিরেক্টরিকে নিজের ভেতরে নয় */
+    }
+    err = resolve_parent(oldpath, &od, on);
+    if (err < 0) {
+        return err;
+    }
+    err = resolve_parent(newpath, &nd, nn);
+    if (err < 0) {
+        vnode_unref(od);
+        return err;
+    }
+    if (!strcmp(on, ".") || !strcmp(on, "..") || !strcmp(nn, ".") || !strcmp(nn, "..") || !on[0] || !nn[0]) {
+        err = -EINVAL;
+    } else if (!od->ops->lookup || (err = od->ops->lookup(od, on, &child)) < 0) {
+        err = err < 0 ? err : -ENOENT;
+    } else {
+        if (child->covered_by || (child->mount && child == child->mount->root)) {
+            err = -EBUSY;
+        }
+        vnode_unref(child);
+        if (!err) {
+            if (od->mount != nd->mount) {
+                err = -EXDEV;                    /* অন্য ফাইলসিস্টেম: কপি করতে হবে */
+            } else if (!od->ops->rename) {
+                err = -EXDEV;
+            } else {
+                err = od->ops->rename(od, on, nd, nn);
+            }
+        }
+    }
+    vnode_unref(nd);
+    vnode_unref(od);
+    return err;
+}
+
+int vfs_rename(const char *oldpath, const char *newpath)
+{ int r; LOCK(); r = do_vfs_rename(oldpath, newpath); UNLOCK(); return r; }
+
 int vfs_unlink(const char *path)
 {
     int r;
@@ -934,6 +1010,32 @@ uint64_t vfs_lock_contended(void)
 {
     return vfs_lock.contended;
 }
+
+/* ধাপ ১৫ক: umount — ভেতরে আরেকটা mount, খোলা ফাইল বা root চলতি থাকলে -EBUSY */
+static int do_vfs_umount(const char *path)
+{
+    size_t i, k;
+    struct mount *m = NULL;
+    for (i = 0; i < mount_count; i++) {
+        if (mounts[i].active && !strcmp(mounts[i].path, path)) m = &mounts[i];
+    }
+    if (!m) return -EINVAL;                      /* এখানে কিছু mount করা নেই */
+    if (m == root_mount || !m->covered) return -EBUSY;
+    for (k = 0; k < mount_count; k++) {
+        if (mounts[k].active && &mounts[k] != m && mounts[k].covered && mounts[k].covered->mount == m) return -EBUSY;
+    }
+    if (m->root->refcount > m->base_ref) return -EBUSY;
+    if (m->fs->umount && m->fs->umount(m->root) < 0) return -EBUSY;
+    block_sync(NULL);                            /* ডিস্কে সব লেখা শেষ */
+    m->covered->covered_by = NULL;
+    vnode_unref(m->covered);
+    m->covered = NULL;
+    m->active = 0;
+    return 0;
+}
+
+int vfs_umount(const char *path)
+{ int r; LOCK(); r = do_vfs_umount(path); UNLOCK(); return r; }
 
 /* ---------- ধাপ ৯: socket-এর মতো "ফাইলসিস্টেমহীন" vnode ---------- */
 

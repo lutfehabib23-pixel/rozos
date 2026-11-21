@@ -1,5 +1,8 @@
 # mv - move or rename a file
   `mv file dst`   dst may be a new name or a directory
-rozOS has no rename system call yet, so mv copies the file and then
-deletes the original (only files, not directories).
+Phase 15a: mv uses the rename() system call - instant, and folders
+move too, as long as source and destination are on the same file
+system (ext2 /, FAT /boot, tmpfs /tmp, a [[mount|mounted disk]]).
+Between file systems (/tmp -> /home) it copies the file and then
+deletes the original (files only; for a folder use cp, then rm).
 Back to [[programs]].

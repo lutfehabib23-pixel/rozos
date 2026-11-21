@@ -1,0 +1,15 @@
+# mount, umount - disks (phase 15a)
+  `mount`                          what is mounted where
+  `mount /dev/nvmea /mnt/nvme`     attach a disk or partition (ext2 or FAT
+                                   is found by itself; the folder is made)
+  `mount -t fat /dev/X /mnt/x`     say the type (ext2, fat, tmpfs)
+  `umount /mnt/nvme`               detach - everything is written first
+umount says "busy" while a file there is open, a program's window shows
+it, or another disk is mounted inside; close it and try again.
+Disks: `ls /dev` - sda (SATA), nvmea (NVMe SSD) and their partitions
+sda1, nvmea1 ... ([[disks]]). The [[filemanager|Files]] window has
+"Disks /mnt" on the left.
+Try it in QEMU: `make run NVME=1` adds a small NVMe SSD with a README.
+USB pen drives (phase 15b) are mounted on /mnt/usb by themselves ([[usb]]).
+A protected disk (a real computer's other disks, [[disks]]) mounts read-only.
+In C: #include <sys/mount.h>  mount(src, dir, "auto", 0, NULL); umount(dir)

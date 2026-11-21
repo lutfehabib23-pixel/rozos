@@ -91,6 +91,9 @@ interrupt_return:
     jz      2f
     SWAPGS
 2:
+    /* ধাপ ১৫ক: এই iretq-তে #GP হলে idt.c (bad_iret) চেনে — নাম দিয়ে */
+    .global interrupt_iretq
+interrupt_iretq:
     iretq
     .size isr_common, . - isr_common
 

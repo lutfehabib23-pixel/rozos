@@ -44,6 +44,10 @@ struct block_device {
     /* ডিস্কের জন্য: partition table ("gpt", "mbr", "" = নেই) আর কয়টা partition */
     char     table[8];
     uint32_t partitions;
+    /* ধাপ ১৫খ */
+    int      read_only;                              /* লেখা -EROFS (আসল কম্পিউটারের অন্য OS-এর ডিস্ক) */
+    int      removable;                              /* USB পেন ড্রাইভ ইত্যাদি */
+    int      offline;                                /* খুলে নেওয়া হয়েছে — পড়া/লেখা -ENODEV */
 };
 
 /* ড্রাইভার নিবন্ধন: নাম নিজে দেয় ("sd" + a, b, c ...), /dev-এও যোগ করে */
@@ -63,6 +67,8 @@ int block_write(struct block_device *dev, uint64_t lba, uint32_t count, const vo
 /* বাইট-ভিত্তিক — offset/len যেকোনো হতে পারে */
 int block_read_bytes(struct block_device *dev, uint64_t offset, void *buf, size_t len);
 int block_write_bytes(struct block_device *dev, uint64_t offset, const void *buf, size_t len);
+/* ধাপ ১৫খ: ডিস্ক (বা partition-এর ডিস্ক) শুধু পড়া যায় কিনা */
+int block_is_read_only(struct block_device *dev);
 
 int block_sync(struct block_device *dev);           /* NULL = সব ডিভাইস */
 

@@ -33,5 +33,6 @@ struct mouse_event {
 int mouse_poll_event(int queue, struct mouse_event *out);   /* থাকলে 1 */
 int mouse_has_wheel(void);
 int mouse_event_pending(int queue);                          /* ধাপ ১৩: poll */
+void mouse_inject(int dx, int dy, uint8_t buttons, int wheel); /* ধাপ ১৫খ: USB মাউস */
 
 #endif

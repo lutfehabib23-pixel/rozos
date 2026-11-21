@@ -352,7 +352,7 @@ static void unix_vn_release(struct vnode *vn)
 }
 
 static const struct vnode_ops unix_ops = {
-    unix_vn_read, unix_vn_write, NULL, NULL, NULL, NULL, NULL, unix_vn_release, unix_vn_poll
+    unix_vn_read, unix_vn_write, NULL, NULL, NULL, NULL, NULL, unix_vn_release, unix_vn_poll, NULL /* rename (ধাপ ১৫ক) */
 };
 
 int unix_shutdown(struct vnode *vn, int how)

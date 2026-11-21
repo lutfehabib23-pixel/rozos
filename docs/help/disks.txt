@@ -14,9 +14,18 @@ bootloader loads), so rozOS still boots, but nothing is kept.
   zero     endless zero bytes               kbd    raw key codes
   serial0  the serial port                  sda    the whole disk
   sda1 sda2 sda3  the partitions ([[partitions]])
+  nvmea nvmea1 ... NVMe SSDs (phase 15a) - mount them with [[mount]]
+  sdb sdb1 ...     USB pen drives (phase 15b) - mounted on /mnt/usb ([[usb]])
+
+== Protection on a real computer (phase 15b) ==
+On a real PC (not QEMU), disks inside the computer that have no rozOS
+partition - your Windows SSD, for example - are READ-ONLY: rozOS can
+look but never write. The boot messages say so. Pen drives and rozOS's
+own disk are writable. To allow writing anyway, add the word `diskwrite`
+to the kernel command line in the boot menu ([[boot-menu]]: press e).
 
 == Driver stack ==
-PCI scan -> AHCI (SATA) driver -> block layer with a 4 KiB write-through
+PCI scan -> AHCI (SATA), NVMe and USB (xHCI) drivers -> block layer with a 4 KiB write-through
 cache -> partitions (GPT/MBR) -> ext2 and [[fat]] -> VFS. Writes reach the disk at once; [[kmon]]'s `sync`
 flushes the disk's own cache. On the PC `make disk-check` runs e2fsck
 and fsck.fat. kmon's `disks` shows every file system in detail.

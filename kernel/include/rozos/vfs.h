@@ -70,6 +70,10 @@ struct vnode_ops {
     /* ধাপ ১৩ (ঐচ্ছিক): এখনই কোন ঘটনা তৈরি (VFS_POLL*), আটকে থাকে না; NULL হলে
      * সাধারণ ফাইলের মতো সবসময় পড়া/লেখা যায় ধরা হয় */
     int     (*poll)(struct vnode *vn, int events);
+    /* ধাপ ১৫ক (ঐচ্ছিক): olddir/oldname → newdir/newname, একই ফাইলসিস্টেমে। newname আগে
+     * থাকলে ফাইল হলে বদলে যায়, ডিরেক্টরি হলে -EEXIST। NULL হলে vfs_rename -EXDEV দেয়
+     * (mv তখন কপি করে) */
+    int     (*rename)(struct vnode *olddir, const char *oldname, struct vnode *newdir, const char *newname);
 };
 
 struct mount;
@@ -126,6 +130,8 @@ struct filesystem {
     int (*statfs)(struct vnode *root, struct vfs_statfs *out);
     /* ঐচ্ছিক (ধাপ ১১খ): kmon-এর `disks`-এর জন্য বিস্তারিত বিবরণ kprintf দিয়ে */
     void (*info)(struct vnode *root);
+    /* ঐচ্ছিক (ধাপ ১৫ক): umount-এর আগে — কোনো ফাইল খোলা থাকলে -EBUSY */
+    int (*umount)(struct vnode *root);
 };
 
 struct mount {
@@ -133,12 +139,17 @@ struct mount {
     const struct filesystem *fs;
     struct vnode *root;          /* mount করা ফাইলসিস্টেমের root */
     struct vnode *covered;       /* যে ডিরেক্টরির ওপর বসানো (/ হলে NULL) */
+    /* ধাপ ১৫ক */
+    char source[24];             /* ডিভাইস (sda2, nvmea1 ...) বা ফাইলসিস্টেমের নাম */
+    int active;                  /* umount হলে 0 (ঘর আবার ব্যবহার হয়) */
+    uint32_t base_ref;           /* mount-এর পর root-এর refcount — বেশি হলে কেউ ব্যবহার করছে */
 };
 
 /* ---------- সেটআপ ---------- */
 int  vfs_init(void);
 int  vfs_register_filesystem(const struct filesystem *fs);
 int  vfs_mount(const char *path, const char *fs_name, const void *arg);
+int  vfs_umount(const char *path);           /* ধাপ ১৫ক: -EBUSY = ব্যবহার হচ্ছে */
 size_t vfs_mount_count(void);
 const struct mount *vfs_mount_at(size_t index);
 
@@ -185,6 +196,7 @@ int vfs_mkdir(const char *path);
 int vfs_mkdir_p(const char *path);            /* মাঝের সব ডিরেক্টরিও বানায় */
 int vfs_unlink(const char *path);             /* ফাইল বা ডিভাইস */
 int vfs_rmdir(const char *path);              /* খালি ডিরেক্টরি */
+int vfs_rename(const char *oldpath, const char *newpath);   /* ধাপ ১৫ক */
 int vfs_truncate(const char *path, uint64_t size);
 int vfs_statfs(const char *path, struct vfs_statfs *st);   /* যে mount-এ path আছে তার হিসাব */
 

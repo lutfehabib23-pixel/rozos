@@ -1,0 +1,26 @@
+# Kernel modules (phase 15a)
+A module is a piece of kernel code loaded while rozOS runs - a driver,
+a new /dev file - without building a new kernel or rebooting.
+  `lsmod`             loaded modules (name, size, description)
+  `insmod hello`      load /lib/modules/hello.ko (or `insmod ./my.ko`)
+  `rmmod hello`       unload it
+  `lsmod -k`          the kernel functions a module may call
+Try it: `insmod hello`, `cat /dev/hello`, `echo hi > /dev/hello`,
+`rmmod hello`. Messages from the kernel appear on the screen/serial.
+
+== Writing one ==
+  cp /usr/src/modules/hello.c mine.c ; edit mine.c
+  tcc -c -I/usr/src/rozos/kernel/include mine.c -o mine.ko
+  insmod ./mine.ko
+The file needs:
+  #include <rozos/module.h>
+  ROZMOD_INFO("mine", "what it does");      (optional)
+  int rozmod_init(void) { ... return 0; }     (< 0 = refuse to load)
+  void rozmod_exit(void) { ... }              (undo everything here)
+Only exported kernel functions can be used (lsmod -k: kprintf, kmalloc,
+devfs_register / devfs_unregister, pci_*, block_*, irq_register,
+timer_* ...). A missing one gives "unknown kernel symbol" - add it to
+kernel/lib/ksyms.c and rebuild the kernel ([[kernel-build]]).
+A module runs inside the kernel: a bug in it can stop the whole system.
+On the PC, modules/*.c are built with gcc into /lib/modules (make).
+See [[syscalls]] (175 init_module, 176 delete_module).

@@ -245,6 +245,15 @@ static void handle_scancode(uint8_t sc)
     push_key((unsigned char)c);
 }
 
+/* ধাপ ১৫খ: USB কিবোর্ড — HID কোড থেকে বানানো PS/2 (set 1) scancode একই পথে
+ * (modifier, CapsLock, Ctrl+C সব একরকম) */
+void keyboard_inject_scancode(uint8_t sc)
+{
+    uint64_t f = cpu_irq_save();
+    handle_scancode(sc);
+    cpu_irq_restore(f);
+}
+
 static void keyboard_irq(uint8_t irq, struct interrupt_frame *frame)
 {
     (void)irq;

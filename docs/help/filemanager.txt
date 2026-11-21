@@ -20,7 +20,8 @@ Opening: folders go inside; .c .h .txt .md .conf and other text go to
 [[code]]; pictures to [[imgview]]; programs run in a terminal window.
 File > Open with Code opens anything as text.
 Folders are copied, moved and deleted with everything inside (delete
-asks first). Renaming and moving copy, then delete the old one (the
-file system has no rename yet - like [[mv]]).
+asks first). Renaming and moving are instant on the same file system
+(phase 15a rename); between disks they copy, then delete ([[mv]]).
+"Disks /mnt" on the left shows [[mount|mounted disks]].
 View > Hidden files shows names starting with a dot.
 Icons can be pictures: [[icons]]. Source: /usr/src/gfx/files.c

@@ -1,4 +1,6 @@
-/* rozOS — mv src dst: সরানো (VFS-এ এখনো rename নেই, তাই কপি করে পুরোনোটা মোছা — শুধু ফাইল) */
+/* rozOS — mv src dst: সরানো / নাম বদল
+ * ধাপ ১৫ক: আগে rename() — একই ফাইলসিস্টেমে সঙ্গে সঙ্গে, ফোল্ডারও। অন্য ফাইলসিস্টেমে
+ * (EXDEV, যেমন /tmp → /home) আগের মতো কপি করে পুরোনোটা মোছা — শুধু ফাইল। */
 
 #include <stdio.h>
 #include <string.h>
@@ -28,16 +30,20 @@ int main(int argc, char **argv)
     struct stat st;
     char path[1024];
     const char *dst;
+    int is_dir;
 
     if (argc != 3) { fprintf(stderr, "usage: mv <file> <dst>\n"); return 2; }
     if (stat(argv[1], &st) < 0) { fprintf(stderr, "mv: %s: %s\n", argv[1], strerror(errno)); return 1; }
-    if (S_ISDIR(st.st_mode)) { fprintf(stderr, "mv: %s: moving directories is not supported yet\n", argv[1]); return 1; }
+    is_dir = S_ISDIR(st.st_mode);
     dst = argv[2];
     if (stat(dst, &st) == 0 && S_ISDIR(st.st_mode)) {
         const char *base = strrchr(argv[1], '/');
         snprintf(path, sizeof(path), "%s/%s", dst, base ? base + 1 : argv[1]);
         dst = path;
     }
+    if (rename(argv[1], dst) == 0) return 0;          /* ধাপ ১৫ক */
+    if (errno != EXDEV && errno != ENOSYS) { fprintf(stderr, "mv: %s -> %s: %s\n", argv[1], dst, strerror(errno)); return 1; }
+    if (is_dir) { fprintf(stderr, "mv: %s: moving a folder to another file system is not supported (use cp -r)\n", argv[1]); return 1; }
     if (copy_file(argv[1], dst)) return 1;
     if (unlink(argv[1]) < 0) { fprintf(stderr, "mv: %s: %s\n", argv[1], strerror(errno)); return 1; }
     return 0;

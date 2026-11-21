@@ -303,9 +303,11 @@ static int copy_tree(const char *src, const char *dst)
     return copy_file(src, dst);
 }
 
-/* VFS-এ এখনো rename নেই (mv-এর মতো) — তাই সরানো/নাম বদল = কপি করে পুরোনোটা মোছা */
+/* ধাপ ১৫ক: আগে rename() (সঙ্গে সঙ্গে, ফোল্ডারও); অন্য ফাইলসিস্টেমে হলে কপি করে পুরোনোটা মোছা */
 static int move_path(const char *a, const char *b)
 {
+    if (rename(a, b) == 0) return 0;
+    if (errno != EXDEV && errno != ENOSYS) return -1;
     if (copy_tree(a, b) != 0) return -1;
     return remove_tree(a);
 }
@@ -498,7 +500,8 @@ static void action(int a)
 static const struct { const char *label; const char *path; char kind; } places[] = {
     { "Home", NULL, 'h' }, { "Root /", "/", 'f' }, { "Programs", "/bin", 'p' },
     { "Sources", "/usr/src", 'c' }, { "Images", "/usr/share/images", 'i' },
-    { "Help pages", "/usr/share/help", 'e' }, { "Icons", "/usr/share/icons", 'g' }, { "Temp", "/tmp", 'f' }
+    { "Help pages", "/usr/share/help", 'e' }, { "Icons", "/usr/share/icons", 'g' }, { "Temp", "/tmp", 'f' },
+    { "Disks /mnt", "/mnt", 'n' }                 /* ধাপ ১৫ক: mount করা ডিস্ক */
 };
 #define NPLACES ((int)(sizeof(places) / sizeof(places[0])))
 

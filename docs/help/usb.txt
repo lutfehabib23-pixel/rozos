@@ -1,0 +1,36 @@
+# USB - pen drives, keyboards, mice (phase 15b)
+rozOS drives the xHCI USB controller (USB 3, 2 and 1.1 ports):
+  pen drives, card readers   -> disks sdb, sdc ... and their partitions
+  keyboards and mice          -> work like the PS/2 ones (console, desktop)
+`lsusb` lists what is plugged in (port, ID, speed, type, disk, name).
+
+== Pen drives ==
+Plug it in: rozOS finds the first FAT or ext2 partition and mounts it
+on /mnt/usb (a second drive goes to /mnt/usb2). Look in Files (Disks /mnt)
+or `ls /mnt/usb`. Before pulling it out:  `umount /mnt/usb`
+(everything is written at once anyway, but umount makes sure no file is
+open). Pulled out without umount: rozOS unmounts it if it can.
+NTFS and exFAT drives are not readable yet - format them as FAT32.
+
+== Try it in QEMU ==
+  `make run USB=1`    adds a USB controller, a 64 MiB pen drive
+                      (usb-disk.img: MBR + FAT32 with README.TXT), a USB
+                      keyboard and a USB mouse
+QEMU monitor (Ctrl+Alt+2 in the window): `device_del usbdisk` style
+commands unplug devices - rozOS notices within a second.
+
+== Your real pen drive (Windows + WSL) ==
+1. Windows PowerShell as administrator, once: `winget install usbipd`
+2. `usbipd list`  - note the BUSID of the pen drive (like 2-3)
+3. `usbipd bind --busid 2-3` then `usbipd attach --wsl --busid 2-3`
+   (Windows cannot use the drive until you detach it)
+4. in WSL: `lsblk` shows it, e.g. /dev/sdd; `sudo chmod a+rw /dev/sdd`
+5. `make run USB=1 USB_DEV=/dev/sdd`  - rozOS sees your real drive
+   (careful: what you change in rozOS changes the drive)
+6. afterwards in PowerShell: `usbipd detach --busid 2-3`
+
+== Limits ==
+No USB hubs yet: plug devices straight into the computer's ports (in
+QEMU they are). Keyboards/mice use the simple "boot" protocol - extra
+keys (volume, media) are ignored. Everything is polled every 8-20 ms.
+See [[disks]], [[mount]], [[filemanager]].

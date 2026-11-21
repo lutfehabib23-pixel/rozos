@@ -1,5 +1,5 @@
 # systest - self-test
-`systest` runs 74 checks and prints [ ok ] or [FAIL] for each:
+`systest` runs 87 checks and prints [ ok ] or [FAIL] for each:
   syscalls through `syscall` and `int 0x80`, bad addresses rejected,
   brk and mmap memory, the stack growing on demand, files in /tmp,
   chdir/getcwd, getdents64, fork/execve/wait, crashing children,
@@ -13,5 +13,9 @@
   14) PTYs, AF_UNIX sockets, process groups and SIG_IGN.
   14b) Code and Files installed, rozui shortcuts and clipboard, icons
       folder, tcc compiling a rozui program.
+  15a) rename (ext2 file and folder, tmpfs, EXDEV, into itself),
+      insmod/lsmod/rmmod of hello.ko, exported symbols, mount list and
+      umount /, NVMe mount (with make run NVME=1).
+  15b) the USB list; write+read on the pen drive (make run USB=1).
 The exit code is the number of failures (0 = all good).
 Source: userland/tests/systest.c. See [[processes]], [[syscalls]].

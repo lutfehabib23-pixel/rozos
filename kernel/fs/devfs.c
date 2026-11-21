@@ -40,12 +40,14 @@ static const struct vnode_ops root_ops;
 static int64_t dev_read(struct vnode *vn, uint64_t off, void *buf, size_t len)
 {
     struct devfs_device *d = (struct devfs_device *)vn;
+    if (!d->name[0]) return -ENODEV;             /* ধাপ ১৫ক: সরানো ডিভাইস */
     return d->read ? d->read(d->ctx, off, buf, len) : -EINVAL;
 }
 
 static int64_t dev_write(struct vnode *vn, uint64_t off, const void *buf, size_t len)
 {
     struct devfs_device *d = (struct devfs_device *)vn;
+    if (!d->name[0]) return -ENODEV;
     return d->write ? d->write(d->ctx, off, buf, len) : -EINVAL;
 }
 
@@ -72,37 +74,47 @@ static int root_lookup(struct vnode *dir, const char *name, struct vnode **out)
 
 static int root_readdir(struct vnode *dir, uint64_t index, struct vfs_dirent *out)
 {
+    size_t i;
     (void)dir;
-    if (index >= device_count) {
+    for (i = 0; i < device_count; i++) {             /* ধাপ ১৫ক: সরানো (নামহীন) বাদ */
+        if (!devices[i].name[0]) continue;
+        if (index-- == 0) break;
+    }
+    if (i >= device_count) {
         return 0;
     }
-    strncpy(out->name, devices[index].name, VFS_NAME_MAX);
+    strncpy(out->name, devices[i].name, VFS_NAME_MAX);
     out->name[VFS_NAME_MAX] = '\0';
     out->type = VNODE_CHARDEV;
-    out->inode = devices[index].vn.inode;
+    out->inode = devices[i].vn.inode;
     out->size = 0;
     return 1;
 }
 
 static const struct vnode_ops dev_ops = {
-    dev_read, dev_write, NULL, NULL, NULL, NULL, NULL, NULL, dev_poll
+    dev_read, dev_write, NULL, NULL, NULL, NULL, NULL, NULL, dev_poll, NULL /* rename (ধাপ ১৫ক) */
 };
 
 /* create/unlink নেই — devfs-এ ফাইল বানানো বা মোছা যায় না */
 static const struct vnode_ops root_ops = {
-    NULL, NULL, NULL, root_lookup, NULL, NULL, root_readdir, NULL, NULL
+    NULL, NULL, NULL, root_lookup, NULL, NULL, root_readdir, NULL, NULL, NULL /* rename (ধাপ ১৫ক) */
 };
 
 int devfs_register(const char *name, devfs_read_fn read, devfs_write_fn write, void *ctx)
 {
-    struct devfs_device *d;
-    if (device_count >= DEVFS_MAX_DEVICES) {
-        return -ENOMEM;
-    }
-    if (strlen(name) >= sizeof(d->name)) {
+    struct devfs_device *d = NULL;
+    size_t i, idx = device_count;
+    if (strlen(name) >= sizeof(devices[0].name)) {
         return -ENAMETOOLONG;
     }
-    d = &devices[device_count];
+    /* ধাপ ১৫ক: সরানো ডিভাইসের খালি ঘর (কেউ খুলে না রাখলে) আবার ব্যবহার */
+    for (i = 0; i < device_count; i++) {
+        if (!devices[i].name[0] && devices[i].vn.refcount == 0) { idx = i; break; }
+    }
+    if (idx == device_count && device_count >= DEVFS_MAX_DEVICES) {
+        return -ENOMEM;
+    }
+    d = &devices[idx];
     memset(d, 0, sizeof(*d));
     strcpy(d->name, name);
     d->read = read;
@@ -110,14 +122,30 @@ int devfs_register(const char *name, devfs_read_fn read, devfs_write_fn write, v
     d->ctx = ctx;
     d->vn.type = VNODE_CHARDEV;
     d->vn.mode = 0666;
-    d->vn.inode = 1000 + device_count;
+    d->vn.inode = 1000 + idx;
     d->vn.nlink = 1;
     d->vn.ops = &dev_ops;
     d->vn.fs_data = d;
     d->vn.mount = root.mount;
-    device_count++;
+    if (idx == device_count) device_count++;
     root.size = device_count;
     return 0;
+}
+
+int devfs_unregister(const char *name)
+{
+    size_t i;
+    if (!name || !name[0]) return -EINVAL;
+    for (i = 0; i < device_count; i++) {
+        if (!strcmp(devices[i].name, name)) {
+            devices[i].name[0] = '\0';
+            devices[i].read = NULL;
+            devices[i].write = NULL;
+            devices[i].poll = NULL;
+            return 0;
+        }
+    }
+    return -ENOENT;
 }
 
 int devfs_set_poll(const char *name, devfs_poll_fn poll)
@@ -161,7 +189,7 @@ static int devfs_statfs(struct vnode *r, struct vfs_statfs *out)
     return 0;
 }
 
-const struct filesystem devfs_filesystem = { "devfs", devfs_mount, devfs_statfs, NULL };
+const struct filesystem devfs_filesystem = { "devfs", devfs_mount, devfs_statfs, NULL, NULL };
 
 /* ---------- ডিফল্ট ডিভাইস ---------- */
 

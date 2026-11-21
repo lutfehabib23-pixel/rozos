@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <rozos/kmon.h>
+#include "arch/x86_64/gdt.h"
 #include <rozos/console.h>
 #include <rozos/printf.h>
 #include <rozos/string.h>
@@ -854,6 +855,8 @@ static void cmd_help(void)
             "  echo <text>    print text\n"
             "  int3           breakpoint exception test (returns)\n"
             "  fault          invalid opcode test (panics)\n"
+            "  gdtcheck       break the user data descriptor: the next return to a\n"
+            "                 program must repair it (the KVM iretq #GP fix, phase 15a)\n"
             "  reboot         reset the machine\n"
             "  halt           stop the CPU\n");
 }
@@ -1033,6 +1036,9 @@ static void run_command(int argc, char **argv)
             kprintf("%s%s", argv[i], (i + 1 < argc) ? " " : "");
         }
         kprintf("\n");
+    } else if (!strcmp(cmd, "gdtcheck")) {
+        kprintf("gdtcheck: user data descriptor broken - watch for \"GDT repaired\"\n");
+        gdt_debug_break_user_data();
     } else if (!strcmp(cmd, "int3")) {
         __asm__ __volatile__("int3");
         kprintf("returned from breakpoint handler\n");

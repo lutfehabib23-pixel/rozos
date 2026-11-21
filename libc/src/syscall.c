@@ -17,6 +17,7 @@
 #include <signal.h>
 #include <time.h>
 #include <rozos.h>
+#include <sys/mount.h>
 
 #define SYS_read            0
 #define SYS_write           1
@@ -49,6 +50,13 @@
 #define SYS_getpgid         121
 #define SYS_getsid          124
 #define SYS_rozos_openpty   505
+#define SYS_init_module     175
+#define SYS_delete_module   176
+#define SYS_rozos_modlist   506
+#define SYS_mount           165
+#define SYS_umount2         166
+#define SYS_rozos_mounts    507
+#define SYS_rozos_usblist   508
 #define SYS_uname           63
 #define SYS_truncate        76
 #define SYS_ftruncate       77      /* ধাপ ১৩ */
@@ -59,6 +67,7 @@
 #define SYS_mkdir           83
 #define SYS_rmdir           84
 #define SYS_unlink          87
+#define SYS_rename          82
 #define SYS_getppid         110
 #define SYS_clock_gettime   228
 
@@ -105,6 +114,7 @@ int     pipe(int fds[2])                         { return (int)SC3(SYS_pipe, fds
 int     pipe2(int fds[2], int flags)             { return (int)SC3(SYS_pipe2, fds, flags, 0); }
 int     poll(struct pollfd *fds, nfds_t n, int timeout) { return (int)SC3(SYS_poll, fds, n, timeout); }
 int     unlink(const char *p)                    { return (int)SC3(SYS_unlink, p, 0, 0); }
+int     rename(const char *a, const char *b)     { return (int)SC3(SYS_rename, a, b, 0); }   /* ধাপ ১৫ক */
 int     rmdir(const char *p)                     { return (int)SC3(SYS_rmdir, p, 0, 0); }
 int     chdir(const char *p)                     { return (int)SC3(SYS_chdir, p, 0, 0); }
 int     truncate(const char *p, off_t len)       { return (int)SC3(SYS_truncate, p, len, 0); }
@@ -149,6 +159,19 @@ void    cfmakeraw(struct termios *t)
     t->c_oflag = 0;
     t->c_lflag &= ~(ISIG | ICANON | ECHO | ECHOE | ECHOK | ECHONL | IEXTEN);
 }
+/* ধাপ ১৫ক: কার্নেল মডিউল */
+int  rozos_init_module(const void *image, unsigned long len, const char *name) { return (int)SC3(SYS_init_module, image, len, name); }
+int  rozos_delete_module(const char *name) { return (int)SC3(SYS_delete_module, name, 0, 0); }
+long rozos_module_list(char *buf, unsigned long len, int ks) { return SC3(SYS_rozos_modlist, buf, len, ks); }
+long rozos_mounts(char *buf, unsigned long len) { return SC3(SYS_rozos_mounts, buf, len, 0); }
+long rozos_usb_list(char *buf, unsigned long len) { return SC3(SYS_rozos_usblist, buf, len, 0); }
+int  mount(const char *src, const char *tgt, const char *type, unsigned long flags, const void *data)
+{
+    return (int)__syscall_ret(__syscall6(SYS_mount, (long)src, (long)tgt, (long)type, (long)flags, (long)data, 0));
+}
+int  umount2(const char *tgt, int flags) { return (int)SC3(SYS_umount2, tgt, flags, 0); }
+int  umount(const char *tgt) { return umount2(tgt, 0); }
+
 int     openpty(int *master, int *slave, char *name, const struct termios *tp, const struct winsize *wp)
 {
     int fds[2];

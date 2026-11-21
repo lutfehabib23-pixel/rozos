@@ -85,6 +85,8 @@ syscall_entry:
 1:
     movq    -40(%rsp), %rcx     /* shrq-এ নষ্ট হওয়া rcx: ফ্রেমে rip-এর 5 ঘর নিচে ছিল */
     SWAPGS
+    .global syscall_iretq
+syscall_iretq:                  /* ধাপ ১৫ক: idt.c-র bad_iret এই ঠিকানা চেনে */
     iretq
     .size syscall_entry, . - syscall_entry
 

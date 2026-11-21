@@ -81,5 +81,6 @@ int    vfscanf(FILE *f, const char *fmt, va_list ap);
 
 void   perror(const char *msg);
 int    remove(const char *path);
+int    rename(const char *oldpath, const char *newpath);   /* ধাপ ১৫ক */
 
 #endif

@@ -30,6 +30,8 @@
 #include <rozos.h>
 #include "rozhttp.h"
 #include "rozui.h"
+#include <sys/mount.h>
+#include <sys/stat.h>
 
 #define SYS_getpid 39
 
@@ -562,6 +564,93 @@ static void test_phase14b(void)
     unlink("/tmp/st-ui");
 }
 
+/* ধাপ ১৫ক: rename, কার্নেল মডিউল, mount/umount, NVMe */
+static int read_all(const char *path, char *buf, int size)
+{
+    int fd = open(path, O_RDONLY), n = -1;
+    if (fd >= 0) { n = (int)read(fd, buf, (size_t)size - 1); close(fd); }
+    if (n >= 0) buf[n] = '\0';
+    return n;
+}
+
+static void test_phase15a(void)
+{
+    char buf[512];
+    struct stat st;
+    FILE *f;
+    long n;
+    char *img;
+
+    mkdir("/home/.st15", 0755);
+    mkdir("/home/.st15/d", 0755);
+    f = fopen("/home/.st15/d/a.txt", "w");
+    if (f) { fputs("rename-me", f); fclose(f); }
+    check(rename("/home/.st15/d/a.txt", "/home/.st15/d/b.txt") == 0 && read_all("/home/.st15/d/b.txt", buf, sizeof(buf)) == 9 &&
+          access("/home/.st15/d/a.txt", F_OK) != 0, "rename: a file on ext2 (instant, same data)");
+    check(rename("/home/.st15/d", "/home/.st15/e") == 0 && read_all("/home/.st15/e/b.txt", buf, sizeof(buf)) == 9 &&
+          stat("/home/.st15/e/..", &st) == 0, "rename: a folder with its files (ext2)");
+    check(rename("/home/.st15/e", "/home/.st15/e/inside") < 0 && errno == EINVAL, "rename: a folder into itself is refused");
+    f = fopen("/tmp/.st15", "w");
+    if (f) { fputs("x", f); fclose(f); }
+    check(rename("/tmp/.st15", "/tmp/.st15b") == 0 && access("/tmp/.st15b", F_OK) == 0, "rename: tmpfs");
+    check(rename("/tmp/.st15b", "/home/.st15/t") < 0 && errno == EXDEV, "rename across file systems gives EXDEV (mv copies)");
+    unlink("/tmp/.st15b");
+    unlink("/home/.st15/e/b.txt");
+    rmdir("/home/.st15/e");
+    rmdir("/home/.st15");
+
+    img = NULL;
+    n = 0;
+    f = fopen("/lib/modules/hello.ko", "rb");
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        n = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        img = (char *)malloc((size_t)n);
+        if (img && fread(img, 1, (size_t)n, f) != (size_t)n) { free(img); img = NULL; }
+        fclose(f);
+    }
+    check(img && rozos_init_module(img, (unsigned long)n, "hello") == 0 && read_all("/dev/hello", buf, sizeof(buf)) > 0 &&
+          strstr(buf, "kernel module") != NULL, "insmod hello.ko: the module runs and makes /dev/hello");
+    check(rozos_module_list(buf, sizeof(buf), 0) > 0 && strstr(buf, "hello") != NULL, "lsmod lists the module");
+    check(rozos_delete_module("hello") == 0 && access("/dev/hello", F_OK) != 0 && rozos_delete_module("hello") < 0,
+          "rmmod: the module and /dev/hello are gone");
+    free(img);
+    {
+        static char syms[65536];
+        check(rozos_module_list(syms, sizeof(syms), 1) > 0 && strstr(syms, "kprintf\n") != NULL,
+              "the kernel exports symbols for modules (kprintf ...)");
+    }
+    check(rozos_mounts(buf, sizeof(buf)) > 0 && strstr(buf, " / ext2") != NULL && umount("/") < 0 && errno == EBUSY &&
+          umount("/no/such") < 0, "mount list; umount of / is refused");
+    if (access("/dev/nvmea", F_OK) == 0) {
+        mkdir("/mnt/.st15", 0755);
+        check(mount("/dev/nvmea", "/mnt/.st15", "auto", 0, NULL) == 0 && stat("/mnt/.st15", &st) == 0 &&
+              umount("/mnt/.st15") == 0, "NVMe: /dev/nvmea mounts and unmounts");
+        rmdir("/mnt/.st15");
+    } else {
+        check(1, "no NVMe disk attached (make run NVME=1) - skipped");
+    }
+}
+
+/* ধাপ ১৫খ: USB পেন ড্রাইভ (make run USB=1 হলে) */
+static void test_phase15b(void)
+{
+    char buf[1024];
+    long n = rozos_usb_list(buf, sizeof(buf));
+    check(n >= 0, "lsusb: the USB device list can be read");
+    if (n > 0 && strstr(buf, " storage ") && access("/mnt/usb", F_OK) == 0) {
+        FILE *f = fopen("/mnt/usb/.systest", "w");
+        int ok = 0;
+        if (f) { fputs("usb-ok", f); fclose(f); }
+        ok = read_all("/mnt/usb/.systest", buf, sizeof(buf)) == 6 && !strcmp(buf, "usb-ok");
+        unlink("/mnt/usb/.systest");
+        check(ok, "USB pen drive: write and read a file on /mnt/usb");
+    } else {
+        check(1, "no USB pen drive (make run USB=1) - skipped");
+    }
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -577,6 +666,8 @@ int main(int argc, char **argv)
     test_phase13();
     test_phase14();
     test_phase14b();
+    test_phase15a();
+    test_phase15b();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

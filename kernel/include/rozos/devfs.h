@@ -21,6 +21,8 @@ typedef int64_t (*devfs_write_fn)(void *ctx, uint64_t offset, const void *buf, s
 
 int devfs_init(void);   /* ফাইলসিস্টেম নিবন্ধন + ডিফল্ট ডিভাইস */
 int devfs_register(const char *name, devfs_read_fn read, devfs_write_fn write, void *ctx);
+/* ধাপ ১৫ক: /dev থেকে সরানো (মডিউল বের হওয়ার সময়); খোলা থাকলে পড়া/লেখা -ENODEV দেয় */
+int devfs_unregister(const char *name);
 /* ধাপ ১৩: poll() — ডিভাইস এখন কোন ঘটনার জন্য তৈরি (VFS_POLL*); না দিলে IN|OUT ধরা হয় */
 typedef int (*devfs_poll_fn)(void *ctx, int events);
 int devfs_set_poll(const char *name, devfs_poll_fn poll);

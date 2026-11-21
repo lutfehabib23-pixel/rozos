@@ -152,10 +152,58 @@ void idt_set_user_hooks(int (*fault)(struct interrupt_frame *frame),
     user_return_hook = ret;
 }
 
+/* ধাপ ১৫ক: ইউজারে ফেরার iretq নিজেই #GP দিলে (KVM-এ কার্নেল বিল্ডের সময় দেখা গেছে,
+ * ERR=0x18 = user data selector) — আগে পুরো কার্নেল panic হত। এখন Linux-এর মতো:
+ * কারণ লিখে রাখা (ফেরার ফ্রেম, GDT), GDT নষ্ট হলে ঠিক করে আবার চেষ্টা, নইলে শুধু ওই
+ * প্রসেস SIGSEGV-তে শেষ — কার্নেল চলতে থাকে। */
+extern char interrupt_iretq[], syscall_iretq[];
+
+static int bad_iret(struct interrupt_frame *f)
+{
+    const uint64_t *b = (const uint64_t *)(uintptr_t)f->rsp;   /* rip, cs, rflags, rsp, ss */
+    int to_user = (b[1] & 3) != 0, repaired;
+    if (to_user) {
+        __asm__ __volatile__(".byte 0x0f, 0x01, 0xf8");   /* swapgs (TCC-র assembler-এর জন্য বাইটে) */          /* iretq-র ঠিক আগে ইউজারের GS বসানো হয়েছিল */
+    }
+    tty_set_color(TTY_COLOR_YELLOW, TTY_COLOR_BLACK);
+    kprintf("\n[kernel] iretq to %s failed (%s, error 0x%llx): RIP=%016llx CS=%04llx RFLAGS=%016llx RSP=%016llx SS=%04llx\n",
+            to_user ? "user" : "kernel", exception_name(f->vector), (unsigned long long)f->error_code, (unsigned long long)b[0],
+            (unsigned long long)b[1], (unsigned long long)b[2], (unsigned long long)b[3], (unsigned long long)b[4]);
+    repaired = gdt_check_repair();
+    tty_set_color(TTY_COLOR_LIGHT_GREY, TTY_COLOR_BLACK);
+    if (!to_user) {
+        return 0;                                /* কার্নেলে ফেরা ভাঙা — আগের মতো panic */
+    }
+    if (repaired && b[1] == GDT_USER_CODE_SEL && b[4] == GDT_USER_DATA_SEL) {
+        kprintf("[kernel] GDT repaired - retrying the return to user mode\n");
+        __asm__ __volatile__(".byte 0x0f, 0x01, 0xf8");   /* swapgs (TCC-র assembler-এর জন্য বাইটে) */          /* আবার ইউজারের GS — iretq-তে ফেরা */
+        return 1;
+    }
+    if (user_fault_hook) {
+        struct interrupt_frame u = *f;           /* ভাঙা ফ্রেমের প্রসেসটাকে দোষী ধরা */
+        u.rip = b[0];
+        u.cs = b[1];
+        u.rflags = b[2];
+        u.rsp = b[3];
+        u.ss = b[4];
+        u.vector = EXC_GENERAL_PROTECTION;
+        user_fault_hook(&u);                     /* proc_exit — ফেরে না */
+    }
+    return 0;
+}
+
 void interrupt_dispatch(struct interrupt_frame *frame)
 {
     uint64_t v = frame->vector;
     int from_user = (frame->cs & 3) != 0;
+
+    /* #NP (11), #SS (12), #GP (13) — iretq-এর selector যাচাইয়ে যেকোনোটা আসতে পারে */
+    if ((v == EXC_GENERAL_PROTECTION || v == 11 || v == 12) && !from_user &&
+        (frame->rip == (uint64_t)(uintptr_t)interrupt_iretq || frame->rip == (uint64_t)(uintptr_t)syscall_iretq)) {
+        if (bad_iret(frame)) {
+            return;
+        }
+    }
 
     if (v >= PIC_VECTOR_BASE && v < PIC_VECTOR_BASE + PIC_IRQ_COUNT) {
         pic_dispatch(frame);

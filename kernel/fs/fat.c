@@ -571,6 +571,7 @@ static int64_t fat_write(struct vnode *vn, uint64_t off, const void *buf, size_t
     struct fat_vnode *fv = FV(vn);
     int err;
     if (vn->type != VNODE_FILE) return -EISDIR;
+    if (block_is_read_only(fv->fs->dev)) return -EROFS;         /* ধাপ ১৫খ: সুরক্ষিত ডিস্ক */
     if (len == 0) return 0;
     if (off + len > FAT_MAX_FILE) return -EFBIG;
     err = ensure_clusters(fv, off + len);
@@ -593,6 +594,7 @@ static int fat_truncate(struct vnode *vn, uint64_t size)
     struct fat_fs *fs = fv->fs;
     int err;
     if (vn->type != VNODE_FILE) return -EISDIR;
+    if (block_is_read_only(fs->dev)) return -EROFS;             /* ধাপ ১৫খ */
     if (size > FAT_MAX_FILE) return -EFBIG;
     if (size < vn->size) {
         uint32_t keep = (uint32_t)((size + fs->cluster_size - 1) / fs->cluster_size);
@@ -855,6 +857,7 @@ static int fat_create(struct vnode *dirvn, const char *name, enum vnode_type typ
     int ulen = 0, need_lfn, err, k;
     uint32_t nlfn = 0, start = 0, dfirst = dir_first_of(dir), newc = 0, i;
     struct dir_entry_info info;
+    if (block_is_read_only(FV(dirvn)->fs->dev)) return -EROFS;         /* ধাপ ১৫খ: সুরক্ষিত ডিস্ক */
 
     if (dirvn->type != VNODE_DIR) return -ENOTDIR;
     if (type != VNODE_FILE && type != VNODE_DIR) return -EINVAL;
@@ -957,6 +960,7 @@ static int fat_unlink(struct vnode *dirvn, const char *name)
     struct find_ctx f;
     uint32_t i, dfirst = dir_first_of(dir), first;
     uint8_t del = 0xE5;
+    if (block_is_read_only(FV(dirvn)->fs->dev)) return -EROFS;         /* ধাপ ১৫খ: সুরক্ষিত ডিস্ক */
 
     f.name = name;
     f.ok = 0;
@@ -987,6 +991,99 @@ static int fat_unlink(struct vnode *dirvn, const char *name)
     return 0;
 }
 
+/* ধাপ ১৫ক: নাম বদল / সরানো — নতুন নামে এন্ট্রি বানিয়ে (LFN সহ) তাতে পুরোনো এন্ট্রির
+ * cluster, আকার, সময় বসানো; তারপর পুরোনো এন্ট্রি মোছা (ডেটা নড়ে না) */
+static int fat_rename(struct vnode *odvn, const char *oname, struct vnode *ndvn, const char *nname)
+{
+    struct fat_vnode *od = FV(odvn), *nd = FV(ndvn), *child, *fv;
+    struct fat_fs *fs = od->fs;
+    struct find_ctx f, g;
+    struct vnode *cvn;
+    uint32_t odfirst = dir_first_of(od), ndfirst = dir_first_of(nd), i, oldfirst;
+    uint8_t ne[32], del = 0xE5;
+    int is_dir, err;
+    if (block_is_read_only(FV(odvn)->fs->dev)) return -EROFS;         /* ধাপ ১৫খ: সুরক্ষিত ডিস্ক */
+
+    if (nd->fs != fs) return -EXDEV;
+    f.name = oname;
+    f.ok = 0;
+    if (walk_dir(fs, odfirst, find_visit, &f) < 0) return -EIO;
+    if (!f.ok) return -ENOENT;
+    is_dir = (f.e[11] & ATTR_DIR) != 0;
+    oldfirst = entry_cluster(fs, f.e);
+    g.name = nname;
+    g.ok = 0;
+    if (walk_dir(fs, ndfirst, find_visit, &g) < 0) return -EIO;
+    if (g.ok) {
+        if (g.found.off == f.found.off) {
+            if (!strcmp(oname, nname)) return 0;
+            /* শুধু বড়/ছোট হাতের অক্ষর বদল (FAT-এ একই নাম): নিচে নতুন করে লেখা হবে */
+        } else {
+            if ((g.e[11] & ATTR_DIR) || is_dir) return -EEXIST;
+            err = fat_unlink(ndvn, nname);
+            if (err < 0) return err;
+        }
+    }
+    /* পুরোনো এন্ট্রি আগে মোছা (একই নাম কেস-বদলের জন্য জায়গা খালি হয়) */
+    for (i = 0; i < f.found.nslots; i++) {
+        uint64_t off;
+        if (dir_slot(fs, odfirst, f.found.slot - (f.found.nslots - 1) + i, &off) != 0 ||
+            block_write_bytes(fs->dev, off, &del, 1) < 0) {
+            return -EIO;
+        }
+    }
+    err = fat_create(ndvn, nname, is_dir ? VNODE_DIR : VNODE_FILE, &cvn);
+    if (err < 0) {
+        /* ফেরত: পুরোনো এন্ট্রি আবার চালু (প্রথম বাইট) */
+        for (i = 0; i < f.found.nslots; i++) {
+            uint64_t off;
+            uint8_t b0;
+            if (dir_slot(fs, odfirst, f.found.slot - (f.found.nslots - 1) + i, &off) != 0) continue;
+            if (i + 1 == f.found.nslots) b0 = f.e[0];
+            else b0 = (uint8_t)(((f.found.nslots - 1 - i) & 0x1F) | (i == 0 ? 0x40 : 0));
+            block_write_bytes(fs->dev, off, &b0, 1);
+        }
+        return err;
+    }
+    child = FV(cvn);
+    if (is_dir && child->first >= 2) free_chain(fs, child->first);   /* নতুন খালি ক্লাস্টার লাগবে না */
+    /* নতুন 8.3 এন্ট্রিতে পুরোনো তথ্য (নামের ১১ বাইট বাদে) */
+    if (block_read_bytes(fs->dev, child->key, ne, 32) < 0) return -EIO;
+    memcpy(ne + 11, f.e + 11, 21);
+    if (block_write_bytes(fs->dev, child->key, ne, 32) < 0) return -EIO;
+    /* ডিরেক্টরি অন্য parent-এ গেলে তার ".." */
+    if (is_dir && oldfirst >= 2 && od != nd) {
+        uint8_t dd[32];
+        uint32_t pc = nd->is_root ? 0 : nd->first;
+        if (block_read_bytes(fs->dev, cluster_off(fs, oldfirst) + 32, dd, 32) == 0 && dd[0] == '.' && dd[1] == '.') {
+            wr16(dd + 26, (uint16_t)pc);
+            if (fs->type == 32) wr16(dd + 20, (uint16_t)(pc >> 16));
+            block_write_bytes(fs->dev, cluster_off(fs, oldfirst) + 32, dd, 32);
+        }
+    }
+    /* cache: পুরোনো vnode খোলা থাকলে নতুন জায়গায় সরানো; নতুনটা বাদ */
+    for (fv = fs->vnodes; fv; fv = fv->next) {
+        if (fv != child && !fv->is_root && fv->key == f.found.off && fv->vn.nlink) break;
+    }
+    if (fv) {
+        fv->key = child->key;
+        fv->slot = child->slot;
+        fv->nslots = child->nslots;
+        fv->dir_first = child->dir_first;
+        fv->vn.inode = child->key;
+        if (fv->vn.type == VNODE_DIR) fv->vn.parent = ndvn;
+        child->vn.nlink = 1;
+        drop_vnode(child);                       /* ref ছিল শুধু আমাদের — ক্লাস্টার ছোঁয়া নয় */
+    } else {
+        child->first = oldfirst;
+        child->vn.size = is_dir ? 0 : rd32(f.e + 28);
+        child->vn.mtime = fat_to_unix(rd16(f.e + 24), rd16(f.e + 22));
+        vnode_unref(cvn);
+    }
+    odvn->mtime = ndvn->mtime = (uint64_t)clock_unix_time();
+    return 0;
+}
+
 static void fat_release(struct vnode *vn)
 {
     struct fat_vnode *fv = FV(vn);
@@ -998,7 +1095,8 @@ static void fat_release(struct vnode *vn)
 
 static const struct vnode_ops fat_ops = {
     fat_read, fat_write, fat_truncate, fat_lookup, fat_create,
-    fat_unlink, fat_readdir, fat_release, NULL
+    fat_unlink, fat_readdir, fat_release, NULL,
+    fat_rename                                           /* ধাপ ১৫ক */
 };
 
 /* ---------- mount / statfs / info ---------- */
@@ -1120,7 +1218,7 @@ static int fat_statfs(struct vnode *root, struct vfs_statfs *out)
     out->free_blocks = fs->free_count;
     out->total_inodes = 0;
     out->free_inodes = 0;
-    out->read_only = 0;
+    out->read_only = block_is_read_only(fs->dev);      /* ধাপ ১৫খ */
     if (n >= sizeof(out->source)) n = sizeof(out->source) - 1;
     memcpy(out->source, fs->dev->name, n);
     out->source[n] = '\0';
@@ -1149,7 +1247,17 @@ static void fat_info(struct vnode *root)
     }
 }
 
-const struct filesystem fat_filesystem = { "fat", fat_mount, fat_statfs, fat_info };
+/* ধাপ ১৫ক: umount-এর আগে — খোলা ফাইল থাকলে ব্যস্ত */
+static int fat_umount(struct vnode *root)
+{
+    struct fat_vnode *fv;
+    for (fv = FV(root)->fs->vnodes; fv; fv = fv->next) {
+        if (&fv->vn != root && fv->vn.refcount > 0) return -EBUSY;
+    }
+    return 0;
+}
+
+const struct filesystem fat_filesystem = { "fat", fat_mount, fat_statfs, fat_info, fat_umount };
 
 /* ---------- kmon-এর জন্য: কোনো ডিভাইসে কী ফাইলসিস্টেম (mount না করেই) ---------- */
 

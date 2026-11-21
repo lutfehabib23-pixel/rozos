@@ -21,6 +21,9 @@
   [[setfont]]  console font              [[fonts]]   fonts and resolution
   mkbuildinfo  build number for the kernel Makefile ([[kinstall]])
   [[rozsh]]    the shell
+  [[mount]]    attach a disk (umount: detach)
+  [[usb|lsusb]]    list USB devices
+  [[modules|insmod]]   load a kernel module (lsmod, rmmod)
 
 == Network ([[network]]) ==
   [[ifconfig]] card and address   [[ping]]     is a host answering?
@@ -39,7 +42,7 @@
   gfxevents   show keyboard/mouse events as text ([[rozgfx]])
 
 == Tests and demos ==
-  [[systest]]  74 kernel and libc tests  [[demos|hello, spin, crash]]
+  [[systest]]  87 kernel and libc tests  [[demos|hello, spin, crash]]
 
 Every program is a normal ELF file built from userland/ in the source
 tree; you can write your own with [[c-programming|tcc]].

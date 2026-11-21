@@ -60,6 +60,18 @@ int timer_add_tick_hook(timer_tick_hook_t hook)
     return -1;
 }
 
+int timer_remove_tick_hook(timer_tick_hook_t hook)
+{
+    int i;
+    for (i = 0; i < 4; i++) {
+        if (extra_hooks[i] == hook) {
+            extra_hooks[i] = NULL;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static void pit_irq(uint8_t irq, struct interrupt_frame *frame)
 {
     (void)irq;

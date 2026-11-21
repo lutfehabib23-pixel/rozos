@@ -248,6 +248,9 @@ static int do_block_read_bytes(struct block_device *dev, uint64_t offset, void *
     if (to_disk(&dev, &offset, len, 0) < 0 || offset + len > dev->sector_count * dev->sector_size) {
         return -EINVAL;
     }
+    if (dev->offline) {
+        return -ENODEV;                          /* ধাপ ১৫খ */
+    }
     while (len) {
         uint64_t chunk = offset / CHUNK_SIZE;
         size_t in = (size_t)(offset % CHUNK_SIZE);
@@ -274,6 +277,12 @@ static int do_block_write_bytes(struct block_device *dev, uint64_t offset, const
     const uint8_t *in_buf = (const uint8_t *)buf;
     if (to_disk(&dev, &offset, len, 1) < 0 || offset + len > dev->sector_count * dev->sector_size) {
         return -EINVAL;
+    }
+    if (dev->read_only) {
+        return -EROFS;                           /* ধাপ ১৫খ: সুরক্ষিত ডিস্ক */
+    }
+    if (dev->offline) {
+        return -ENODEV;                          /* ধাপ ১৫খ: খুলে নেওয়া পেন ড্রাইভ */
     }
     while (len) {
         uint64_t chunk = offset / CHUNK_SIZE, first_lba;
@@ -358,6 +367,12 @@ int block_write_bytes(struct block_device *dev, uint64_t offset, const void *buf
     r = do_block_write_bytes(dev, offset, buf, len);
     kmutex_unlock(&block_lock);
     return r;
+}
+
+int block_is_read_only(struct block_device *dev)
+{
+    while (dev && dev->parent) dev = dev->parent;
+    return dev ? dev->read_only : 0;
 }
 
 int block_sync(struct block_device *dev)

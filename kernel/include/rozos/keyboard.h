@@ -40,5 +40,6 @@ int      keyboard_getkey(void);         /* কী আসা পর্যন্�
 uint8_t  keyboard_modifiers(void);
 uint8_t  keyboard_last_scancode(void);  /* ডিবাগিং */
 const char *keyboard_key_name(int key);
+void     keyboard_inject_scancode(uint8_t sc);   /* ধাপ ১৫খ: USB কিবোর্ড থেকে */
 
 #endif

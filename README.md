@@ -6,7 +6,7 @@
 
 rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphical desktop. It includes a C compiler, a text editor, `make`, a TCP/IP stack with HTTPS, and a package manager, so you can write, compile and even rebuild the rozOS kernel **from inside rozOS itself**.
 
-> Status: hobby / educational OS, under active development (current: **0.14.2-phase14b**).
+> Status: hobby / educational OS, under active development (current: **0.15.1-phase15b**).
 > It runs in QEMU. Real hardware has not been tested yet.
 
 ---
@@ -18,11 +18,12 @@ rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphica
 | **Boot** | Limine, BIOS + UEFI, ISO and GPT disk image, boot menu with several kernels (`kinstall`) |
 | **Kernel** | x86_64 long mode, GDT/IDT, PIC/PIT, PMM + VMM (4-level paging), kernel heap, preemptive multitasking, `fork`/`exec`/`wait`, Linux-like syscall ABI |
 | **Processes** | process groups and sessions, signals (`kill`, SIG_IGN), Ctrl+C to the foreground job |
-| **Filesystems** | VFS, ext2 (read/write root), FAT32 (boot partition), devfs, tmpfs, initrd |
+| **Filesystems** | VFS, ext2 (read/write root), FAT32 (boot partition), devfs, tmpfs, initrd; `rename()`, `mount`/`umount` |
 | **IPC** | pipes, `poll`, shared memory (`shm_open` + `mmap MAP_SHARED`), PTYs, Unix domain sockets |
-| **Drivers** | PCI, ACPI, PS/2 keyboard and mouse, serial, VGA/framebuffer console with PSF2 fonts, AHCI (SATA) disk, e1000/e1000e network |
+| **Drivers** | PCI, ACPI, PS/2 keyboard and mouse, serial, VGA/framebuffer console with PSF2 fonts, AHCI (SATA) and NVMe disks, USB (xHCI: pen drives, keyboards, mice, hot-plug), e1000/e1000e network |
 | **Network** | lwIP TCP/IP, DHCP, DNS, BSD sockets, BearSSL TLS (HTTPS) |
 | **libc** | own C library, *rozlibc* (stdio, stdlib, string, math, time, sockets, termios, …) |
+| **Kernel modules** | `insmod`/`lsmod`/`rmmod`: ELF relocatable `.ko` files (gcc or the in-OS tcc), exported-symbol table, example `/lib/modules/hello.ko` |
 | **Toolchain in the OS** | TinyCC (`tcc`), `make` (pdpmake), Code (graphical) and `edit` (terminal, F10 menu) editors |
 | **Packages** | `rozpkg`, which downloads C libraries over HTTPS and links them |
 | **Graphics** | `/dev/fb0`, *librozgfx* (shapes, TrueType text via stb_truetype, BMP/PNG/JPEG via stb_image) |
@@ -68,6 +69,8 @@ Other targets:
 | `make run-uefi` | boot through UEFI (OVMF) |
 | `make run-serial` | no window; you get a shell in this terminal |
 | `make iso` / `make run-iso` | build or boot the live ISO |
+| `make run USB=1` | also attach USB: a 64 MiB pen drive (mounted on `/mnt/usb`), keyboard, mouse; `USB_DEV=/dev/sdX` = a real pen drive via usbipd |
+| `make run NVME=1` | also attach a 64 MiB NVMe SSD (`mount /dev/nvmea /mnt/nvme`) |
 | `make disk-reset` | recreate the disk image from scratch (**erases** files you made inside rozOS) |
 | `make clean` | remove build output |
 
@@ -76,7 +79,8 @@ KVM is off by default (see *Known issues*). Turn it on with `make run KVM=1`. Me
 ### Inside rozOS
 ```
 help            index of all help pages
-systest         self-test (74 tests should pass)
+systest         self-test (87 tests should pass)
+lsusb           USB devices; pen drives appear on /mnt/usb
 code hello.c    graphical editor (F5 runs);  edit hello.c in a terminal
 files           file manager
 tcc hello.c -o hello && ./hello
@@ -99,6 +103,7 @@ kernel/        the kernel
 libc/          rozlibc: headers + sources + crt0
 userland/      init, shell, coreutils, editor, net tools, gfx apps, rozwm, rozterm, libraries
 sysroot/       files copied as-is to the root disk (/etc, /usr/share, apps, fonts)
+modules/       example kernel modules (built into /lib/modules/*.ko)
 docs/help/     the built-in help pages (plain text, [[links]])
 ports/         build glue for TinyCC, pdpmake, BearSSL, packages
 toolchain/     host scripts: disk image, boot menu, fetchers, font converter
@@ -113,11 +118,11 @@ Contributions of all sizes are welcome: bug reports, help pages, drivers, ported
 
 **Good places to start**
 - **Desktop:** more apps (settings, text viewer, games), drag and drop in Files, Bengali text shaping, icon pictures (`/usr/share/icons`).
-- **Drivers:** NVMe, USB (xHCI + HID + mass storage), more network cards.
-- **Kernel:** user signal handlers + `SIGWINCH`, loadable kernel modules, SMP.
+- **Drivers:** USB hubs, more network cards, interrupt-driven xHCI/NVMe/AHCI, NTFS/exFAT reading.
+- **Kernel:** user signal handlers + `SIGWINCH`, SMP, more exported symbols for modules.
 - **libc:** more POSIX coverage, eventually musl compatibility.
 - **Toolchain:** binutils + GCC (C++) running inside rozOS.
-- **Bug:** under KVM, the in-OS kernel build can hit a #GP at `iretq` (`isr.S`, error code 0x18).
+- **Bug:** under KVM, the in-OS kernel build hit a #GP at `iretq` (error 0x18). It is now caught and logged - help find the root cause.
 - **Hardware testing:** boot the ISO on a real PC and report what happens.
 
 **How to contribute**
@@ -135,14 +140,16 @@ Contributions of all sizes are welcome: bug reports, help pages, drivers, ported
 ---
 
 ## Known issues
-- KVM: a #GP fault during the in-OS kernel build (KVM is therefore off by default).
+- KVM: an `iretq` #GP fault was seen during the in-OS kernel build. Since 0.15 it is caught and logged (and a damaged GDT is repaired) instead of panicking; KVM stays off by default until confirmed.
 - No `SIGWINCH`; resize a terminal window, then press Ctrl+L in the editor.
 - User signal handlers are not yet invoked (only default / ignore).
 - `kmon` (kernel monitor) works only on the text console or serial line.
-- The VFS has no `rename()` yet: `mv` and Files move/rename by copy + delete.
 - The screen fonts have no Bengali glyphs yet (UTF-8 text is kept, shown as dots).
 
 ---
+
+## Safety on real hardware
+rozOS has not been tested much on real PCs yet. To protect your data, on a real computer every internal disk without a rozOS partition (for example your Windows SSD) is **read-only**; add `diskwrite` to the kernel command line to change that.
 
 ## License
 rozOS is released under the [MIT License](LICENSE). Third-party components keep their own licenses (below).

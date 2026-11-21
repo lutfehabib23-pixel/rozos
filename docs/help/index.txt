@@ -17,6 +17,9 @@ Type [[help|how to use this viewer]] if you are new here.
 
 == Programs in /bin ==
   [[programs]]        the full list, one line each
+  [[modules]]         kernel modules: insmod, lsmod, rmmod, write your own
+  [[mount]]           disks: mount, umount, NVMe, /mnt
+  [[usb]]             USB pen drives, keyboards and mice (lsusb)
   [[menu]]            start programs from a list; [[install]] your own
   [[mouse]]           the mouse in the terminal and the QEMU window
   [[edit]]            the text editor

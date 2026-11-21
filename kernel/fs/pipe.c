@@ -156,11 +156,11 @@ static void pipe_wr_release(struct vnode *vn)
 }
 
 static const struct vnode_ops pipe_rd_ops = {
-    pipe_read, NULL, NULL, NULL, NULL, NULL, NULL, pipe_rd_release, pipe_rd_poll
+    pipe_read, NULL, NULL, NULL, NULL, NULL, NULL, pipe_rd_release, pipe_rd_poll, NULL /* rename (ধাপ ১৫ক) */
 };
 
 static const struct vnode_ops pipe_wr_ops = {
-    NULL, pipe_write, NULL, NULL, NULL, NULL, NULL, pipe_wr_release, pipe_wr_poll
+    NULL, pipe_write, NULL, NULL, NULL, NULL, NULL, pipe_wr_release, pipe_wr_poll, NULL /* rename (ধাপ ১৫ক) */
 };
 
 static void init_end(struct pipe *p, struct vnode *vn, const struct vnode_ops *ops, uint64_t ino)

@@ -3,6 +3,7 @@
  * Limine-এর দেওয়া GDT bootloader-reclaimable মেমোরিতে থাকে (PROTOCOL.md), তাই
  * PMM সেই মেমোরি ফেরত নেওয়ার আগেই কার্নেলের নিজস্ব GDT বসাতে হয়। */
 
+#include <rozos/printf.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <rozos/string.h>
@@ -25,6 +26,7 @@
 
 /* ৫টা সাধারণ descriptor + TSS-এর জন্য ২টা (16 বাইট) */
 static uint64_t gdt[7] ROZ_ALIGNED(16);
+static uint64_t gdt_expected[5];         /* ধাপ ১৫ক: শুরুর মান — নষ্ট হলে ধরা ও ঠিক করা */
 static struct tss tss ROZ_ALIGNED(16);
 
 static uint8_t ist_df_stack[IST_STACK_SIZE] ROZ_ALIGNED(16);
@@ -69,6 +71,8 @@ void gdt_init(void)
                              GDT_ACC_PRESENT | GDT_ACC_DPL3 | GDT_ACC_CODE_DATA | GDT_ACC_EXEC | GDT_ACC_RW,
                              GDT_FLAG_GRAN | GDT_FLAG_LONG);
 
+    memcpy(gdt_expected, gdt, sizeof(gdt_expected));
+
     memset(&tss, 0, sizeof(tss));
     tss.ist[IST_DOUBLE_FAULT - 1]  = (uint64_t)(uintptr_t)(ist_df_stack + IST_STACK_SIZE);
     tss.ist[IST_NMI - 1]           = (uint64_t)(uintptr_t)(ist_nmi_stack + IST_STACK_SIZE);
@@ -80,6 +84,37 @@ void gdt_init(void)
     ptr.base  = (uint64_t)(uintptr_t)gdt;
     gdt_load(&ptr, GDT_KERNEL_CODE, GDT_KERNEL_DATA);
     tss_load(GDT_TSS);
+}
+
+int gdt_check_repair(void)
+{
+    struct gdt_pointer cur;
+    int i, bad = 0;
+    const uint64_t acc = 1ULL << 40;              /* "accessed" বিট — CPU নিজে বসায়, উপেক্ষা */
+    __asm__ __volatile__("sgdt %0" : "=m"(cur));
+    for (i = 0; i < 5; i++) {
+        if ((gdt[i] | acc) != (gdt_expected[i] | acc)) {
+            kprintf("  GDT[%d] = %016llx, expected %016llx - repaired\n", i,
+                    (unsigned long long)gdt[i], (unsigned long long)gdt_expected[i]);
+            gdt[i] = gdt_expected[i];
+            bad = 1;
+        }
+    }
+    if (cur.base != (uint64_t)(uintptr_t)gdt || cur.limit != sizeof(gdt) - 1) {
+        struct gdt_pointer ptr;
+        kprintf("  GDTR = %016llx/%x, expected %016llx/%x - reloaded\n", (unsigned long long)cur.base,
+                cur.limit, (unsigned long long)(uintptr_t)gdt, (unsigned)(sizeof(gdt) - 1));
+        ptr.limit = sizeof(gdt) - 1;
+        ptr.base = (uint64_t)(uintptr_t)gdt;
+        __asm__ __volatile__("lgdt %0" : : "m"(ptr) : "memory");
+        bad = 1;
+    }
+    return bad;
+}
+
+void gdt_debug_break_user_data(void)
+{
+    gdt[3] &= ~(1ULL << 41);                      /* writable বিট মোছা — SS হিসেবে অচল (#GP 0x18) */
 }
 
 void tss_set_kernel_stack(uint64_t rsp0)

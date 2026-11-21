@@ -61,6 +61,7 @@
 #define SYS_mkdir           83
 #define SYS_rmdir           84
 #define SYS_unlink          87
+#define SYS_rename          82   /* ধাপ ১৫ক */
 #define SYS_getppid         110
 #define SYS_rt_sigaction    13      /* ধাপ ১৪: শুধু SIG_IGN / SIG_DFL মানে রাখে */
 #define SYS_setpgid         109     /* ধাপ ১৪ */
@@ -79,6 +80,13 @@
 #define SYS_rozos_shm_open  503     /* ধাপ ১৩: (name, flags, mode) → fd */
 #define SYS_rozos_shm_unlink 504    /* ধাপ ১৩ */
 #define SYS_rozos_openpty   505     /* ধাপ ১৪: (int fds[2]) master, slave */
+#define SYS_init_module     175     /* ধাপ ১৫ক: (image, len, name) — Linux-এর মতো নম্বর */
+#define SYS_delete_module   176     /* ধাপ ১৫ক: (name, flags) */
+#define SYS_rozos_modlist   506     /* ধাপ ১৫ক: (buf, len, what) what 0 = মডিউল, 1 = কার্নেল প্রতীক */
+#define SYS_mount           165     /* ধাপ ১৫ক: (source, target, fstype, flags, data) */
+#define SYS_umount2         166     /* ধাপ ১৫ক: (target, flags) */
+#define SYS_rozos_usblist   508     /* ধাপ ১৫খ: (buf, len) lsusb */
+#define SYS_rozos_mounts    507     /* ধাপ ১৫ক: (buf, len) "source path fstype\n" সারি */
 #define SYS_ftruncate       77      /* ধাপ ১৩ */
 #define SYS_rozos_netconfig 502     /* ধাপ ৯: হাতে IP বসানো / আবার DHCP */
 

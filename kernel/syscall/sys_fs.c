@@ -9,6 +9,11 @@
 #include <rozos/syscall.h>
 #include <rozos/proc.h>
 #include <rozos/vfs.h>
+#include <rozos/module.h>
+#include <rozos/usb.h>
+#include <rozos/block.h>
+#include <rozos/fat.h>
+#include <rozos/printf.h>
 #include <rozos/devfs.h>
 #include <rozos/uaccess.h>
 #include <rozos/heap.h>
@@ -263,6 +268,136 @@ static int64_t sys_pipe(struct interrupt_frame *f, uint64_t ufds, uint64_t a2, u
 }
 
 /* ধাপ ১৪ */
+/* ---------- ধাপ ১৫ক: কার্নেল মডিউল ---------- */
+static int64_t sys_init_module(struct interrupt_frame *f, uint64_t uimg, uint64_t len, uint64_t uname,
+                               uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    char name[32] = "", err[160] = "";
+    void *img;
+    int r;
+    (void)f; (void)a4; (void)a5; (void)a6;
+    if (len == 0 || len > 16 * 1024 * 1024) return -EINVAL;
+    if (uname && copy_string_from_user(name, (const char *)(uintptr_t)uname, sizeof(name)) < 0) return -EFAULT;
+    img = kmalloc(len);
+    if (!img) return -ENOMEM;
+    if (copy_from_user(img, (const void *)(uintptr_t)uimg, len) < 0) { kfree(img); return -EFAULT; }
+    r = module_load(img, len, name[0] ? name : NULL, err, sizeof(err));
+    kfree(img);
+    if (r < 0 && err[0]) kprintf("[module] %s: %s\n", name[0] ? name : "?", err);
+    return r;
+}
+
+static int64_t sys_delete_module(struct interrupt_frame *f, uint64_t uname, uint64_t flags, uint64_t a3,
+                                 uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    char name[32];
+    (void)f; (void)flags; (void)a3; (void)a4; (void)a5; (void)a6;
+    if (copy_string_from_user(name, (const char *)(uintptr_t)uname, sizeof(name)) < 0) return -EFAULT;
+    return module_unload(name);
+}
+
+static int64_t sys_modlist(struct interrupt_frame *f, uint64_t ubuf, uint64_t len, uint64_t what,
+                           uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    char *k;
+    int64_t n;
+    (void)f; (void)a4; (void)a5; (void)a6;
+    if (len == 0) return 0;
+    if (len > 65536) len = 65536;
+    k = (char *)kmalloc(len);
+    if (!k) return -ENOMEM;
+    n = module_list(k, len, what == 1);
+    if (copy_to_user((void *)(uintptr_t)ubuf, k, (size_t)n + 1) < 0) n = -EFAULT;
+    kfree(k);
+    return n;
+}
+
+/* ---------- ধাপ ১৫ক: mount / umount ---------- */
+static int64_t sys_mount(struct interrupt_frame *f, uint64_t usrc, uint64_t utgt, uint64_t utype,
+                         uint64_t flags, uint64_t a5, uint64_t a6)
+{
+    char src[64], tgt[VFS_PATH_MAX], type[16] = "auto";
+    const char *dev, *fs;
+    struct block_device *bd;
+    int err;
+    (void)f; (void)flags; (void)a5; (void)a6;
+    if (copy_string_from_user(src, (const char *)(uintptr_t)usrc, sizeof(src)) < 0) return -EFAULT;
+    err = user_path(utgt, tgt);
+    if (err < 0) return err;
+    if (utype && copy_string_from_user(type, (const char *)(uintptr_t)utype, sizeof(type)) < 0) return -EFAULT;
+    if (!strcmp(type, "tmpfs")) return vfs_mount(tgt, "tmpfs", NULL);
+    dev = !strncmp(src, "/dev/", 5) ? src + 5 : src;
+    bd = block_find(dev);
+    if (!bd) return -ENODEV;
+    fs = type;
+    if (!strcmp(type, "auto") || !type[0]) {
+        const char *p = fs_probe_name(bd);
+        fs = !strcmp(p, "ext2") ? "ext2" : !strncmp(p, "fat", 3) ? "fat" : NULL;
+        if (!fs) return -EINVAL;                 /* চেনা ফাইলসিস্টেম নেই */
+    } else if (!strncmp(type, "vfat", 4) || !strncmp(type, "fat", 3)) {
+        fs = "fat";
+    }
+    {
+        size_t i;                                /* একই ডিভাইস দুবার নয় */
+        for (i = 0; i < vfs_mount_count(); i++) {
+            const struct mount *m = vfs_mount_at(i);
+            if (m && !strcmp(m->source, dev)) return -EBUSY;
+        }
+    }
+    {
+        int r = vfs_mount(tgt, fs, dev);
+        if (r == 0 && block_is_read_only(bd))
+            kprintf("[mount] /dev/%s is read-only (a protected disk - boot option diskwrite allows writing)\n", dev);
+        return r;
+    }
+}
+
+static int64_t sys_umount2(struct interrupt_frame *f, uint64_t utgt, uint64_t flags, uint64_t a3,
+                           uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    char tgt[VFS_PATH_MAX];
+    int err = user_path(utgt, tgt);
+    (void)f; (void)flags; (void)a3; (void)a4; (void)a5; (void)a6;
+    return err < 0 ? err : vfs_umount(tgt);
+}
+
+static int64_t sys_mounts(struct interrupt_frame *f, uint64_t ubuf, uint64_t len, uint64_t a3,
+                          uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    char *k;
+    size_t i, o = 0;
+    (void)f; (void)a3; (void)a4; (void)a5; (void)a6;
+    if (len == 0) return 0;
+    if (len > 16384) len = 16384;
+    k = (char *)kzalloc(len);
+    if (!k) return -ENOMEM;
+    for (i = 0; i < vfs_mount_count() && o + 1 < len; i++) {
+        const struct mount *m = vfs_mount_at(i);
+        o += (size_t)ksnprintf(k + o, len - o, "%s %s %s\n", m->source[0] ? m->source : "-", m->path, m->fs->name);
+    }
+    if (o >= len) o = len - 1;
+    if (copy_to_user((void *)(uintptr_t)ubuf, k, o + 1) < 0) o = (size_t)-EFAULT;
+    kfree(k);
+    return (int64_t)o;
+}
+
+/* ধাপ ১৫খ: lsusb */
+static int64_t sys_usblist(struct interrupt_frame *f, uint64_t ubuf, uint64_t len, uint64_t a3,
+                           uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    char *k;
+    int64_t n;
+    (void)f; (void)a3; (void)a4; (void)a5; (void)a6;
+    if (len == 0) return 0;
+    if (len > 16384) len = 16384;
+    k = (char *)kzalloc(len);
+    if (!k) return -ENOMEM;
+    n = usb_list(k, len);
+    if (copy_to_user((void *)(uintptr_t)ubuf, k, (size_t)n + 1) < 0) n = -EFAULT;
+    kfree(k);
+    return n;
+}
+
 static int64_t sys_openpty(struct interrupt_frame *f, uint64_t ufds, uint64_t a2, uint64_t a3,
                            uint64_t a4, uint64_t a5, uint64_t a6)
 {
@@ -519,6 +654,18 @@ static int64_t sys_unlink(struct interrupt_frame *f, uint64_t upath, uint64_t a2
     return err < 0 ? err : vfs_unlink(path);
 }
 
+/* ধাপ ১৫ক: rename(old, new) — একই ফাইলসিস্টেমে; না হলে -EXDEV (mv তখন কপি করে) */
+static int64_t sys_rename(struct interrupt_frame *f, uint64_t uold, uint64_t unew, uint64_t a3,
+                          uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    char a[VFS_PATH_MAX], b[VFS_PATH_MAX];
+    int err = user_path(uold, a);
+    (void)f; (void)a3; (void)a4; (void)a5; (void)a6;
+    if (err < 0) return err;
+    err = user_path(unew, b);
+    return err < 0 ? err : vfs_rename(a, b);
+}
+
 static int64_t sys_truncate(struct interrupt_frame *f, uint64_t upath, uint64_t len, uint64_t a3,
                             uint64_t a4, uint64_t a5, uint64_t a6)
 {
@@ -659,10 +806,18 @@ void sys_fs_register(void)
     syscall_register(SYS_mkdir, sys_mkdir, "mkdir");
     syscall_register(SYS_rmdir, sys_rmdir, "rmdir");
     syscall_register(SYS_unlink, sys_unlink, "unlink");
+    syscall_register(SYS_rename, sys_rename, "rename");     /* ধাপ ১৫ক */
     syscall_register(SYS_truncate, sys_truncate, "truncate");
     syscall_register(SYS_ioctl, sys_ioctl, "ioctl");
     syscall_register(SYS_pipe, sys_pipe, "pipe");          /* ধাপ ১৩ */
     syscall_register(SYS_pipe2, sys_pipe2, "pipe2");
     syscall_register(SYS_poll, sys_poll, "poll");
     syscall_register(SYS_rozos_openpty, sys_openpty, "openpty");   /* ধাপ ১৪ */
+    syscall_register(SYS_init_module, sys_init_module, "init_module");       /* ধাপ ১৫ক */
+    syscall_register(SYS_delete_module, sys_delete_module, "delete_module");
+    syscall_register(SYS_rozos_modlist, sys_modlist, "modlist");
+    syscall_register(SYS_mount, sys_mount, "mount");
+    syscall_register(SYS_umount2, sys_umount2, "umount2");
+    syscall_register(SYS_rozos_mounts, sys_mounts, "mounts");
+    syscall_register(SYS_rozos_usblist, sys_usblist, "usblist");      /* ধাপ ১৫খ */
 }

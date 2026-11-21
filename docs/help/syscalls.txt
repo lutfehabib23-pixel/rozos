@@ -18,5 +18,9 @@ phase 13:   7 poll   22 pipe   293 pipe2   77 ftruncate ([[pipes]])
 phase 14:  13 rt_sigaction (SIG_IGN only)  109 setpgid  111 getpgrp
 112 setsid  121 getpgid  124 getsid  505 rozos_openpty ([[pty]]);
 socket(AF_UNIX) through the normal socket calls ([[pty]])
+phase 15a: 82 rename ([[mv]])  165 mount  166 umount2 ([[mount]])
+175 init_module  176 delete_module  506 rozos_modlist ([[modules]])
+507 rozos_mounts ([[mount]])
+phase 15b: 508 rozos_usblist ([[usb]])
 [[rozlibc]] wraps these in normal C functions (write(), fork() ...).
 The kernel checks every pointer a program passes before using it.

@@ -88,6 +88,28 @@ static void handle_packet(void)
     }
 }
 
+/* ধাপ ১৫খ: USB মাউস — dx ডানে, dy নিচে (+), buttons বিট ০ বাঁ ১ ডান ২ মাঝ, wheel ওপরে − */
+void mouse_inject(int dx, int dy, uint8_t btn, int wheel)
+{
+    uint64_t f = cpu_irq_save();
+    packet[0] = (uint8_t)(0x08 | (btn & 7) | (dx < 0 ? 0x10 : 0) | (-dy < 0 ? 0x20 : 0));
+    if (dx > 255) dx = 255;
+    if (dx < -256) dx = -256;
+    if (dy > 256) dy = 256;
+    if (dy < -255) dy = -255;
+    packet[1] = (uint8_t)(dx & 0xFF);
+    packet[2] = (uint8_t)((-dy) & 0xFF);
+    packet[3] = (uint8_t)(wheel & 0x0F);
+    {
+        int saved = packet_size;
+        packet_size = 4;                         /* চাকার মান সবসময় নেওয়া */
+        handle_packet();
+        packet_size = saved;
+    }
+    packet_index = 0;
+    cpu_irq_restore(f);
+}
+
 int mouse_poll_event(int queue, struct mouse_event *out)
 {
     uint64_t flags;

@@ -13,6 +13,9 @@ shows the menu in the QEMU window, which is easier).
 The menu is /boot/limine.conf, written by [[kinstall]].
 "rozOS factory (text mode, no desktop)" boots without the desktop
 (kernel command line word `text`), see [[desktop]].
+Other words for the kernel command line (in the menu press e on an entry,
+add to the `cmdline:` line, F10 to boot): `diskwrite` lets rozOS write to
+every disk on a real computer ([[disks]], phase 15b).
 Screen resolution (phase 13): `kinstall --resolution 1024x768` adds a
 "resolution:" line to every entry (`auto` removes it) - see [[fonts]].
 

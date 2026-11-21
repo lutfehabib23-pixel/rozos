@@ -43,6 +43,11 @@ struct tss {
 } ROZ_PACKED;
 
 void gdt_init(void);
+/* ধাপ ১৫ক: GDT/GDTR শুরুর মতো আছে কিনা; বদলে গেলে কী বদলেছে লিখে ঠিক করে, ফেরত 1 */
+int gdt_check_repair(void);
+/* ধাপ ১৫ক (kmon `gdtcheck`): ইউজার-ডেটা descriptor ইচ্ছা করে নষ্ট — পরের iretq-তে
+ * #GP(0x18), আর bad_iret সেটা ধরে ঠিক করে কিনা দেখা */
+void gdt_debug_break_user_data(void);
 
 /* ধাপ ৬: প্রতিটি ইউজার প্রসেসে সুইচ করার সময় তার কার্নেল স্ট্যাক বসানো */
 void tss_set_kernel_stack(uint64_t rsp0);

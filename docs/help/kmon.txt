@@ -16,5 +16,7 @@ kmon runs as a kernel thread; programs keep running meanwhile.
   `reboot`, `halt`
 kmon has its own current directory and does not see shell variables.
 See [[processes]] and [[kernel]].
+gdtcheck (phase 15a) damages the GDT on purpose: the kernel must
+repair it on the next return to a program ([[qemu]], KVM).
 Phase 14: kmon talks to the text console directly - in the [[desktop]]
 use the serial line or Start > Text mode first.
