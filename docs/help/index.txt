@@ -29,7 +29,7 @@ Type [[help|how to use this viewer]] if you are new here.
   [[lua]]             Lua 5.4 scripts; [[zlib]]: gzip, gunzip, libz
   [[make]]            build from a Makefile (pdpmake)
   [[kmon]]            the kernel monitor (debugging)
-  [[systest]]         the self-test (186 checks)
+  [[systest]]         the self-test (191 checks)
 
 == Writing software ==
   [[c-programming]]   write, compile and run a C program, step by step
@@ -50,7 +50,8 @@ Type [[help|how to use this viewer]] if you are new here.
 == Graphics (phase 13) ==
   [[graphics]]        the graphics programs, and how to write your own
   [[rozgfx]]          the graphics library (shapes, pictures, fonts, mouse)
-  [[games]]           Snake, Breakout - and [[rozgame]]: make your own games
+  [[games]]           Snake, Breakout, Tetris, Platformer - and [[rozgame]]:
+                      make your own games in C, or in Lua with [[luagame]]
   [[fonts]]           console fonts (setfont) and screen resolution
   [[framebuffer]]     /dev/fb0      [[shm]] shared memory   [[pipes]] pipe(), poll()
 

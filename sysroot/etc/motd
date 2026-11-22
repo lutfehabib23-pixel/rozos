@@ -5,4 +5,4 @@ This file came from sysroot/etc/motd on the build host.
 Shell tips: menu, ls /bin | wc -l, edit notes.txt, systest, kmon, help
 Desktop: Start menu, Terminal, Files, Code icons; textmode / desktop switch; help desktop
 Graphics (make run window): gfxdemo, paint, imgview, gcalc, setfont, help graphics
-Games: snake, breakout (Start > Games); help games, help rozgame
+Games: snake, breakout, tetris, platformer, luagame (Start > Games); help games, help rozgame

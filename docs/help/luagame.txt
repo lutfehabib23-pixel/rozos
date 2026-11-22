@@ -1,0 +1,51 @@
+# luagame - write games in Lua (phase 18b)
+  `luagame game.lua`      runs a Lua 5.4 script with the `game` module
+  `luagame /usr/share/games/stars.lua`   the example (Star catcher)
+No compiling: change the script and run it again. Errors show the line.
+
+== The smallest game ==
+  local x = 300
+  game.run{
+    title = "Hi",
+    update = function(dt)
+      if game.key_down("right") then x = x + 200 * dt end
+      if game.key_pressed("escape") then game.quit() end
+    end,
+    draw = function()
+      game.clear(game.rgb(0, 0, 40))
+      game.circle(x, 240, 20, game.rgb(255, 80, 80))
+    end }
+Also: init = function() ... end, quit = ..., width/height (640x480),
+scale = "fit" / "integer" / "stretch" / "native", smooth = true, show_fps = true.
+
+== Functions ==
+  keys: game.key_down("left"), key_pressed, key_released, key_typed
+        names: "left" "right" "up" "down" "space" "enter" "escape" "a" "1"
+        "f1" "lshift" "lctrl" ...   game.text_input()
+  mouse: x, y = game.mouse()   game.mouse_down() / _pressed / _released
+         ("left", "right", "middle")   game.mouse_wheel()
+  colour: game.rgb(r, g, b [, alpha])   game.hsv(h, s, v)   game.color_lerp
+  draw: game.clear(c)  fill_rect(x,y,w,h,c)  rect  circle(x,y,r,c)
+        line  gradient(x,y,w,h,top,bottom)  text(x,y,s,c)  text_center(y,s,c)
+        ttf(size,x,y,s,c)  ttf_center(size,y,s,c)  ttf_width(size,s)
+  pictures: img = game.image("x.png")  img:draw(x, y [, alpha])
+        img:draw_part(sx,sy,sw,sh,x,y [,flipx,flipy])  img:draw_scaled(x,y,w,h)
+        img:draw_rotated(cx,cy,angle,scale)  img:resize(w,h,true)  img:size()
+        sh = game.sheet("walk.png", 32, 48)  sh:draw(frame, x, y [, flipx])
+  maps: m = game.tilemap("level.map")  m:draw(vx, vy)  m:get(c, r)  m:set(c, r, "C")
+        m:solid_at(x, y)  i, c, r = m:find("C" [, start])  m:size()
+        x, y, hit = m:move(x, y, w, h, dx, dy)   (hit & game.HIT_BOTTOM ...)
+  camera: cam = game.camera()  cam:bounds(0,0,w,h)  cam:follow(x, y, 7, dt)
+        cam:shake(8, 0.4)  cam:update(dt)  vx, vy = cam:view()
+  particles: ps = game.particles(500)  ps:burst(x, y, 20, {color = c,
+        speed = 200, life = 0.8, size = 4, gravity = 200, spread = 6.28})
+        ps:update(dt)  ps:draw(vx, vy)
+  more: game.overlap(ax,ay,aw,ah, bx,by,bw,bh)  game.circle_overlap
+        game.rand_int(a, b)  game.rand_float(a, b)  game.clamp  game.lerp
+        game.approach  game.score_load("name")  game.score_save("name", n)
+        game.width() game.height() game.time() game.fps() game.quit()
+        game.screenshot("x.bmp")
+Pictures and maps are looked for in the current folder, then in
+/usr/share/games. Everything is the C library underneath ([[rozgame]]),
+so it is just as fast to draw. Source: /usr/src/games/luagame.c.
+See [[lua]], [[games]].

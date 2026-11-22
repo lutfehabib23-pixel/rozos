@@ -417,6 +417,23 @@ static void new_file(void)
     snprintf(status_msg, sizeof(status_msg), "New file - Ctrl+S asks for a name");
 }
 
+/* ধাপ ১৮খ: File > New game — /usr/share/templates/game.c দিয়ে শুরু (নামহীন) */
+static void new_game_file(void)
+{
+    char cwd[256];
+    if (!confirm_discard()) return;
+    if (load_file("/usr/share/templates/game.c") < 0) {
+        ui_msgbox("Code", "/usr/share/templates/game.c is missing", UI_MB_OK | UI_MB_ERROR);
+        return;
+    }
+    if (!getcwd(cwd, sizeof(cwd))) strcpy(cwd, "/home");
+    if (!strcmp(cwd, "/usr/share/templates") || !strcmp(cwd, "/")) strcpy(cwd, "/home");
+    snprintf(path, sizeof(path), "%s/untitled.c", cwd);
+    untitled = 1;
+    modified = 1;
+    snprintf(status_msg, sizeof(status_msg), "New game - F5 compiles and runs, Ctrl+S asks for a name");
+}
+
 static void open_file(void)
 {
     char p[512];
@@ -726,7 +743,7 @@ static void update_states(void)
 
 /* ---------- মেনু ---------- */
 enum {
-    M_NEW = 1, M_OPEN, M_SAVE, M_SAVEAS, M_QUIT,
+    M_NEW = 1, M_OPEN, M_SAVE, M_SAVEAS, M_QUIT, M_NEWGAME,
     M_UNDO, M_REDO, M_CUT, M_COPY, M_PASTE, M_ALL,
     M_FIND, M_NEXT, M_REPL, M_GOTO,
     M_COMPILE, M_RUN, M_COMPILE2, M_RUN2,
@@ -734,7 +751,7 @@ enum {
     M_KEYS, M_ABOUT
 };
 static const struct ui_menuitem file_items[] = {
-    { "New", "Ctrl+N", M_NEW }, { "Open...", "Ctrl+O", M_OPEN }, { "-", NULL, 0 },
+    { "New", "Ctrl+N", M_NEW }, { "New game", NULL, M_NEWGAME }, { "Open...", "Ctrl+O", M_OPEN }, { "-", NULL, 0 },
     { "Save", "Ctrl+S", M_SAVE }, { "Save As...", "F12", M_SAVEAS }, { "-", NULL, 0 },
     { "Quit", "Ctrl+Q", M_QUIT }
 };
@@ -759,7 +776,7 @@ static const struct ui_menuitem help_items[] = {
     { "Keyboard shortcuts", "F1", M_KEYS }, { "About Code", NULL, M_ABOUT }
 };
 static const struct ui_menu menus[] = {
-    { "File", file_items, 7 }, { "Edit", edit_items, 8 }, { "Search", search_items, 5 },
+    { "File", file_items, 8 }, { "Edit", edit_items, 8 }, { "Search", search_items, 5 },
     { "Build", build_items, 5 }, { "View", view_items, 6 }, { "Help", help_items, 2 }
 };
 
@@ -790,6 +807,7 @@ static void do_action(int id)
 {
     switch (id) {
     case M_NEW: new_file(); break;
+    case M_NEWGAME: new_game_file(); break;
     case M_OPEN: open_file(); break;
     case M_SAVE: save_file(); break;
     case M_SAVEAS: save_as(); break;

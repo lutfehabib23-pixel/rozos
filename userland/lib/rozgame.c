@@ -1312,3 +1312,466 @@ const char *game_data_path(const char *file)
     snprintf(p, sizeof(p), "/usr/share/games/%s", file);
     return p;
 }
+
+/* ================= ক্যামেরা (ধাপ ১৮খ) ================= */
+
+void game_camera_init(game_camera *c)
+{
+    if (!c) return;
+    memset(c, 0, sizeof(*c));
+}
+
+static int cam_w(const game_camera *c) { return c->w > 0 ? c->w : lw; }
+static int cam_h(const game_camera *c) { return c->h > 0 ? c->h : lh; }
+
+static void cam_clamp(game_camera *c)
+{
+    float w = (float)cam_w(c), h = (float)cam_h(c);
+    if (!c->bounded) return;
+    if (c->bx1 - c->bx0 <= w) c->x = c->bx0 - (w - (c->bx1 - c->bx0)) / 2;   /* জগত ছোট — মাঝখানে */
+    else c->x = game_clamp(c->x, c->bx0, c->bx1 - w);
+    if (c->by1 - c->by0 <= h) c->y = c->by0 - (h - (c->by1 - c->by0)) / 2;
+    else c->y = game_clamp(c->y, c->by0, c->by1 - h);
+}
+
+void game_camera_bounds(game_camera *c, float x0, float y0, float x1, float y1)
+{
+    if (!c) return;
+    c->bounded = 1;
+    c->bx0 = x0; c->by0 = y0; c->bx1 = x1; c->by1 = y1;
+    cam_clamp(c);
+}
+
+void game_camera_follow(game_camera *c, float tx, float ty, float speed, float dt)
+{
+    float gx, gy, k;
+    if (!c) return;
+    gx = tx - cam_w(c) / 2.0f;
+    gy = ty - cam_h(c) / 2.0f;
+    if (speed <= 0) {
+        c->x = gx;
+        c->y = gy;
+    } else {
+        k = 1.0f - expf(-speed * dt);              /* fps যাই হোক একই রকম মসৃণ */
+        c->x += (gx - c->x) * k;
+        c->y += (gy - c->y) * k;
+    }
+    cam_clamp(c);
+}
+
+void game_camera_shake(game_camera *c, float amp, float seconds)
+{
+    if (!c) return;
+    if (amp > c->shake_amp || c->shake_left <= 0) c->shake_amp = amp;
+    c->shake_time = seconds;
+    c->shake_left = seconds;
+}
+
+void game_camera_update(game_camera *c, float dt)
+{
+    if (!c) return;
+    if (c->shake_left > 0) {
+        float a = c->shake_amp * (c->shake_time > 0 ? c->shake_left / c->shake_time : 0);
+        c->shake_left -= dt;
+        c->sx = (int)game_rand_float(-a, a);
+        c->sy = (int)game_rand_float(-a, a);
+    } else {
+        c->sx = c->sy = 0;
+        c->shake_amp = 0;
+    }
+}
+
+int game_camera_view_x(const game_camera *c) { return c ? (int)floorf(c->x) + c->sx : 0; }
+int game_camera_view_y(const game_camera *c) { return c ? (int)floorf(c->y) + c->sy : 0; }
+
+/* ================= টাইল ম্যাপ (ধাপ ১৮খ) ================= */
+
+game_tilemap *game_tilemap_new(int cols, int rows, int tw, int th)
+{
+    game_tilemap *m;
+    int i;
+    if (cols <= 0 || rows <= 0 || tw <= 0 || th <= 0) return NULL;
+    m = (game_tilemap *)calloc(1, sizeof(*m));
+    if (!m) return NULL;
+    m->cells = (unsigned char *)malloc((size_t)cols * (size_t)rows);
+    if (!m->cells) {
+        free(m);
+        return NULL;
+    }
+    memset(m->cells, '.', (size_t)cols * (size_t)rows);
+    m->cols = cols; m->rows = rows; m->tw = tw; m->th = th;
+    for (i = 0; i < 256; i++) m->frame[i] = -1;
+    m->edges = GAME_EDGE_LEFT | GAME_EDGE_RIGHT | GAME_EDGE_TOP;
+    return m;
+}
+
+void game_tilemap_free(game_tilemap *m)
+{
+    if (!m) return;
+    game_sheet_free(m->set);
+    free(m->cells);
+    free(m);
+}
+
+void game_tilemap_tile(game_tilemap *m, int ch, int frame, int solid)
+{
+    if (!m || ch <= 0 || ch > 255) return;
+    m->frame[ch] = (short)frame;
+    m->solid[ch] = solid ? 1 : 0;
+}
+
+/* tileset/ছবির পথ: ম্যাপের ফোল্ডারে আগে, তারপর game_data_path */
+static const char *sibling_path(const char *map_path, const char *file, char *buf, size_t size)
+{
+    const char *slash = strrchr(map_path, '/');
+    struct stat st;
+    if (file[0] == '/') return file;
+    if (slash) {
+        snprintf(buf, size, "%.*s/%s", (int)(slash - map_path), map_path, file);
+        if (stat(buf, &st) == 0) return buf;
+    }
+    return game_data_path(file);
+}
+
+static char *trim(char *s)
+{
+    char *e;
+    while (*s == ' ' || *s == '\t') s++;
+    e = s + strlen(s);
+    while (e > s && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ' || e[-1] == '\t')) *--e = 0;
+    return s;
+}
+
+game_tilemap *game_tilemap_load(const char *path)
+{
+    FILE *f;
+    char line[1024], tileset[256] = "", buf[512];
+    int tw = 32, th = 32, in_map = 0, cols = 0, rows = 0, cap = 0, r, i;
+    char **lines = NULL;
+    short frame[256];
+    unsigned char solid[256];
+    uint32_t color[256];
+    game_tilemap *m = NULL;
+
+    if (!path || !(f = fopen(path, "r"))) {
+        fprintf(stderr, "game_tilemap_load: %s: cannot open\n", path ? path : "(null)");
+        return NULL;
+    }
+    for (i = 0; i < 256; i++) { frame[i] = -1; solid[i] = 0; color[i] = 0; }
+    while (fgets(line, sizeof(line), f)) {
+        if (in_map) {
+            char *e = line + strlen(line);
+            while (e > line && (e[-1] == '\n' || e[-1] == '\r')) *--e = 0;
+            if (rows == cap) {
+                char **n = (char **)realloc(lines, sizeof(char *) * (size_t)(cap ? cap * 2 : 32));
+                if (!n) break;
+                lines = n;
+                cap = cap ? cap * 2 : 32;
+            }
+            lines[rows] = strdup(line);
+            if (!lines[rows]) break;
+            if ((int)strlen(line) > cols) cols = (int)strlen(line);
+            rows++;
+            continue;
+        }
+        {
+            char *s = trim(line), *kw, *a, *b, *c;
+            if (!*s || *s == '#') continue;
+            kw = strtok(s, " \t");
+            a = strtok(NULL, " \t");
+            b = strtok(NULL, " \t");
+            c = strtok(NULL, " \t");
+            if (!strcmp(kw, "map")) in_map = 1;
+            else if (!strcmp(kw, "tileset") && a) {
+                snprintf(tileset, sizeof(tileset), "%s", a);
+                if (b) tw = atoi(b);
+                if (c) th = atoi(c);
+            } else if (!strcmp(kw, "size") && a && b) {
+                tw = atoi(a);
+                th = atoi(b);
+            } else if (!strcmp(kw, "tile") && a && b) {
+                frame[(unsigned char)a[0]] = (short)atoi(b);
+                solid[(unsigned char)a[0]] = c && !strcmp(c, "solid");
+            } else if (!strcmp(kw, "color") && a && b) {
+                color[(unsigned char)a[0]] = 0xFF000000u | (uint32_t)strtoul(b, NULL, 16);
+                solid[(unsigned char)a[0]] = c && !strcmp(c, "solid");
+            }
+        }
+    }
+    fclose(f);
+    if (rows > 0 && cols > 0) m = game_tilemap_new(cols, rows, tw > 0 ? tw : 32, th > 0 ? th : 32);
+    if (m) {
+        for (r = 0; r < rows; r++) {
+            int n = (int)strlen(lines[r]);
+            for (i = 0; i < n; i++) m->cells[(size_t)r * cols + i] = (unsigned char)lines[r][i];
+        }
+        memcpy(m->frame, frame, sizeof(frame));
+        memcpy(m->solid, solid, sizeof(solid));
+        memcpy(m->color, color, sizeof(color));
+        if (tileset[0]) {
+            m->set = game_sheet_load(sibling_path(path, tileset, buf, sizeof(buf)), m->tw, m->th);
+            if (!m->set) fprintf(stderr, "game_tilemap_load: tileset %s not found\n", tileset);
+        }
+    } else {
+        fprintf(stderr, "game_tilemap_load: %s: no map lines\n", path);
+    }
+    for (r = 0; r < rows; r++) free(lines[r]);
+    free(lines);
+    return m;
+}
+
+int game_tilemap_get(const game_tilemap *m, int c, int r)
+{
+    if (!m || c < 0 || r < 0 || c >= m->cols || r >= m->rows) return 0;
+    return m->cells[(size_t)r * m->cols + c];
+}
+
+void game_tilemap_set(game_tilemap *m, int c, int r, int ch)
+{
+    if (!m || c < 0 || r < 0 || c >= m->cols || r >= m->rows) return;
+    m->cells[(size_t)r * m->cols + c] = (unsigned char)ch;
+}
+
+int game_tilemap_solid(const game_tilemap *m, int c, int r)
+{
+    if (!m) return 0;
+    if (c < 0) return (m->edges & GAME_EDGE_LEFT) != 0;
+    if (c >= m->cols) return (m->edges & GAME_EDGE_RIGHT) != 0;
+    if (r < 0) return (m->edges & GAME_EDGE_TOP) != 0;
+    if (r >= m->rows) return (m->edges & GAME_EDGE_BOTTOM) != 0;
+    return m->solid[m->cells[(size_t)r * m->cols + c]];
+}
+
+int game_tilemap_solid_at(const game_tilemap *m, float x, float y)
+{
+    if (!m) return 0;
+    return game_tilemap_solid(m, (int)floorf(x / m->tw), (int)floorf(y / m->th));
+}
+
+int game_tilemap_rect_solid(const game_tilemap *m, game_rect r)
+{
+    int c0, c1, r0, r1, c, rr;
+    if (!m || r.w <= 0 || r.h <= 0) return 0;
+    c0 = (int)floorf(r.x / m->tw);
+    c1 = (int)floorf((r.x + r.w - 0.001f) / m->tw);
+    r0 = (int)floorf(r.y / m->th);
+    r1 = (int)floorf((r.y + r.h - 0.001f) / m->th);
+    for (rr = r0; rr <= r1; rr++)
+        for (c = c0; c <= c1; c++)
+            if (game_tilemap_solid(m, c, rr)) return 1;
+    return 0;
+}
+
+int game_tilemap_find(const game_tilemap *m, int ch, int start, int *col, int *row)
+{
+    int i, n;
+    if (!m) return -1;
+    n = m->cols * m->rows;
+    for (i = start < 0 ? 0 : start; i < n; i++)
+        if (m->cells[i] == (unsigned char)ch) {
+            if (col) *col = i % m->cols;
+            if (row) *row = i / m->cols;
+            return i;
+        }
+    return -1;
+}
+
+/* এক অক্ষে সরানো; ধাপ টাইলের অর্ধেকের বেশি নয় (পাতলা দেয়াল ভেদ করে না) */
+static int move_axis(const game_tilemap *m, game_rect *r, float d, int xaxis)
+{
+    int hit = 0;
+    float limit = (xaxis ? m->tw : m->th) * 0.5f;
+    while (d != 0 && !hit) {
+        float step = d > limit ? limit : d < -limit ? -limit : d;
+        game_rect t = *r;
+        d -= step;
+        if (xaxis) t.x += step; else t.y += step;
+        if (!game_tilemap_rect_solid(m, t)) {
+            *r = t;
+            continue;
+        }
+        /* ধাক্কা: টাইলের কিনারায় বসানো */
+        if (xaxis) {
+            if (step > 0) {
+                int c = (int)floorf((t.x + t.w - 0.001f) / m->tw);
+                r->x = c * m->tw - r->w;
+                hit = GAME_HIT_RIGHT;
+            } else {
+                int c = (int)floorf(t.x / m->tw);
+                r->x = (float)(c + 1) * m->tw;
+                hit = GAME_HIT_LEFT;
+            }
+        } else {
+            if (step > 0) {
+                int rr = (int)floorf((t.y + t.h - 0.001f) / m->th);
+                r->y = rr * m->th - r->h;
+                hit = GAME_HIT_BOTTOM;
+            } else {
+                int rr = (int)floorf(t.y / m->th);
+                r->y = (float)(rr + 1) * m->th;
+                hit = GAME_HIT_TOP;
+            }
+        }
+        /* কিনারায় বসানোর পরেও ঢুকে থাকলে (অস্বাভাবিক) আগের জায়গায় */
+        if (game_tilemap_rect_solid(m, *r)) {
+            if (xaxis) r->x = t.x - step; else r->y = t.y - step;
+        }
+    }
+    return hit;
+}
+
+int game_tilemap_move(const game_tilemap *m, game_rect *r, float dx, float dy)
+{
+    int hit = 0;
+    if (!m || !r) return 0;
+    if (dx != 0) hit |= move_axis(m, r, dx, 1);
+    if (dy != 0) hit |= move_axis(m, r, dy, 0);
+    return hit;
+}
+
+void game_tilemap_draw(const game_tilemap *m, int vx, int vy)
+{
+    int c0, c1, r0, r1, c, r;
+    if (!m || !logical) return;
+    c0 = vx < 0 ? -((-vx + m->tw - 1) / m->tw) : vx / m->tw;
+    r0 = vy < 0 ? -((-vy + m->th - 1) / m->th) : vy / m->th;
+    c1 = (vx + lw) / m->tw;
+    r1 = (vy + lh) / m->th;
+    if (c0 < 0) c0 = 0;
+    if (r0 < 0) r0 = 0;
+    if (c1 >= m->cols) c1 = m->cols - 1;
+    if (r1 >= m->rows) r1 = m->rows - 1;
+    for (r = r0; r <= r1; r++)
+        for (c = c0; c <= c1; c++) {
+            int ch = m->cells[(size_t)r * m->cols + c], x = c * m->tw - vx, y = r * m->th - vy;
+            if (m->frame[ch] >= 0 && m->set) game_draw_frame(m->set, m->frame[ch], x, y, 0);
+            else if (m->color[ch] >> 24) game_fill_rect(x, y, m->tw, m->th, m->color[ch]);
+        }
+}
+
+/* ================= কণা / particle (ধাপ ১৮খ) ================= */
+
+game_emitter game_emitter_default(uint32_t color)
+{
+    game_emitter e;
+    memset(&e, 0, sizeof(e));
+    e.speed_min = 40;
+    e.speed_max = 180;
+    e.spread = 6.2831853f;
+    e.life_min = 0.4f;
+    e.life_max = 0.9f;
+    e.size_start = 4;
+    e.size_end = 1;
+    e.color_start = color | 0xFF000000u;
+    e.color_end = color & 0x00FFFFFFu;            /* মিলিয়ে যায় */
+    e.gravity = 200;
+    e.drag = 0.5f;
+    return e;
+}
+
+game_particles *game_particles_new(int max)
+{
+    game_particles *ps;
+    if (max <= 0) return NULL;
+    ps = (game_particles *)calloc(1, sizeof(*ps));
+    if (!ps) return NULL;
+    ps->p = (game_particle *)calloc((size_t)max, sizeof(game_particle));
+    if (!ps->p) {
+        free(ps);
+        return NULL;
+    }
+    ps->max = max;
+    return ps;
+}
+
+void game_particles_free(game_particles *ps)
+{
+    if (!ps) return;
+    free(ps->p);
+    free(ps);
+}
+
+void game_particles_clear(game_particles *ps)
+{
+    if (ps) memset(ps->p, 0, sizeof(game_particle) * (size_t)ps->max);
+}
+
+void game_particles_burst(game_particles *ps, float x, float y, int n, const game_emitter *e)
+{
+    game_emitter d;
+    if (!ps || n <= 0) return;
+    if (!e) {
+        d = game_emitter_default(GFX_WHITE);
+        e = &d;
+    }
+    while (n-- > 0) {
+        game_particle *p;
+        int i, slot = -1;
+        float a, sp;
+        /* খালি ঘর খোঁজা; না পেলে সবচেয়ে পুরোনোটার জায়গায় (ঘুরে ঘুরে) */
+        for (i = 0; i < ps->max; i++) {
+            int k = (ps->next + i) % ps->max;
+            if (ps->p[k].life <= 0) { slot = k; break; }
+        }
+        if (slot < 0) slot = ps->next;
+        ps->next = (slot + 1) % ps->max;
+        p = &ps->p[slot];
+        a = e->angle + game_rand_float(-e->spread / 2, e->spread / 2);
+        sp = game_rand_float(e->speed_min, e->speed_max > e->speed_min ? e->speed_max : e->speed_min + 0.001f);
+        p->x = x; p->y = y;
+        p->vx = cosf(a) * sp;
+        p->vy = sinf(a) * sp;
+        p->max = p->life = game_rand_float(e->life_min > 0 ? e->life_min : 0.01f,
+                                          e->life_max > e->life_min ? e->life_max : e->life_min + 0.01f);
+        p->size0 = e->size_start;
+        p->size1 = e->size_end;
+        p->gravity = e->gravity;
+        p->drag = e->drag;
+        p->c0 = e->color_start;
+        p->c1 = e->color_end;
+    }
+}
+
+void game_particles_update(game_particles *ps, float dt)
+{
+    int i;
+    if (!ps) return;
+    for (i = 0; i < ps->max; i++) {
+        game_particle *p = &ps->p[i];
+        float k;
+        if (p->life <= 0) continue;
+        p->life -= dt;
+        p->vy += p->gravity * dt;
+        k = 1.0f - p->drag * dt;
+        if (k < 0) k = 0;
+        p->vx *= k;
+        p->vy *= k;
+        p->x += p->vx * dt;
+        p->y += p->vy * dt;
+    }
+}
+
+void game_particles_draw(const game_particles *ps, int vx, int vy)
+{
+    int i;
+    if (!ps) return;
+    for (i = 0; i < ps->max; i++) {
+        const game_particle *p = &ps->p[i];
+        float t, sz;
+        int s;
+        if (p->life <= 0) continue;
+        t = 1.0f - p->life / p->max;
+        sz = p->size0 + (p->size1 - p->size0) * t;
+        s = sz < 1 ? 1 : (int)(sz + 0.5f);
+        game_fill_rect((int)p->x - s / 2 - vx, (int)p->y - s / 2 - vy, s, s, game_color_lerp(p->c0, p->c1, t));
+    }
+}
+
+int game_particles_alive(const game_particles *ps)
+{
+    int i, n = 0;
+    if (!ps) return 0;
+    for (i = 0; i < ps->max; i++)
+        if (ps->p[i].life > 0) n++;
+    return n;
+}

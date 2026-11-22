@@ -1587,6 +1587,105 @@ static void test_phase18a(void)
     check(ok, "game_score_save/load keeps the best");
 }
 
+/* ধাপ ১৮খ: ক্যামেরা, টাইল ম্যাপ, কণা, luagame */
+static void test_phase18b(void)
+{
+    game_camera cam;
+    game_tilemap *m;
+    game_rect r;
+    game_particles *ps;
+    game_emitter e;
+    FILE *f;
+    int ok, hit, c, row, idx, st;
+
+    /* ১. ক্যামেরা: লক্ষ্য মাঝখানে, সীমার ভেতরে, ছোট জগত মাঝখানে */
+    game_camera_init(&cam);
+    cam.w = 100; cam.h = 100;
+    game_camera_bounds(&cam, 0, 0, 1000, 500);
+    game_camera_follow(&cam, 500, 250, 0, 0);
+    ok = cam.x == 450 && cam.y == 200;
+    game_camera_follow(&cam, 10, 10, 0, 0);
+    ok = ok && cam.x == 0 && cam.y == 0;
+    game_camera_follow(&cam, 990, 490, 0, 0);
+    ok = ok && cam.x == 900 && cam.y == 400 && game_camera_view_x(&cam) == 900;
+    game_camera_bounds(&cam, 0, 0, 60, 60);
+    check(ok && cam.x == -20 && cam.y == -20, "game_camera: follow, bounds, small world centred");
+
+    /* ২. টাইল ম্যাপ: শক্ত ঘর, move-এ থামা */
+    m = game_tilemap_new(10, 6, 16, 16);
+    ok = m != NULL;
+    if (ok) {
+        for (c = 0; c < 10; c++) game_tilemap_set(m, c, 5, '#');
+        game_tilemap_set(m, 6, 4, '#');
+        game_tilemap_tile(m, '#', 0, 1);
+        ok = game_tilemap_solid(m, 3, 5) && !game_tilemap_solid(m, 3, 4) && game_tilemap_solid(m, -1, 0) &&
+             !game_tilemap_solid(m, 3, 9) && game_tilemap_solid_at(m, 100, 85) && game_tilemap_get(m, 6, 4) == '#';
+        r = game_make_rect(10, 20, 12, 12);
+        hit = game_tilemap_move(m, &r, 0, 200);                /* নিচে পড়ে মেঝেতে থামে */
+        ok = ok && hit == GAME_HIT_BOTTOM && r.y == 80 - 12;
+        hit = game_tilemap_move(m, &r, 300, 0);                /* ডানে গিয়ে (6,4)-এর দেয়ালে */
+        ok = ok && hit == GAME_HIT_RIGHT && r.x == 96 - 12;
+        hit = game_tilemap_move(m, &r, -500, 0);               /* বাঁ কিনারা শক্ত */
+        ok = ok && hit == GAME_HIT_LEFT && r.x == 0;
+        game_tilemap_free(m);
+    }
+    check(ok, "game_tilemap: solid cells and edges, move stops on floor and walls");
+
+    /* ৩. .map ফাইল পড়া, অক্ষর খোঁজা */
+    f = fopen("/tmp/t18.map", "w");
+    if (f) {
+        fputs("# test\nsize 8 8\ncolor # 808080 solid\ntile ^ 3\nmap\n..C..C\n.P\n######\n", f);
+        fclose(f);
+    }
+    m = game_tilemap_load("/tmp/t18.map");
+    ok = m && m->cols == 6 && m->rows == 3 && m->tw == 8 && m->solid['#'] && !m->solid['^'] && m->frame['^'] == 3;
+    if (ok) {
+        idx = game_tilemap_find(m, 'C', 0, &c, &row);
+        ok = idx == 2 && c == 2 && row == 0;
+        idx = game_tilemap_find(m, 'C', idx + 1, &c, &row);
+        ok = ok && idx == 5 && c == 5 && game_tilemap_find(m, 'C', idx + 1, NULL, NULL) == -1;
+        ok = ok && game_tilemap_find(m, 'P', 0, &c, &row) >= 0 && c == 1 && row == 1 && game_tilemap_get(m, 4, 1) == '.';
+    }
+    game_tilemap_free(m);
+    unlink("/tmp/t18.map");
+    m = game_tilemap_load("/usr/share/games/platformer-1.map");
+    check(ok && m && m->set && m->cols == 80 && m->rows == 15, "game_tilemap_load: .map text, find, platformer level with tileset");
+    game_tilemap_free(m);
+
+    /* ৪. কণা */
+    ps = game_particles_new(16);
+    e = game_emitter_default(GFX_RGB(255, 0, 0));
+    ok = ps && e.color_start == GFX_RGB(255, 0, 0) && (e.color_end >> 24) == 0;
+    if (ps) {
+        game_particles_burst(ps, 10, 10, 20, &e);             /* ১৬-র বেশি চাইলে ঘুরে বসে */
+        ok = ok && game_particles_alive(ps) == 16;
+        game_particles_update(ps, 0.2f);
+        ok = ok && game_particles_alive(ps) == 16;
+        game_particles_update(ps, 1.0f);
+        ok = ok && game_particles_alive(ps) == 0;
+        game_particles_free(ps);
+    }
+    check(ok, "game_particles: burst, update, all fade out");
+
+    /* ৫. luagame: game মডিউল (গ্রাফিক্স ছাড়া অংশ) */
+    f = fopen("/tmp/t18.lua", "w");
+    if (f) {
+        fputs("assert(game.overlap(0,0,10,10, 5,5,10,10) and not game.overlap(0,0,10,10, 10,0,5,5))\n"
+              "assert(game.rgb(1,2,3) == 0xFF010203 and game.clamp(5,0,3) == 3)\n"
+              "local x = game.rand_int(2, 4) assert(x >= 2 and x <= 4)\n"
+              "assert(type(game.run) == 'function' and game.HIT_BOTTOM == 8)\n"
+              "local m = game.tilemap('platformer-1.map') local c, r = m:size() assert(c == 80 and r == 15)\n"
+              "local nx, ny, hit = m:move(40, 300, 20, 28, 0, 200) assert(hit == game.HIT_BOTTOM)\n", f);
+        fclose(f);
+    }
+    {
+        char *argv[] = { "luagame", "/tmp/t18.lua", NULL };
+        ok = run("/bin/luagame", argv, &st) > 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0;
+    }
+    unlink("/tmp/t18.lua");
+    check(ok, "luagame: the Lua game module (collisions, colours, tile map)");
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -1609,6 +1708,7 @@ int main(int argc, char **argv)
     test_phase16b1_more();
     test_phase16b2();
     test_phase18a();
+    test_phase18b();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

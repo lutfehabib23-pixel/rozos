@@ -44,6 +44,8 @@
 
 == Games ([[games]]) ==
   [[snake]]    eat apples, grow           [[breakout]] break the bricks
+  [[tetris]]   falling blocks             [[platformer]] run and jump
+  [[luagame]]  run a game written in Lua (Star catcher)
 
 == Tests and demos ==
   [[systest]]  kernel and libc tests  [[demos|hello, spin, crash]]

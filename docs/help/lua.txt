@@ -13,4 +13,5 @@ The library and headers are installed: lua.h, lualib.h, lauxlib.h,
   `luaL_dostring(L, "print('hello from Lua')");`
 The full source is in /usr/src/lua - rebuild it inside rozOS:
   `cd /usr/src/lua; tcc -DLUA_USE_POSIX -o /tmp/lua onelua.c -lm`
+Games in Lua: [[luagame]] (the `game` module - pictures, keys, maps).
 See [[programs]], [[c-programming]].

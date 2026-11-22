@@ -209,6 +209,10 @@ ifeq ($(HAVE_LUA),1)
   USER_PROGS += lua
   USER_BINS += $(USER_BUILD)/bin/lua
   USER_STRIPPED += $(USER_BUILD)/stripped/lua
+  # ধাপ ১৮খ: luagame — Lua + librozgame ("game" মডিউল)
+  USER_PROGS += luagame
+  USER_BINS += $(USER_BUILD)/bin/luagame
+  USER_STRIPPED += $(USER_BUILD)/stripped/luagame
 endif
 ifeq ($(HAVE_ZLIB),1)
   USER_PROGS += gzip gunzip
@@ -238,7 +242,7 @@ MOD_KOS      := $(patsubst modules/%.c,$(BUILD)/modules/%.ko,$(MOD_SRCS))
 # ধাপ ১৩: গ্রাফিক্স ডেমোর সোর্স /usr/src/gfx-এ (নিজে বদলে tcc দিয়ে চালানোর জন্য)
 GFX_SRC_FILES := $(wildcard userland/gfx/*.c)
 # ধাপ ১৮ক: গেমের সোর্স /usr/src/games-এ, ছবি /usr/share/games-এ
-GAME_SRC_FILES := $(wildcard userland/games/*.c)
+GAME_SRC_FILES := $(wildcard userland/games/*.c) userland/lua/luagame.c
 GAME_DATA_FILES := $(wildcard sysroot/usr/share/games/*)
 
 # initrd ও ডিস্কের জন্য sysroot + বিল্ড করা প্রোগ্রাম একসাথে
@@ -424,6 +428,16 @@ $(USER_BUILD)/bin/lua: $(LUA_BUILD)/lua.o $(LUA_A) $(LIBC_A) $(LIBC_CRT0)
 	@mkdir -p $(dir $@)
 	@echo "  LD      $@"
 	@$(CC) $(USER_LDFLAGS) $(LIBC_CRT0) $(LUA_BUILD)/lua.o $(LUA_A) $(LIBC_A) -lgcc -o $@
+
+$(USER_BUILD)/obj/luagame.o: userland/lua/luagame.c userland/lib/rozgame.h userland/lib/rozgfx.h config.mk
+	@mkdir -p $(dir $@)
+	@echo "  CC      $<"
+	@$(CC) $(USER_CFLAGS) -Iuserland/lib -I$(LUA_SRC) -c $< -o $@
+
+$(USER_BUILD)/bin/luagame: $(USER_BUILD)/obj/luagame.o $(LUA_A) $(USER_LIBS) $(LIBC_A) $(LIBC_CRT0)
+	@mkdir -p $(dir $@)
+	@echo "  LD      $@"
+	@$(CC) $(USER_LDFLAGS) $(LIBC_CRT0) $< $(LUA_A) $(USER_LIBS) $(LIBC_A) -lgcc -o $@
 
 $(ZLIB_ZCONF): $(ZLIB_SRC)/zconf.h
 	@mkdir -p $(dir $@)

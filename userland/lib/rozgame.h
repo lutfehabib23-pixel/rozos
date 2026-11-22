@@ -218,6 +218,96 @@ int  game_rect_hit_side(game_rect a, game_rect b);
 /* a-কে b থেকে বের করে দেওয়া (কম দূরত্বের দিকে); কোন পাশ দিয়ে ফেরত */
 int  game_rect_push_out(game_rect *a, game_rect b);
 
+/* ---------- ক্যামেরা (ধাপ ১৮খ) ---------- */
+/* জগত পর্দার চেয়ে বড় হলে: জিনিস আঁকো (x − game_camera_view_x(&cam), y − …)-এ */
+typedef struct game_camera {
+    float x, y;                /* দেখা অংশের বাঁ-উপর কোণ (জগতের স্থানাঙ্কে) */
+    int w, h;                  /* দেখার মাপ; 0 = লজিক্যাল পর্দা */
+    int bounded;               /* 1 = নিচের সীমার বাইরে যায় না */
+    float bx0, by0, bx1, by1;  /* জগতের সীমা */
+    float shake_amp, shake_time, shake_left;
+    int sx, sy;                /* এই ফ্রেমের কাঁপা (পিক্সেল) */
+} game_camera;
+
+void game_camera_init(game_camera *c);
+void game_camera_bounds(game_camera *c, float x0, float y0, float x1, float y1);
+/* লক্ষ্যকে মাঝখানে রাখো; speed = প্রতি সেকেন্ডে কতটা কাছে যায় (যেমন 8); 0 = সাথে সাথে */
+void game_camera_follow(game_camera *c, float tx, float ty, float speed, float dt);
+void game_camera_shake(game_camera *c, float amp, float seconds);
+void game_camera_update(game_camera *c, float dt);   /* কাঁপা হিসাব — প্রতি ফ্রেমে একবার */
+int  game_camera_view_x(const game_camera *c);       /* কাঁপাসহ, পূর্ণসংখ্যা */
+int  game_camera_view_y(const game_camera *c);
+
+/* ---------- টাইল ম্যাপ (ধাপ ১৮খ) ---------- */
+/* .map ফাইল (টেক্সট):
+ *   # মন্তব্য
+ *   tileset platformer-tiles.png 32 32     ছবি আর একটা টাইলের মাপ
+ *   size 32 32                             (tileset ছাড়া হলে টাইলের মাপ)
+ *   tile # 0 solid                         অক্ষর → ফ্রেম, শক্ত কিনা
+ *   tile ^ 5                               (শক্ত নয়)
+ *   color = 806040 solid                   ছবি ছাড়া রং দিয়ে আঁকা টাইল
+ *   map                                    এর পরের প্রতিটা লাইন = এক সারি
+ *   ....P....C....
+ *   ##############
+ * অন্য অক্ষর (P, C, E …) আঁকা হয় না — গেম game_tilemap_find দিয়ে খুঁজে নেয়। */
+typedef struct game_tilemap {
+    int cols, rows, tw, th;
+    unsigned char *cells;        /* cols × rows অক্ষর; '.' বা ' ' = খালি */
+    short frame[256];            /* অক্ষর → tileset-এর ফ্রেম; −1 = আঁকা নয় */
+    unsigned char solid[256];    /* অক্ষর → শক্ত */
+    uint32_t color[256];         /* frame < 0 হলেও রং থাকলে (alpha > 0) রং দিয়ে আঁকা */
+    game_sheet *set;
+    int edges;                   /* ম্যাপের বাইরে কোন দিক শক্ত: GAME_EDGE_* (ডিফল্ট বাঁ|ডান|ওপর) */
+} game_tilemap;
+
+enum { GAME_EDGE_LEFT = 1, GAME_EDGE_RIGHT = 2, GAME_EDGE_TOP = 4, GAME_EDGE_BOTTOM = 8 };
+enum { GAME_HIT_LEFT = 1, GAME_HIT_RIGHT = 2, GAME_HIT_TOP = 4, GAME_HIT_BOTTOM = 8 };
+
+game_tilemap *game_tilemap_load(const char *path);          /* ব্যর্থ হলে NULL (কারণ stderr-এ) */
+game_tilemap *game_tilemap_new(int cols, int rows, int tw, int th);
+void game_tilemap_free(game_tilemap *m);
+void game_tilemap_tile(game_tilemap *m, int ch, int frame, int solid);
+int  game_tilemap_get(const game_tilemap *m, int col, int row);     /* বাইরে 0 */
+void game_tilemap_set(game_tilemap *m, int col, int row, int ch);
+int  game_tilemap_solid(const game_tilemap *m, int col, int row);
+int  game_tilemap_solid_at(const game_tilemap *m, float x, float y);   /* জগতের পিক্সেলে */
+int  game_tilemap_rect_solid(const game_tilemap *m, game_rect r);
+/* ch অক্ষরের পরের ঘর (start থেকে খোঁজা) → index, না পেলে −1; col/row-ও দেয় */
+int  game_tilemap_find(const game_tilemap *m, int ch, int start, int *col, int *row);
+/* r-কে (dx, dy) সরাও, শক্ত টাইলে থামিয়ে (আগে x, তারপর y) → কোন দিকে লাগল (GAME_HIT_*) */
+int  game_tilemap_move(const game_tilemap *m, game_rect *r, float dx, float dy);
+void game_tilemap_draw(const game_tilemap *m, int view_x, int view_y);   /* শুধু দেখা অংশ */
+
+/* ---------- কণা / particle (ধাপ ১৮খ) ---------- */
+typedef struct game_emitter {
+    float speed_min, speed_max;    /* পিক্সেল/সেকেন্ড */
+    float angle, spread;           /* দিক আর ছড়ানো (রেডিয়ান; spread 6.28 = সবদিকে) */
+    float life_min, life_max;      /* সেকেন্ড */
+    float size_start, size_end;    /* পিক্সেল */
+    uint32_t color_start, color_end;   /* alpha-ও বদলায় (শেষে 0 দিলে মিলিয়ে যায়) */
+    float gravity;                 /* পিক্সেল/সেকেন্ড² (নিচে ধনাত্মক) */
+    float drag;                    /* প্রতি সেকেন্ডে গতির কত ভাগ কমে (0-1) */
+} game_emitter;
+
+typedef struct game_particle {
+    float x, y, vx, vy, life, max, size0, size1, gravity, drag;
+    uint32_t c0, c1;
+} game_particle;
+
+typedef struct game_particles {
+    game_particle *p;
+    int max, next;
+} game_particles;
+
+game_emitter    game_emitter_default(uint32_t color);    /* সবদিকে ছিটকে, মিলিয়ে যায় */
+game_particles *game_particles_new(int max);
+void game_particles_free(game_particles *ps);
+void game_particles_clear(game_particles *ps);
+void game_particles_burst(game_particles *ps, float x, float y, int n, const game_emitter *e);
+void game_particles_update(game_particles *ps, float dt);
+void game_particles_draw(const game_particles *ps, int view_x, int view_y);
+int  game_particles_alive(const game_particles *ps);
+
 /* ---------- সহায়ক ---------- */
 
 void     game_rand_seed(uint32_t seed);          /* না ডাকলে /dev/urandom থেকে */

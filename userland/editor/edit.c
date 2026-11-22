@@ -2,6 +2,7 @@
  *
  *   edit [file]
  *   edit --new [TEMPLATE]   নতুন নামহীন ফাইল: FILE001.c (থাকলে FILE002.c …), TEMPLATE-এর
+ *                           (ধাপ ১৮খ: শুধু নাম — যেমন game — দিলে /usr/share/templates/game.c)
  *                           লেখা দিয়ে শুরু (ডিফল্ট /usr/share/templates/new.c); প্রথম Ctrl+S-এ
  *                           নাম চায় (ধাপ ১২ক)
  *
@@ -1101,6 +1102,12 @@ static void start_new(const char *tmpl)
     int i;
     FILE *f;
     if (!tmpl) tmpl = "/usr/share/templates/new.c";
+    /* ধাপ ১৮খ: শুধু নাম দিলে (edit --new game) /usr/share/templates/<নাম>.c */
+    if (!strchr(tmpl, '/') && stat(tmpl, &st) != 0) {
+        static char tpath[256];
+        snprintf(tpath, sizeof(tpath), "/usr/share/templates/%s%s", tmpl, strchr(tmpl, '.') ? "" : ".c");
+        tmpl = tpath;
+    }
     dot = strrchr(tmpl, '.');
     if (dot && !strchr(dot, '/') && strlen(dot) < 12) ext = dot;
     for (i = 1; i < 1000; i++) {

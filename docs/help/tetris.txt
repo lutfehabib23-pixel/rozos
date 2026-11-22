@@ -1,0 +1,19 @@
+# tetris - the falling blocks game (phase 18b)
+  `tetris`  `tetris -f` (show fps)  `tetris -p` (no menu)
+
+Move and turn the falling pieces so they fill whole rows; a full row
+disappears. Clearing 1, 2, 3 or 4 rows at once gives 100, 300, 500 or
+800 points times the level. Every 10 rows the level goes up and the
+pieces fall faster. The game ends when a new piece has no room.
+
+  Left / Right (or A D)   move - hold the key to keep moving
+  Up or X                 turn          Z   turn the other way
+  Down (or S)             fall faster (1 point per row)
+  Space                   drop at once (2 points per row)
+  C or Shift              hold: keep this piece for later (once per piece)
+  P   pause       Esc   back to the menu
+
+The outline under the piece shows where it will land; the next three
+pieces are on the right. Every 7 pieces contain each shape once.
+Best score: /home/.rozgame/tetris.score.
+Source: /usr/src/games/tetris.c - see [[games]] and [[rozgame]].

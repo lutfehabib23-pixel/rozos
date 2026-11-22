@@ -1,8 +1,12 @@
-# Games (phase 18a)
+# Games (phase 18a, 18b)
 Start menu > Games, or type the name in a terminal.
 
   [[snake]]      eat apples, grow, don't hit the walls or yourself
   [[breakout]]   break all the bricks with the ball and the paddle
+  [[tetris]]     stack the falling pieces, clear full lines
+  [[platformer]] run, jump, collect coins, reach the flag (2 levels,
+                 make your own level in a text file)
+  Star catcher   a small game written in Lua ([[luagame]])
 
 Both are written with [[rozgame]] - the game library - and their full
 source is in /usr/src/games. Change them and build your own copy:
@@ -14,6 +18,8 @@ source is in /usr/src/games. Change them and build your own copy:
 == Options (both games) ==
   -f   show the frames per second
   -p   start playing at once (no menu)
+New game of your own: `edit --new game`, Code: File > New game, or
+in Lua: [[luagame]].
 Breakout also has -s: smooth (bilinear) enlarging on a big screen.
 
 == Pictures ==
@@ -22,8 +28,8 @@ your own picture of the same size and the game uses it.
 They were drawn by a program (toolchain/mkgameart.py), not copied.
 
 == Best scores ==
-Kept in /home/.rozgame/snake.score and breakout.score - delete the
-file to start again.
+Kept in /home/.rozgame/<game>.score (snake, breakout, tetris,
+platformer, stars) - delete the file to start again.
 
 == Keys in games ==
 Games get the real "pressed" and "released" of each key from

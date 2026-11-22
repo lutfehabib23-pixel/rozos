@@ -1,6 +1,7 @@
-# librozgame - make games in C (phase 18a)
+# librozgame - make games in C (phase 18a, 18b)
   `#include <rozgame.h>`    compile: `tcc game.c -lrozgame -lrozgfx -lm -o game`
-Built on [[rozgfx]]. Full examples: /usr/src/games ([[snake]], [[breakout]]).
+Built on [[rozgfx]]. Full examples: /usr/src/games ([[snake]], [[breakout]],
+[[tetris]], [[platformer]]); games in Lua: [[luagame]].
 
 == The smallest game ==
   static void update(void *ud, float dt) {        /* 60 times a second */
@@ -92,5 +93,46 @@ game_data_path("x.png") looks in the current folder, then /usr/share/games.
   export ROZGAME_STATS=1      print the fps when the game ends
   export ROZGAME_SHOT=/home/s.bmp  (and ROZGAME_SHOT_AT=200) screenshot
 
-Coming in phase 18b: tile maps, camera, particles, Tetris, a platformer
-and Lua games. Sound comes with the sound driver. See [[games]].
+== Camera (phase 18b) - worlds bigger than the screen ==
+  game_camera cam;  game_camera_init(&cam);
+  game_camera_bounds(&cam, 0, 0, world_w, world_h);   never shows outside
+  game_camera_follow(&cam, px, py, 7, dt);  keeps the player in the middle
+                                            (7 = how fast; 0 = at once)
+  game_camera_shake(&cam, 8, 0.4f);   game_camera_update(&cam, dt);
+  int vx = game_camera_view_x(&cam), vy = game_camera_view_y(&cam);
+  then draw everything at (x - vx, y - vy)
+
+== Tile maps (phase 18b) ==
+A level is a text file - one letter per tile:
+  tileset platformer-tiles.png 32 32    picture and tile size
+  tile G 0 solid                        letter, frame in the picture, solid?
+  tile ^ 4                              (not solid - e.g. spikes)
+  color = 806040 solid                  a tile drawn in one colour (no picture)
+  map
+  ....P.....C....E....
+  GGGGGGGGGGGGGGGGGGGG
+Letters with no "tile" line are not drawn: use them for things the game
+places itself (P player, C coin, E enemy).
+  game_tilemap *m = game_tilemap_load(game_data_path("level1.map"));
+  game_tilemap_draw(m, vx, vy)         only the visible tiles
+  game_tilemap_get / _set (m, col, row)   game_tilemap_solid_at(m, x, y)
+  i = game_tilemap_find(m, 'C', i + 1, &col, &row)   next 'C' (-1 = none)
+  hit = game_tilemap_move(m, &rect, dx, dy)   moves and stops at walls;
+       hit & GAME_HIT_BOTTOM = standing on the ground, _TOP, _LEFT, _RIGHT
+  m->edges = GAME_EDGE_LEFT | GAME_EDGE_RIGHT   which map borders are walls
+                                                (no BOTTOM: you can fall)
+
+== Particles (phase 18b) ==
+  game_particles *ps = game_particles_new(500);
+  game_emitter e = game_emitter_default(GFX_RGB(255, 200, 50));
+  e.speed_max = 300; e.gravity = 0; e.spread = 1.0f; e.angle = -1.57f;
+  game_particles_burst(ps, x, y, 30, &e);     sparks, dust, explosions
+  game_particles_update(ps, dt);  game_particles_draw(ps, vx, vy);
+  emitter: speed_min/max, angle, spread (radians), life_min/max,
+  size_start/end, color_start/end (alpha too - fades), gravity, drag
+
+== Start a new game ==
+  `edit --new game`, or Code: File > New game - a small working game
+  (/usr/share/templates/game.c) to change. Ctrl+R / F5 runs it.
+  In Lua: [[luagame]]. Examples: [[snake]] [[breakout]] [[tetris]]
+  [[platformer]]. Sound comes with the sound driver. See [[games]].

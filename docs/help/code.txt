@@ -5,7 +5,7 @@ Also: the Code icon on the desktop, Start > Development, or double-click
 a .c file in [[filemanager|Files]].
 
 == Menus (every entry shows its key) ==
-  File    New Ctrl+N, Open... Ctrl+O, Save Ctrl+S, Save As... F12, Quit Ctrl+Q
+  File    New Ctrl+N, New game ([[rozgame]] starter), Open... Ctrl+O, Save Ctrl+S, Save As... F12, Quit Ctrl+Q
   Edit    Undo Ctrl+Z, Redo Ctrl+Y, Cut Ctrl+X, Copy Ctrl+C, Paste Ctrl+V,
           Select All Ctrl+A
   Search  Find... Ctrl+F, Find Next F3, Replace... Ctrl+E, Go to Line Ctrl+G

@@ -6,7 +6,7 @@
 
 rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphical desktop. It includes a C compiler, a text editor, `make`, a TCP/IP stack with HTTPS, and a package manager, so you can write, compile and even rebuild the rozOS kernel **from inside rozOS itself**.
 
-> Status: hobby / educational OS, under active development (current: **0.18.0-phase18a**).
+> Status: hobby / educational OS, under active development (current: **0.18.1-phase18b**).
 > It runs in QEMU. Real hardware has not been tested yet.
 
 ---
@@ -27,12 +27,12 @@ rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphica
 | **Toolchain in the OS** | TinyCC (`tcc`), `make` (pdpmake), Code (graphical) and `edit` (terminal, F10 menu) editors, Lua 5.4 (`lua`, `liblua.a`), zlib (`gzip`/`gunzip`, `libz.a`) |
 | **Packages** | `rozpkg`, which downloads C libraries over HTTPS and links them |
 | **Graphics** | `/dev/fb0`, *librozgfx* (shapes, TrueType text via stb_truetype, BMP/PNG/JPEG via stb_image) |
-| **Games** | *librozgame*: fixed-step game loop, real key press/release (`/dev/keyev`), fast image drawing (row-classified sprites, memcpy for opaque rows), sprite sheets and animation, scaling (fit / integer / native, optional bilinear), high-quality photo resize, collisions, TrueType text, menus, best scores; **Snake** and **Breakout** with source in `/usr/src/games` |
+| **Games** | *librozgame*: fixed-step game loop, real key press/release (`/dev/keyev`), fast image drawing (row-classified sprites, memcpy for opaque rows), sprite sheets and animation, scaling (fit / integer / native, optional bilinear), high-quality photo resize, collisions, TrueType text, menus, best scores, camera (follow, bounds, shake), text-file tile maps with move-and-slide, particles; Lua games with `luagame`; **Snake**, **Breakout**, **Tetris**, **Platformer** (own levels as `.map` text files) and **Star catcher** (Lua), with source in `/usr/src/games` and starter templates (`edit --new game`) |
 | **Widgets** | *librozui*: immediate-mode buttons, check boxes, text boxes, lists, scroll bars, menu bars with shortcuts, message boxes, input and file dialogs; icons can be replaced by pictures |
 | **Desktop** | **rozwm** compositing window manager: flicker-free damage-based drawing, movable/resizable windows with minimise/maximise/close, Start menu, taskbar, clock; **rozterm** terminal windows (VT100, scrollback, copy and paste, blinking cursor); dark 3D theme (Ebony, Obsidian, Onyx, Jet Black) |
 | **Desktop apps** | **Code** (graphical C editor: menus, syntax colours, compile and run with tcc, clickable errors), **Files** (file manager), calculator, paint, image viewer |
 | **Shell** | `rozsh`: pipes, redirection, `&&`/`||`, job control, history; about 50 programs in `/bin` |
-| **Docs** | 104 built-in help pages (`help`, `help desktop`, `help syscalls`, …) |
+| **Docs** | 107 built-in help pages (`help`, `help desktop`, `help syscalls`, …) |
 
 ---
 
@@ -82,8 +82,9 @@ KVM is off by default (see *Known issues*). Turn it on with `make run KVM=1`. Me
 ### Inside rozOS
 ```
 help            index of all help pages
-systest         self-test (186 checks should pass)
-snake, breakout games (Start > Games); help rozgame to write your own
+systest         self-test (191 checks should pass)
+snake, breakout, tetris, platformer   games (Start > Games); help rozgame to write your own
+luagame /usr/share/games/stars.lua    a game in Lua (help luagame)
 lsusb           USB devices; pen drives appear on /mnt/usb
 code hello.c    graphical editor (F5 runs);  edit hello.c in a terminal
 files           file manager

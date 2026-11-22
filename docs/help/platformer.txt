@@ -1,0 +1,26 @@
+# platformer - run and jump (phase 18b)
+  `platformer`  `platformer -f` (fps)  `platformer -p` (no menu)
+  `platformer mylevel.map`              play your own level
+
+Run to the flag at the end of each level. Collect coins (10 points),
+jump on a slime's head to squash it (50 points), keep away from the
+spikes and the holes. You have 3 lives; there are 2 levels.
+
+  Left / Right (or A D)        run
+  Up, W or Space               jump - hold longer to jump higher
+  P   pause       Esc   back to the menu
+
+== Make your own level ==
+A level is a plain text file - one letter per 32x32 tile:
+  `cp /usr/share/games/platformer-1.map /home/my.map`
+  `edit /home/my.map`        change the letters below the "map" line
+  `platformer /home/my.map`
+Letters:  G grass  D dirt  S stone  B brick  X crate  (solid)
+          ^ spikes  * bush  F flag  | flag pole  (not solid)
+          P start   C coin  E slime
+The screen shows 20 x 15 tiles; a level can be as wide as you like.
+The format is explained in [[rozgame]] (Tile maps).
+
+The camera follows the player, the hills far away move slower
+(parallax). Best score: /home/.rozgame/platformer.score.
+Source: /usr/src/games/platformer.c - see [[games]].

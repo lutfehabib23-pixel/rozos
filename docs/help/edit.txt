@@ -5,6 +5,9 @@
                   filled from /usr/share/templates/new.c; the first
                   Ctrl+S asks for the real name. The [[menu]] has it as
                   "New C program" (Development).
+  `edit --new game`  the same, starting from a small game
+                  (/usr/share/templates/game.c, [[rozgame]]); menu:
+                  "New game (C)". Any name from /usr/share/templates works.
 It opens on its own screen; when you quit, the shell screen comes
 back exactly as it was. It finds the terminal size by itself ([[stty]]).
 
