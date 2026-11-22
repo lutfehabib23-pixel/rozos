@@ -1,0 +1,350 @@
+# rozOS C reference - users, logging, errors, dynamic loading, search
+# tables, floating-point flags, intmax_t: <pwd.h> <grp.h> <syslog.h>
+# <err.h> <dlfcn.h> <search.h> <fenv.h> <inttypes.h> (phase 19b)
+
+@entry getpwnam
+@also getpwuid getpwnam_r getpwuid_r getpwent setpwent endpwent passwd pw_name pw_dir pw_shell
+@header pwd.h
+@syntax struct passwd *getpwnam(const char *name);
+@syntax struct passwd *getpwuid(uid_t uid);
+@syntax int getpwnam_r(const char *name, struct passwd *pw, char *buf, size_t size, struct passwd **result);
+@syntax int getpwuid_r(uid_t uid, struct passwd *pw, char *buf, size_t size, struct passwd **result);
+@syntax struct passwd *getpwent(void);   void setpwent(void);   void endpwent(void);
+@summary Look up a user in /etc/passwd.
+@desc
+struct passwd has pw_name, pw_passwd, pw_uid, pw_gid, pw_gecos, pw_dir
+(home directory) and pw_shell. rozOS has one line: root, uid 0, home
+/home, shell /bin/sh. getpwent walks all users (setpwent restarts,
+endpwent closes). The plain forms return a static struct; the _r forms
+use your buffers (thread safe).
+@returns
+A pointer, or NULL if not found (_r: 0 and *result NULL).
+@see getuid getgrnam getenv
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <pwd.h>
+
+int main(void)
+{
+    struct passwd *pw = getpwuid(getuid());
+    if (!pw) { printf("unknown user\n"); return 0; }
+    printf("user %s, home %s, shell %s\n", pw->pw_name, pw->pw_dir, pw->pw_shell);
+    return 0;
+}
+@end
+
+@entry getgrnam
+@also getgrgid getgrnam_r getgrgid_r getgrent setgrent endgrent initgroups setgroups group gr_name
+@header grp.h
+@syntax struct group *getgrnam(const char *name);
+@syntax struct group *getgrgid(gid_t gid);
+@syntax int getgrnam_r / getgrgid_r (..., struct group *g, char *buf, size_t size, struct group **result);
+@syntax struct group *getgrent(void);   void setgrent(void);   void endgrent(void);
+@syntax int initgroups(const char *user, gid_t gid);   int setgroups(size_t n, const gid_t *list);
+@summary Look up a group in /etc/group.
+@desc
+struct group has gr_name, gr_passwd, gr_gid and gr_mem (member names,
+ending in NULL). rozOS has the group root (0). initgroups / setgroups
+succeed only for group 0 (one user).
+@returns
+A pointer, or NULL.
+@see getpwnam getuid
+@example
+#include <stdio.h>
+#include <grp.h>
+
+int main(void)
+{
+    struct group *g = getgrgid(0);
+    char **m;
+    if (!g) return 0;
+    printf("group %s (%d), members:", g->gr_name, (int)g->gr_gid);
+    for (m = g->gr_mem; m && *m; m++) printf(" %s", *m);
+    printf("\n");
+    return 0;
+}
+@end
+
+@entry syslog
+@also openlog closelog setlogmask vsyslog LOG_INFO LOG_ERR LOG_WARNING LOG_DEBUG LOG_PID LOG_USER LOG_DAEMON
+@header syslog.h
+@syntax void openlog(const char *ident, int option, int facility);
+@syntax void syslog(int priority, const char *fmt, ...);
+@syntax void vsyslog(int priority, const char *fmt, va_list ap);
+@syntax int setlogmask(int mask);
+@syntax void closelog(void);
+@summary Write messages to the system log.
+@desc
+Each message is a line "Nov 23 10:15:00 rozos myprog[42]: text" appended
+to /var/log/messages (or /tmp/messages if that cannot be written; with
+LOG_CONS to the console as a last resort). priority is LOG_ERR,
+LOG_WARNING, LOG_INFO, LOG_DEBUG ...; openlog sets the name shown and
+options (LOG_PID adds the pid). setlogmask(LOG_UPTO(LOG_INFO)) drops
+messages below that level. Read the log with "cat /var/log/messages".
+@returns
+Nothing (setlogmask: the old mask).
+@see fprintf err
+@example
+#include <stdio.h>
+#include <syslog.h>
+
+int main(void)
+{
+    openlog("demo", LOG_PID, LOG_USER);
+    syslog(LOG_INFO, "started, %d workers", 4);
+    syslog(LOG_WARNING, "disk is %d%% full", 91);
+    closelog();
+    printf("two lines added to the system log\n");
+    return 0;
+}
+@end
+
+@entry err
+@also errx warn warnx verr verrx vwarn vwarnx
+@header err.h
+@syntax void err(int status, const char *fmt, ...);     /* print + strerror(errno), then exit(status) */
+@syntax void errx(int status, const char *fmt, ...);    /* print, then exit(status) */
+@syntax void warn(const char *fmt, ...);                /* print + strerror(errno) */
+@syntax void warnx(const char *fmt, ...);               /* print only */
+@syntax void verr / verrx / vwarn / vwarnx (..., va_list ap);
+@summary Print a "program: message" error on standard error (and maybe exit).
+@desc
+Short forms for the usual error message of a command-line tool:
+"prog: cannot open x.txt: No such file or directory". The ...x forms do
+not add the errno text. err and errx never return.
+@returns
+warn/warnx return; err/errx exit.
+@see perror strerror exit
+@example
+#include <stdio.h>
+#include <err.h>
+#include <fcntl.h>
+
+int main(void)
+{
+    if (open("/no/such/file", O_RDONLY) < 0)
+        warn("cannot open %s", "/no/such/file");
+    warnx("this one has no errno text");
+    printf("still running after warn\n");
+    return 0;
+}
+@end
+
+@entry dlopen
+@also dlsym dlerror dlclose dladdr RTLD_NOW RTLD_LAZY shared-library
+@header dlfcn.h
+@syntax void *dlopen(const char *file, int mode);
+@syntax void *dlsym(void *handle, const char *name);
+@syntax char *dlerror(void);
+@syntax int dlclose(void *handle);
+@syntax int dladdr(const void *addr, Dl_info *info);
+@summary Load a shared library while running (not supported yet in rozOS).
+@desc
+rozOS programs are linked statically, so there is nothing to load:
+dlopen(file) returns NULL and dlerror explains why; dlopen(NULL) gives a
+handle for the program itself, but dlsym still finds nothing. Programs
+that use plugins only if dlopen works run fine without them.
+@returns
+dlopen/dlsym: NULL in rozOS. dlerror: a message or NULL. dlclose: 0.
+@see main
+@example
+#include <stdio.h>
+#include <dlfcn.h>
+
+int main(void)
+{
+    void *lib = dlopen("libplugin.so", RTLD_NOW);
+    if (!lib) printf("no plugin: %s\n", dlerror());
+    return 0;
+}
+@end
+
+@entry hsearch
+@also hcreate hdestroy ENTRY ACTION FIND ENTER hash-table
+@header search.h
+@syntax int hcreate(size_t n);
+@syntax ENTRY *hsearch(ENTRY item, ACTION action);
+@syntax void hdestroy(void);
+@summary One simple hash table of string keys.
+@desc
+hcreate(n) makes the table (room for about n items). hsearch with ENTER
+adds item.key -> item.data (or finds it if already there), with FIND only
+looks. There is only one table per program; hdestroy removes it. The
+keys and data are not copied - keep them alive.
+@returns
+hcreate: non-zero on success. hsearch: the entry, or NULL.
+@see tsearch bsearch
+@example
+#include <stdio.h>
+#include <search.h>
+
+int main(void)
+{
+    ENTRY e, *found;
+    char *names[] = { "red", "green", "blue" };
+    char *codes[] = { "#ff0000", "#00ff00", "#0000ff" };
+    int i;
+    hcreate(16);
+    for (i = 0; i < 3; i++) {
+        e.key = names[i];
+        e.data = codes[i];
+        hsearch(e, ENTER);
+    }
+    e.key = "green";
+    found = hsearch(e, FIND);
+    printf("green = %s\n", found ? (char *)found->data : "?");
+    hdestroy();
+    return 0;
+}
+@end
+
+@entry tsearch
+@also tfind tdelete twalk tdestroy VISIT preorder postorder endorder leaf binary-tree
+@header search.h
+@syntax void *tsearch(const void *key, void **root, int (*cmp)(const void *, const void *));
+@syntax void *tfind(const void *key, void *const *root, int (*cmp)(const void *, const void *));
+@syntax void *tdelete(const void *key, void **root, int (*cmp)(const void *, const void *));
+@syntax void twalk(const void *root, void (*action)(const void *node, VISIT v, int depth));
+@syntax void tdestroy(void *root, void (*free_key)(void *));
+@summary A sorted (balanced) binary tree of your own items.
+@desc
+Start with void *root = NULL. tsearch adds key if missing; tfind only
+looks; tdelete removes. They return a pointer to the node, whose first
+field is your key: use *(T **)node. twalk visits every node - print on
+postorder or leaf to get sorted order. tdestroy frees the tree (and each
+key with free_key).
+@returns
+A node pointer, or NULL.
+@see hsearch qsort bsearch
+@example
+#include <stdio.h>
+#include <string.h>
+#include <search.h>
+
+static int cmp(const void *a, const void *b) { return strcmp(a, b); }
+
+static void show(const void *node, VISIT v, int depth)
+{
+    (void)depth;
+    if (v == postorder || v == leaf) printf("%s\n", *(char *const *)node);
+}
+
+int main(void)
+{
+    void *root = NULL;
+    char *words[] = { "pear", "apple", "fig", "apple", "kiwi" };
+    int i;
+    for (i = 0; i < 5; i++) tsearch(words[i], &root, cmp);   /* duplicate kept once */
+    printf("fig in tree? %s\n", tfind("fig", &root, cmp) ? "yes" : "no");
+    twalk(root, show);
+    return 0;
+}
+@end
+
+@entry lsearch
+@also lfind insque remque
+@header search.h
+@syntax void *lfind(const void *key, const void *base, size_t *n, size_t size, int (*cmp)(const void *, const void *));
+@syntax void *lsearch(const void *key, void *base, size_t *n, size_t size, int (*cmp)(const void *, const void *));
+@syntax void insque(void *elem, void *prev);
+@syntax void remque(void *elem);
+@summary Linear search in an array; doubly linked list helpers.
+@desc
+lfind looks through an unsorted array one by one (cmp returns 0 for a
+match). lsearch also adds key at the end if it is missing (the array must
+have room) and increases *n. insque / remque link an element into / out
+of a list whose elements start with two pointers (next, previous).
+@returns
+A pointer to the found (or added) element, or NULL.
+@see bsearch tsearch
+@example
+#include <stdio.h>
+#include <search.h>
+
+static int cmp_int(const void *a, const void *b) { return *(const int *)a != *(const int *)b; }
+
+int main(void)
+{
+    int list[10] = { 4, 8, 15 };
+    size_t n = 3, i;
+    int k = 16;
+    lsearch(&k, list, &n, sizeof list[0], cmp_int);     /* not there: added */
+    k = 8;
+    lsearch(&k, list, &n, sizeof list[0], cmp_int);     /* already there */
+    for (i = 0; i < n; i++) printf("%d ", list[i]);
+    printf("(%lu items)\n", (unsigned long)n);
+    return 0;
+}
+@end
+
+@entry feclearexcept
+@also feraiseexcept fetestexcept fegetexceptflag fesetexceptflag fegetenv fesetenv feholdexcept feupdateenv FE_DIVBYZERO FE_INVALID FE_OVERFLOW FE_UNDERFLOW FE_INEXACT FE_ALL_EXCEPT fenv_t fexcept_t
+@header fenv.h
+@syntax int feclearexcept(int e);   int feraiseexcept(int e);   int fetestexcept(int e);
+@syntax int fegetexceptflag(fexcept_t *f, int e);   int fesetexceptflag(const fexcept_t *f, int e);
+@syntax int fegetenv(fenv_t *env);   int fesetenv(const fenv_t *env);
+@syntax int feholdexcept(fenv_t *env);   int feupdateenv(const fenv_t *env);
+@summary Floating-point exception flags: did a calculation divide by zero, overflow ...?
+@desc
+The CPU sets a flag instead of stopping the program: FE_DIVBYZERO,
+FE_INVALID (like sqrt(-1)), FE_OVERFLOW, FE_UNDERFLOW, FE_INEXACT.
+Clear them, calculate, then fetestexcept. fegetenv/fesetenv save and
+restore the whole state (flags and rounding mode); feholdexcept saves it
+and clears the flags; feupdateenv restores it and raises again whatever
+was set meanwhile. The rounding mode is on the fenv page.
+@returns
+0 on success (fetestexcept: the flags that are set).
+@see fenv isnan
+@example
+#include <stdio.h>
+#include <math.h>
+#include <fenv.h>
+
+int main(void)
+{
+    volatile double zero = 0.0, x;
+    feclearexcept(FE_ALL_EXCEPT);
+    x = 1.0 / zero;
+    printf("1/0 = %f, divide-by-zero flag: %s\n", x, fetestexcept(FE_DIVBYZERO) ? "set" : "clear");
+    feclearexcept(FE_ALL_EXCEPT);
+    x = sqrt(-1.0 + zero);
+    printf("sqrt(-1) = %f, invalid flag: %s\n", x, fetestexcept(FE_INVALID) ? "set" : "clear");
+    return 0;
+}
+@end
+
+@entry imaxabs
+@also imaxdiv strtoimax strtoumax imaxdiv_t intmax_t uintmax_t PRIdMAX SCNd64
+@header inttypes.h
+@syntax intmax_t imaxabs(intmax_t v);
+@syntax imaxdiv_t imaxdiv(intmax_t a, intmax_t b);
+@syntax intmax_t strtoimax(const char *s, char **end, int base);
+@syntax uintmax_t strtoumax(const char *s, char **end, int base);
+@summary The largest integer type, and printf formats for exact-width integers.
+@desc
+intmax_t is the widest signed integer (64 bits in rozOS). imaxabs/imaxdiv
+are abs/div for it, strtoimax/strtoumax are strtoll/strtoull for it.
+inttypes.h also gives the printf/scanf pieces for <stdint.h> types:
+printf("%" PRId64, x) for int64_t, PRIu32, PRIx64, SCNd64 ... - the right
+format on every system.
+@returns
+As abs / div / strtoll.
+@see int64_t strtol abs
+@example
+#include <stdio.h>
+#include <stdint.h>
+#include <inttypes.h>
+
+int main(void)
+{
+    int64_t big = -9000000000LL;
+    uint32_t small = 4000000000u;
+    imaxdiv_t d = imaxdiv(100, 7);
+    printf("big = %" PRId64 ", small = %" PRIu32 ", hex %" PRIx64 "\n", big, small, (uint64_t)255);
+    printf("|big| = %" PRIdMAX "\n", imaxabs(big));
+    printf("100 / 7 = %" PRIdMAX " rest %" PRIdMAX "\n", d.quot, d.rem);
+    printf("parsed: %" PRIdMAX "\n", strtoimax("123456789012", NULL, 10));
+    return 0;
+}
+@end

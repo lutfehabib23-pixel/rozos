@@ -1,4 +1,4 @@
-# cref, crefview - the C reference (phase 19a)
+# cref, crefview - the C reference (phase 19a, 19b)
 Every function of the C library with its syntax, what it does, what it
 returns, and a small program that uses it - like the help of Turbo C.
 Also the C language itself: types, if/for/while, pointers, structs,
@@ -30,8 +30,22 @@ printf and scanf codes, operators, the preprocessor ...
 == What is covered ==
 Phase 19a: the C language, <stdio.h>, <stdlib.h>, <string.h>,
 <strings.h>, <ctype.h>, <math.h>, <time.h> - every function.
-Coming: POSIX (unistd, files, signals, threads, sockets ...) and the
-rozOS libraries (rozgfx, rozui, rozgame ...).
+Phase 19b: POSIX - every function of
+  files       <unistd.h> <fcntl.h> <sys/stat.h> <dirent.h> <sys/mman.h>
+              <sys/uio.h> <sys/ioctl.h> <sys/file.h> <utime.h>
+  processes   fork/exec/wait, <signal.h> <setjmp.h> <sys/time.h> <poll.h>
+              <sys/select.h> <sys/resource.h> <sys/times.h> <sys/utsname.h>
+              <sys/random.h> <sys/mount.h> <sys/reboot.h>
+  threads     <pthread.h> <semaphore.h> <sched.h>
+  network     <sys/socket.h> <netinet/in.h> <arpa/inet.h> <netdb.h>
+  text        <termios.h> <pty.h> <getopt.h> <regex.h> <fnmatch.h>
+              <glob.h> <libgen.h> <wchar.h> <wctype.h> <locale.h>
+              <langinfo.h> <iconv.h>
+  other       <pwd.h> <grp.h> <syslog.h> <err.h> <dlfcn.h> <search.h>
+              <fenv.h> <inttypes.h>
+Pages also say what rozOS does differently (one user, no symbolic
+links, no shared libraries ...). Try `cref -l` for the full list.
+Coming (19c): the rozOS libraries (rozgfx, rozui, rozgame, rozhttp ...).
 
 The pages are text files in /usr/share/cref (source: docs/cref in the
 rozOS tree). Every example is compiled and run when rozOS is built

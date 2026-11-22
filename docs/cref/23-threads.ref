@@ -1,0 +1,884 @@
+# rozOS C reference - threads: <pthread.h> <semaphore.h> <sched.h> (phase 19b)
+# Threads are part of the rozOS C library: no -lpthread needed
+# (it is accepted anyway). All threads of a process share its memory and
+# open files; each has its own stack.
+
+@entry pthread_create
+@also pthread_t threads thread
+@header pthread.h
+@syntax int pthread_create(pthread_t *t, const pthread_attr_t *attr, void *(*start)(void *), void *arg);
+@summary Start a new thread running start(arg).
+@desc
+The new thread runs alongside the caller. attr NULL gives the defaults
+(512 KiB stack, joinable). Pass data through arg - often a pointer to a
+struct - and make sure it stays valid while the thread uses it. The
+thread ends when start returns (its return value can be collected with
+pthread_join) or calls pthread_exit. Shared data needs a mutex.
+@returns
+0, or an error number (EAGAIN: no resources). pthread calls return the
+error number instead of setting errno.
+@see pthread_join pthread_mutex_lock pthread_attr_init
+@example
+#include <stdio.h>
+#include <pthread.h>
+
+struct job { int from, to; long sum; };
+
+static void *add_range(void *arg)
+{
+    struct job *j = arg;
+    int i;
+    for (i = j->from; i <= j->to; i++) j->sum += i;
+    return NULL;
+}
+
+int main(void)
+{
+    struct job jobs[4];
+    pthread_t t[4];
+    long total = 0;
+    int i;
+    for (i = 0; i < 4; i++) {
+        jobs[i].from = i * 250 + 1;
+        jobs[i].to = (i + 1) * 250;
+        jobs[i].sum = 0;
+        pthread_create(&t[i], NULL, add_range, &jobs[i]);
+    }
+    for (i = 0; i < 4; i++) {
+        pthread_join(t[i], NULL);
+        total += jobs[i].sum;
+    }
+    printf("1 + 2 + ... + 1000 = %ld\n", total);
+    return 0;
+}
+@end
+
+@entry pthread_join
+@also pthread_detach pthread_tryjoin_np pthread_timedjoin_np
+@header pthread.h
+@syntax int pthread_join(pthread_t t, void **result);
+@syntax int pthread_detach(pthread_t t);
+@syntax int pthread_tryjoin_np(pthread_t t, void **result);
+@syntax int pthread_timedjoin_np(pthread_t t, void **result, const struct timespec *abstime);
+@summary Wait for a thread to finish (or let it clean up by itself).
+@desc
+join waits and stores the thread's return value in *result (if not NULL).
+Every joinable thread must be joined or detached, or its memory is never
+freed. A detached thread frees itself when it ends and cannot be joined.
+tryjoin_np does not wait (EBUSY if still running); timedjoin_np waits until
+the absolute CLOCK_REALTIME time abstime (ETIMEDOUT). "_np" means
+"not portable" (Linux extensions).
+@returns
+0, or an error number.
+@see pthread_create pthread_exit
+@example
+#include <stdio.h>
+#include <stdint.h>
+#include <pthread.h>
+
+static void *square(void *arg)
+{
+    intptr_t n = (intptr_t)arg;
+    return (void *)(n * n);
+}
+
+int main(void)
+{
+    pthread_t t;
+    void *r;
+    pthread_create(&t, NULL, square, (void *)(intptr_t)12);
+    pthread_join(t, &r);
+    printf("thread returned %ld\n", (long)(intptr_t)r);
+    return 0;
+}
+@end
+
+@entry pthread_exit
+@also PTHREAD_CANCELED
+@header pthread.h
+@syntax void pthread_exit(void *result);
+@summary End the calling thread.
+@desc
+Same as returning result from the thread function. Thread-specific data
+destructors run. If the main thread calls pthread_exit, the process goes
+on until the last thread ends (exit() from any thread ends them all).
+@returns
+Does not return.
+@see pthread_join pthread_key_create
+@example
+#include <stdio.h>
+#include <pthread.h>
+
+static void *worker(void *arg)
+{
+    if (arg == NULL) pthread_exit("left early");
+    return "finished";
+}
+
+int main(void)
+{
+    pthread_t t;
+    void *r;
+    pthread_create(&t, NULL, worker, NULL);
+    pthread_join(t, &r);
+    printf("%s\n", (char *)r);
+    return 0;
+}
+@end
+
+@entry pthread_self
+@also pthread_equal pthread_gettid_np pthread_setname_np pthread_getname_np
+@header pthread.h
+@syntax pthread_t pthread_self(void);
+@syntax int pthread_equal(pthread_t a, pthread_t b);
+@syntax pid_t pthread_gettid_np(pthread_t t);
+@syntax int pthread_setname_np(pthread_t t, const char *name);
+@syntax int pthread_getname_np(pthread_t t, char *buf, size_t len);
+@summary Which thread am I?
+@desc
+Compare pthread_t values with pthread_equal, not ==. pthread_gettid_np
+gives the kernel thread id (like gettid). setname_np is accepted but the
+name is not kept in rozOS; getname_np always gives "rozthread".
+@returns
+self: the id. equal: non-zero if the same. Others: 0 or an error number.
+@see gettid pthread_create
+@example
+#include <stdio.h>
+#include <pthread.h>
+
+static pthread_t main_thread;
+
+static void *who(void *arg)
+{
+    (void)arg;
+    printf("worker is main? %s\n", pthread_equal(pthread_self(), main_thread) ? "yes" : "no");
+    return NULL;
+}
+
+int main(void)
+{
+    pthread_t t;
+    main_thread = pthread_self();
+    pthread_create(&t, NULL, who, NULL);
+    pthread_join(t, NULL);
+    return 0;
+}
+@end
+
+@entry pthread_mutex_lock
+@also pthread_mutex_unlock pthread_mutex_trylock pthread_mutex_timedlock pthread_mutex_init pthread_mutex_destroy pthread_mutex_consistent PTHREAD_MUTEX_INITIALIZER mutex pthread_mutex_t
+@header pthread.h
+@syntax int pthread_mutex_lock(pthread_mutex_t *m);
+@syntax int pthread_mutex_unlock(pthread_mutex_t *m);
+@syntax int pthread_mutex_trylock(pthread_mutex_t *m);
+@syntax int pthread_mutex_timedlock(pthread_mutex_t *m, const struct timespec *abstime);
+@syntax int pthread_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *attr);
+@syntax int pthread_mutex_destroy(pthread_mutex_t *m);
+@syntax pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
+@summary A lock: only one thread at a time runs the code between lock and unlock.
+@desc
+Without a mutex, two threads doing "count++" can lose updates. Lock
+before touching shared data, unlock right after; keep the locked part
+short. trylock gives EBUSY instead of waiting; timedlock gives ETIMEDOUT
+at the absolute time abstime. A static mutex can use the INITIALIZER; a
+mutex inside malloc'd memory needs pthread_mutex_init. Locking a normal
+mutex twice in the same thread deadlocks - see pthread_mutexattr_settype
+for recursive ones. A waiting thread sleeps (futex), it does not spin.
+@returns
+0, or an error number.
+@see pthread_cond_wait pthread_mutexattr_init pthread_spin_lock
+@example
+#include <stdio.h>
+#include <pthread.h>
+
+static long count;
+static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void *add(void *arg)
+{
+    int i;
+    (void)arg;
+    for (i = 0; i < 100000; i++) {
+        pthread_mutex_lock(&lock);
+        count++;
+        pthread_mutex_unlock(&lock);
+    }
+    return NULL;
+}
+
+int main(void)
+{
+    pthread_t t[4];
+    int i;
+    for (i = 0; i < 4; i++) pthread_create(&t[i], NULL, add, NULL);
+    for (i = 0; i < 4; i++) pthread_join(t[i], NULL);
+    printf("count = %ld (expected 400000)\n", count);
+    return 0;
+}
+@end
+
+@entry pthread_mutexattr_init
+@also pthread_mutexattr_destroy pthread_mutexattr_settype pthread_mutexattr_gettype pthread_mutexattr_setpshared pthread_mutexattr_getpshared pthread_mutexattr_setrobust pthread_mutexattr_getrobust pthread_mutexattr_setprotocol pthread_mutexattr_getprotocol PTHREAD_MUTEX_RECURSIVE PTHREAD_MUTEX_ERRORCHECK
+@header pthread.h
+@syntax int pthread_mutexattr_init(pthread_mutexattr_t *a);
+@syntax int pthread_mutexattr_settype(pthread_mutexattr_t *a, int type);
+@syntax int pthread_mutexattr_gettype(const pthread_mutexattr_t *a, int *type);
+@syntax int pthread_mutexattr_destroy(pthread_mutexattr_t *a);
+@syntax int pthread_mutexattr_setpshared / setrobust / setprotocol (pthread_mutexattr_t *a, int v);
+@syntax int pthread_mutexattr_getpshared / getrobust / getprotocol (const pthread_mutexattr_t *a, int *v);
+@summary Settings for a new mutex.
+@desc
+type: PTHREAD_MUTEX_NORMAL (default), PTHREAD_MUTEX_RECURSIVE (the same
+thread may lock again; unlock as many times), PTHREAD_MUTEX_ERRORCHECK
+(locking twice gives EDEADLK, unlocking someone else's EPERM). pshared,
+robust and protocol are stored but have no effect in rozOS.
+@returns
+0, or an error number.
+@see pthread_mutex_lock
+@example
+#include <stdio.h>
+#include <pthread.h>
+
+int main(void)
+{
+    pthread_mutexattr_t a;
+    pthread_mutex_t m;
+    pthread_mutexattr_init(&a);
+    pthread_mutexattr_settype(&a, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&m, &a);
+    pthread_mutexattr_destroy(&a);
+    pthread_mutex_lock(&m);
+    pthread_mutex_lock(&m);                 /* fine: recursive */
+    printf("locked twice by the same thread\n");
+    pthread_mutex_unlock(&m);
+    pthread_mutex_unlock(&m);
+    pthread_mutex_destroy(&m);
+    return 0;
+}
+@end
+
+@entry pthread_cond_wait
+@also pthread_cond_signal pthread_cond_broadcast pthread_cond_timedwait pthread_cond_init pthread_cond_destroy PTHREAD_COND_INITIALIZER pthread_cond_t
+@header pthread.h
+@syntax int pthread_cond_wait(pthread_cond_t *c, pthread_mutex_t *m);
+@syntax int pthread_cond_timedwait(pthread_cond_t *c, pthread_mutex_t *m, const struct timespec *abstime);
+@syntax int pthread_cond_signal(pthread_cond_t *c);
+@syntax int pthread_cond_broadcast(pthread_cond_t *c);
+@syntax int pthread_cond_init(pthread_cond_t *c, const pthread_condattr_t *attr);
+@syntax int pthread_cond_destroy(pthread_cond_t *c);
+@summary Sleep until another thread says "something changed".
+@desc
+A condition variable always goes with a mutex and a condition you can
+test. Pattern:
+  lock; while (!condition) pthread_cond_wait(&c, &m); use data; unlock
+cond_wait unlocks m while it sleeps and locks it again before returning.
+Always test in a while loop - a thread can wake without a real change.
+The other side changes the data under the lock, then calls signal (wake
+one waiter) or broadcast (wake all). timedwait gives ETIMEDOUT at the
+absolute time abstime (CLOCK_REALTIME unless set by condattr_setclock).
+@returns
+0, or an error number.
+@see pthread_mutex_lock sem_wait pthread_condattr_init
+@example
+#include <stdio.h>
+#include <pthread.h>
+
+static pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t ready = PTHREAD_COND_INITIALIZER;
+static int item, have_item;
+
+static void *producer(void *arg)
+{
+    int i;
+    (void)arg;
+    for (i = 1; i <= 3; i++) {
+        pthread_mutex_lock(&m);
+        while (have_item) pthread_cond_wait(&ready, &m);
+        item = i * 10;
+        have_item = 1;
+        pthread_cond_broadcast(&ready);
+        pthread_mutex_unlock(&m);
+    }
+    return NULL;
+}
+
+int main(void)
+{
+    pthread_t t;
+    int i;
+    pthread_create(&t, NULL, producer, NULL);
+    for (i = 0; i < 3; i++) {
+        pthread_mutex_lock(&m);
+        while (!have_item) pthread_cond_wait(&ready, &m);
+        printf("consumer got %d\n", item);
+        have_item = 0;
+        pthread_cond_broadcast(&ready);
+        pthread_mutex_unlock(&m);
+    }
+    pthread_join(t, NULL);
+    return 0;
+}
+@end
+
+@entry pthread_condattr_init
+@also pthread_condattr_destroy pthread_condattr_setclock pthread_condattr_getclock pthread_condattr_setpshared pthread_condattr_getpshared
+@header pthread.h
+@syntax int pthread_condattr_init(pthread_condattr_t *a);
+@syntax int pthread_condattr_setclock(pthread_condattr_t *a, clockid_t clock);
+@syntax int pthread_condattr_getclock(const pthread_condattr_t *a, clockid_t *clock);
+@syntax int pthread_condattr_setpshared(pthread_condattr_t *a, int pshared);
+@syntax int pthread_condattr_getpshared(const pthread_condattr_t *a, int *pshared);
+@syntax int pthread_condattr_destroy(pthread_condattr_t *a);
+@summary Settings for a new condition variable.
+@desc
+The useful one is setclock(&a, CLOCK_MONOTONIC): then timedwait times are
+measured on the clock that never jumps. pshared is stored only.
+@returns
+0, or an error number.
+@see pthread_cond_wait clock_gettime
+@example
+#include <stdio.h>
+#include <time.h>
+#include <errno.h>
+#include <pthread.h>
+
+int main(void)
+{
+    pthread_condattr_t a;
+    pthread_cond_t c;
+    pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
+    struct timespec until;
+    int r;
+    pthread_condattr_init(&a);
+    pthread_condattr_setclock(&a, CLOCK_MONOTONIC);
+    pthread_cond_init(&c, &a);
+    clock_gettime(CLOCK_MONOTONIC, &until);
+    until.tv_nsec += 100000000;                     /* 0.1 s from now */
+    if (until.tv_nsec >= 1000000000) { until.tv_sec++; until.tv_nsec -= 1000000000; }
+    pthread_mutex_lock(&m);
+    r = pthread_cond_timedwait(&c, &m, &until);
+    pthread_mutex_unlock(&m);
+    printf("timedwait: %s\n", r == ETIMEDOUT ? "timed out, as expected" : "woke up");
+    return 0;
+}
+@end
+
+@entry pthread_rwlock_rdlock
+@also pthread_rwlock_wrlock pthread_rwlock_unlock pthread_rwlock_tryrdlock pthread_rwlock_trywrlock pthread_rwlock_init pthread_rwlock_destroy pthread_rwlockattr_init pthread_rwlockattr_destroy PTHREAD_RWLOCK_INITIALIZER
+@header pthread.h
+@syntax int pthread_rwlock_rdlock(pthread_rwlock_t *l);
+@syntax int pthread_rwlock_wrlock(pthread_rwlock_t *l);
+@syntax int pthread_rwlock_unlock(pthread_rwlock_t *l);
+@syntax int pthread_rwlock_tryrdlock(pthread_rwlock_t *l);
+@syntax int pthread_rwlock_trywrlock(pthread_rwlock_t *l);
+@syntax int pthread_rwlock_init(pthread_rwlock_t *l, const pthread_rwlockattr_t *a);
+@syntax int pthread_rwlock_destroy(pthread_rwlock_t *l);
+@syntax int pthread_rwlockattr_init / pthread_rwlockattr_destroy(pthread_rwlockattr_t *a);
+@summary A lock that lets many readers in at once, but a writer alone.
+@desc
+Good for data that is read often and changed rarely (a settings table).
+Readers take rdlock, writers wrlock; both release with unlock.
+@returns
+0, or an error number (EBUSY from the try forms).
+@see pthread_mutex_lock
+@example
+#include <stdio.h>
+#include <pthread.h>
+
+static pthread_rwlock_t lock = PTHREAD_RWLOCK_INITIALIZER;
+static int setting = 1;
+
+static void *reader(void *arg)
+{
+    int v;
+    (void)arg;
+    pthread_rwlock_rdlock(&lock);
+    v = setting;
+    pthread_rwlock_unlock(&lock);
+    return (void *)(long)v;
+}
+
+int main(void)
+{
+    pthread_t t[3];
+    void *r;
+    int i;
+    pthread_rwlock_wrlock(&lock);
+    setting = 7;
+    pthread_rwlock_unlock(&lock);
+    for (i = 0; i < 3; i++) pthread_create(&t[i], NULL, reader, NULL);
+    for (i = 0; i < 3; i++) {
+        pthread_join(t[i], &r);
+        printf("reader %d saw %ld\n", i, (long)r);
+    }
+    return 0;
+}
+@end
+
+@entry pthread_spin_lock
+@also pthread_spin_unlock pthread_spin_trylock pthread_spin_init pthread_spin_destroy pthread_spinlock_t
+@header pthread.h
+@syntax int pthread_spin_init(pthread_spinlock_t *s, int pshared);
+@syntax int pthread_spin_lock(pthread_spinlock_t *s);
+@syntax int pthread_spin_trylock(pthread_spinlock_t *s);
+@syntax int pthread_spin_unlock(pthread_spinlock_t *s);
+@syntax int pthread_spin_destroy(pthread_spinlock_t *s);
+@summary A lock that busy-waits instead of sleeping.
+@desc
+Only worth it for very short locked parts. rozOS runs threads on one CPU,
+so a spinning thread just wastes its time slice - a mutex is usually the
+better choice.
+@returns
+0, or EBUSY from trylock.
+@see pthread_mutex_lock
+@example
+#include <stdio.h>
+#include <pthread.h>
+
+int main(void)
+{
+    pthread_spinlock_t s;
+    pthread_spin_init(&s, 0);
+    pthread_spin_lock(&s);
+    printf("trylock while held: %s\n", pthread_spin_trylock(&s) ? "busy" : "got it");
+    pthread_spin_unlock(&s);
+    pthread_spin_destroy(&s);
+    return 0;
+}
+@end
+
+@entry pthread_barrier_wait
+@also pthread_barrier_init pthread_barrier_destroy pthread_barrierattr_init pthread_barrierattr_destroy PTHREAD_BARRIER_SERIAL_THREAD
+@header pthread.h
+@syntax int pthread_barrier_init(pthread_barrier_t *b, const pthread_barrierattr_t *a, unsigned count);
+@syntax int pthread_barrier_wait(pthread_barrier_t *b);
+@syntax int pthread_barrier_destroy(pthread_barrier_t *b);
+@summary Make count threads wait for each other at a meeting point.
+@desc
+Each thread calls barrier_wait; all are held until the count-th arrives,
+then all go on. Exactly one of them gets PTHREAD_BARRIER_SERIAL_THREAD
+(it can do a once-per-round job). Used between steps of a computation
+split across threads.
+@returns
+PTHREAD_BARRIER_SERIAL_THREAD or 0; an error number on failure.
+@see pthread_create
+@example
+#include <stdio.h>
+#include <pthread.h>
+
+static pthread_barrier_t b;
+
+static void *step(void *arg)
+{
+    long id = (long)arg;
+    printf("thread %ld: part 1 done\n", id);
+    if (pthread_barrier_wait(&b) == PTHREAD_BARRIER_SERIAL_THREAD)
+        printf("--- everyone finished part 1 ---\n");
+    return NULL;
+}
+
+int main(void)
+{
+    pthread_t t[3];
+    long i;
+    pthread_barrier_init(&b, NULL, 3);
+    for (i = 0; i < 3; i++) pthread_create(&t[i], NULL, step, (void *)i);
+    for (i = 0; i < 3; i++) pthread_join(t[i], NULL);
+    pthread_barrier_destroy(&b);
+    return 0;
+}
+@end
+
+@entry pthread_once
+@also PTHREAD_ONCE_INIT pthread_once_t
+@header pthread.h
+@syntax int pthread_once(pthread_once_t *once, void (*init)(void));
+@syntax pthread_once_t once = PTHREAD_ONCE_INIT;
+@summary Run an init function exactly once, however many threads ask.
+@desc
+Threads that arrive while init is running wait for it to finish.
+@returns
+0.
+@see pthread_mutex_lock
+@example
+#include <stdio.h>
+#include <pthread.h>
+
+static pthread_once_t once = PTHREAD_ONCE_INIT;
+static int table[10];
+
+static void build(void)
+{
+    int i;
+    for (i = 0; i < 10; i++) table[i] = i * i;
+    printf("table built\n");
+}
+
+static void *use(void *arg)
+{
+    (void)arg;
+    pthread_once(&once, build);
+    return (void *)(long)table[9];
+}
+
+int main(void)
+{
+    pthread_t t[3];
+    void *r;
+    int i;
+    for (i = 0; i < 3; i++) pthread_create(&t[i], NULL, use, NULL);
+    for (i = 0; i < 3; i++) pthread_join(t[i], &r);
+    printf("table[9] = %ld\n", (long)r);
+    return 0;
+}
+@end
+
+@entry pthread_key_create
+@also pthread_key_delete pthread_setspecific pthread_getspecific pthread_key_t _Thread_local __thread
+@header pthread.h
+@syntax int pthread_key_create(pthread_key_t *key, void (*destructor)(void *));
+@syntax int pthread_setspecific(pthread_key_t key, const void *value);
+@syntax void *pthread_getspecific(pthread_key_t key);
+@syntax int pthread_key_delete(pthread_key_t key);
+@summary A variable that has a different value in every thread.
+@desc
+Make the key once; each thread then stores its own pointer with
+setspecific. When a thread ends, destructor(value) runs for its non-NULL
+values. (gcc also offers __thread / _Thread_local variables; tcc does not,
+so the key functions are the portable way in rozOS.)
+@returns
+create/set/delete: 0 or an error number. get: the value or NULL.
+@see pthread_once pthread_exit
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+
+static pthread_key_t name_key;
+
+static void say(const char *what)
+{
+    printf("[%s] %s\n", (char *)pthread_getspecific(name_key), what);
+}
+
+static void *worker(void *arg)
+{
+    pthread_setspecific(name_key, arg);
+    say("hello");
+    return NULL;
+}
+
+int main(void)
+{
+    pthread_t a, b;
+    pthread_key_create(&name_key, NULL);
+    pthread_create(&a, NULL, worker, "alpha");
+    pthread_join(a, NULL);
+    pthread_create(&b, NULL, worker, "beta");
+    pthread_join(b, NULL);
+    pthread_key_delete(name_key);
+    return 0;
+}
+@end
+
+@entry pthread_cancel
+@also pthread_testcancel pthread_setcancelstate pthread_setcanceltype PTHREAD_CANCEL_ENABLE PTHREAD_CANCEL_DISABLE
+@header pthread.h
+@syntax int pthread_cancel(pthread_t t);
+@syntax void pthread_testcancel(void);
+@syntax int pthread_setcancelstate(int state, int *old);
+@syntax int pthread_setcanceltype(int type, int *old);
+@summary Ask another thread to stop.
+@desc
+In rozOS cancellation is deferred and happens only at pthread_testcancel:
+the target thread calls it at safe points in its loop and, if asked to
+stop, ends there as if by pthread_exit(PTHREAD_CANCELED). setcancelstate
+with PTHREAD_CANCEL_DISABLE postpones it. A plain shared "stop" flag is
+often simpler.
+@returns
+0, or an error number.
+@see pthread_join pthread_exit
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <pthread.h>
+
+static void *busy(void *arg)
+{
+    long n = 0;
+    (void)arg;
+    for (;;) {
+        n++;
+        pthread_testcancel();             /* stops here when cancelled */
+        usleep(1000);
+    }
+    return NULL;
+}
+
+int main(void)
+{
+    pthread_t t;
+    void *r;
+    pthread_create(&t, NULL, busy, NULL);
+    usleep(20000);
+    pthread_cancel(t);
+    pthread_join(t, &r);
+    printf("thread %s\n", r == PTHREAD_CANCELED ? "was cancelled" : "ended");
+    return 0;
+}
+@end
+
+@entry pthread_kill
+@header pthread.h
+@syntax int pthread_kill(pthread_t t, int sig);
+@summary Send a signal to one thread of this process.
+@desc
+The handler runs in that thread. sig 0 only checks that the thread
+exists.
+@returns
+0, or an error number.
+@see kill pthread_sigmask
+@example
+#include <stdio.h>
+#include <signal.h>
+#include <pthread.h>
+
+static void on_usr1(int sig) { (void)sig; printf("handler ran in a thread\n"); }
+
+int main(void)
+{
+    signal(SIGUSR1, on_usr1);
+    pthread_kill(pthread_self(), SIGUSR1);
+    return 0;
+}
+@end
+
+@entry pthread_atfork
+@header pthread.h
+@syntax int pthread_atfork(void (*prepare)(void), void (*parent)(void), void (*child)(void));
+@summary Functions to run around fork() in a threaded program.
+@desc
+prepare runs before fork (typically: lock your mutexes), parent and child
+run after it in each process (unlock them). This keeps locks consistent in
+the child, which has only the thread that called fork. Any of the three
+may be NULL.
+@returns
+0, or an error number.
+@see fork pthread_mutex_lock
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <pthread.h>
+
+static void before(void) { printf("prepare\n"); fflush(stdout); }
+static void in_child(void) { printf("child side\n"); fflush(stdout); }
+
+int main(void)
+{
+    pthread_atfork(before, NULL, in_child);
+    if (fork() == 0) _exit(0);
+    wait(NULL);
+    printf("parent done\n");
+    return 0;
+}
+@end
+
+@entry pthread_attr_init
+@also pthread_attr_destroy pthread_attr_setdetachstate pthread_attr_getdetachstate pthread_attr_setstacksize pthread_attr_getstacksize pthread_attr_setstack pthread_attr_getstack pthread_attr_setguardsize pthread_attr_getguardsize pthread_attr_setscope pthread_attr_getscope pthread_attr_setinheritsched pthread_attr_getinheritsched pthread_attr_setschedpolicy pthread_attr_getschedpolicy pthread_attr_setschedparam pthread_attr_getschedparam pthread_getattr_np PTHREAD_CREATE_DETACHED PTHREAD_STACK_MIN
+@header pthread.h
+@syntax int pthread_attr_init(pthread_attr_t *a);
+@syntax int pthread_attr_setdetachstate(pthread_attr_t *a, int state);
+@syntax int pthread_attr_setstacksize(pthread_attr_t *a, size_t size);
+@syntax int pthread_attr_setstack(pthread_attr_t *a, void *addr, size_t size);
+@syntax int pthread_attr_get...(const pthread_attr_t *a, ... *out);
+@syntax int pthread_getattr_np(pthread_t t, pthread_attr_t *a);
+@syntax int pthread_attr_destroy(pthread_attr_t *a);
+@summary Settings for pthread_create.
+@desc
+The useful ones:
+  setdetachstate  PTHREAD_CREATE_DETACHED: start already detached
+  setstacksize    stack size (default 512 KiB, at least PTHREAD_STACK_MIN);
+                  more for deep recursion or big local arrays
+  setstack        use your own memory as the stack
+  setguardsize    the empty page that catches stack overflow
+scope must be PTHREAD_SCOPE_SYSTEM; the scheduling fields are stored but
+rozOS schedules every thread the same. getattr_np reads a running
+thread's settings.
+@returns
+0, or an error number (EINVAL for a too-small stack).
+@see pthread_create
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <pthread.h>
+
+static void *deep(void *arg)
+{
+    char big[768 * 1024];                    /* needs a bigger stack */
+    big[0] = 1;
+    big[sizeof big - 1] = 2;
+    (void)arg;
+    return (void *)(long)(big[0] + big[sizeof big - 1]);
+}
+
+int main(void)
+{
+    pthread_attr_t a;
+    pthread_t t;
+    size_t size;
+    void *r;
+    pthread_attr_init(&a);
+    pthread_attr_setstacksize(&a, 1024 * 1024);
+    pthread_attr_getstacksize(&a, &size);
+    pthread_create(&t, &a, deep, NULL);
+    pthread_attr_destroy(&a);
+    pthread_join(t, &r);
+    printf("stack %lu KiB, thread returned %ld\n", (unsigned long)(size / 1024), (long)r);
+    return 0;
+}
+@end
+
+@entry pthread_getschedparam
+@also pthread_setschedparam pthread_getconcurrency pthread_setconcurrency pthread_getcpuclockid pthread_yield
+@header pthread.h
+@syntax int pthread_getschedparam(pthread_t t, int *policy, struct sched_param *p);
+@syntax int pthread_setschedparam(pthread_t t, int policy, const struct sched_param *p);
+@syntax int pthread_getconcurrency(void);   int pthread_setconcurrency(int n);
+@syntax int pthread_getcpuclockid(pthread_t t, clockid_t *clock);
+@syntax int pthread_yield(void);
+@summary Scheduling details of a thread.
+@desc
+rozOS has one scheduling policy (SCHED_OTHER); set calls are accepted
+without effect. pthread_yield is sched_yield. getcpuclockid gives
+CLOCK_THREAD_CPUTIME_ID for use with clock_gettime.
+@returns
+0, or an error number.
+@see sched_yield clock_gettime
+@example
+#include <stdio.h>
+#include <pthread.h>
+#include <sched.h>
+
+int main(void)
+{
+    int policy;
+    struct sched_param p;
+    pthread_getschedparam(pthread_self(), &policy, &p);
+    printf("policy %s, priority %d\n", policy == SCHED_OTHER ? "SCHED_OTHER" : "other", p.sched_priority);
+    return 0;
+}
+@end
+
+@entry sem_init
+@also sem_wait sem_post sem_trywait sem_timedwait sem_getvalue sem_destroy sem_t semaphore
+@header semaphore.h
+@syntax int sem_init(sem_t *s, int pshared, unsigned value);
+@syntax int sem_wait(sem_t *s);
+@syntax int sem_post(sem_t *s);
+@syntax int sem_trywait(sem_t *s);
+@syntax int sem_timedwait(sem_t *s, const struct timespec *abstime);
+@syntax int sem_getvalue(sem_t *s, int *value);
+@syntax int sem_destroy(sem_t *s);
+@summary A counter that threads can wait on (a semaphore).
+@desc
+sem_wait takes one unit, waiting while the count is 0; sem_post gives one
+back and wakes a waiter. Start at N to let N threads use something at
+once, or at 0 to make one thread wait for another's signal. Unlike the
+pthread calls these return -1 and set errno (EAGAIN from trywait,
+ETIMEDOUT from timedwait).
+@returns
+0, or -1 with errno.
+@see pthread_cond_wait sem_open
+@example
+#include <stdio.h>
+#include <pthread.h>
+#include <semaphore.h>
+
+static sem_t done;
+
+static void *worker(void *arg)
+{
+    printf("worker %ld finished\n", (long)arg);
+    sem_post(&done);
+    return NULL;
+}
+
+int main(void)
+{
+    pthread_t t[3];
+    long i;
+    sem_init(&done, 0, 0);
+    for (i = 0; i < 3; i++) pthread_create(&t[i], NULL, worker, (void *)i);
+    for (i = 0; i < 3; i++) sem_wait(&done);        /* wait for all three */
+    printf("all workers reported\n");
+    for (i = 0; i < 3; i++) pthread_join(t[i], NULL);
+    sem_destroy(&done);
+    return 0;
+}
+@end
+
+@entry sem_open
+@also sem_close sem_unlink SEM_FAILED
+@header semaphore.h
+@syntax sem_t *sem_open(const char *name, int oflag, ...);
+@syntax int sem_close(sem_t *s);
+@syntax int sem_unlink(const char *name);
+@summary Named semaphores between processes (not supported in rozOS).
+@desc
+All three fail with ENOSYS. Between processes, put a sem_t (with
+pshared = 1) in shared memory from mmap(MAP_SHARED | MAP_ANONYMOUS) or
+shm_open, and use sem_init on it.
+@returns
+SEM_FAILED / -1 in rozOS.
+@see sem_init shm_open
+@example
+#include <stdio.h>
+#include <errno.h>
+#include <string.h>
+#include <fcntl.h>
+#include <semaphore.h>
+
+int main(void)
+{
+    sem_t *s = sem_open("/demo", O_CREAT, 0600, 1);
+    if (s == SEM_FAILED) printf("sem_open: %s\n", strerror(errno));
+    return 0;
+}
+@end
+
+@entry sched_yield
+@also sched_get_priority_max sched_get_priority_min sched_getparam sched_setparam sched_getscheduler sched_setscheduler sched_rr_get_interval sched_getaffinity sched_setaffinity sched_getcpu SCHED_OTHER SCHED_FIFO SCHED_RR sched_param cpu_set_t
+@header sched.h
+@syntax int sched_yield(void);
+@syntax int sched_getscheduler(pid_t pid);
+@syntax int sched_setscheduler(pid_t pid, int policy, const struct sched_param *p);
+@syntax int sched_getparam / sched_setparam(pid_t pid, struct sched_param *p);
+@syntax int sched_get_priority_max(int policy);   int sched_get_priority_min(int policy);
+@syntax int sched_rr_get_interval(pid_t pid, struct timespec *t);
+@syntax int sched_getaffinity / sched_setaffinity(pid_t pid, size_t size, cpu_set_t *set);
+@syntax int sched_getcpu(void);
+@summary The scheduler: give up the CPU, policies, CPUs.
+@desc
+sched_yield lets other threads and processes run now - useful in a wait
+loop. rozOS uses one round-robin policy with a 10 ms time slice on one
+CPU: getscheduler gives SCHED_OTHER, getcpu 0, getaffinity a set with CPU
+0. setscheduler accepts only SCHED_OTHER (EPERM otherwise); setparam and
+setaffinity are accepted without effect.
+@returns
+0 (or the asked value), -1 on error.
+@see pthread_yield nice
+@example
+#include <stdio.h>
+#include <time.h>
+#include <sched.h>
+
+int main(void)
+{
+    struct timespec slice;
+    sched_rr_get_interval(0, &slice);
+    printf("time slice %ld ms, running on CPU %d\n", slice.tv_nsec / 1000000, sched_getcpu());
+    sched_yield();
+    return 0;
+}
+@end

@@ -1,0 +1,740 @@
+# rozOS C reference - processes, signals, timers: <sys/wait.h> <signal.h>
+# <setjmp.h> <sys/time.h> <sys/resource.h> <sys/times.h> <sys/utsname.h>
+# <sys/random.h> <sys/mount.h> <sys/reboot.h> <poll.h> <sys/select.h>
+# (phase 19b)
+
+@entry waitpid
+@also wait WIFEXITED WEXITSTATUS WIFSIGNALED WTERMSIG WNOHANG
+@header sys/wait.h
+@syntax pid_t waitpid(pid_t pid, int *status, int options);
+@syntax pid_t wait(int *status);
+@summary Wait for a child process to end and get its exit status.
+@desc
+pid > 0 waits for that child, -1 for any child (wait(&s) is
+waitpid(-1, &s, 0)). With options WNOHANG it does not wait: 0 means
+"still running". Read status with the macros:
+  WIFEXITED(s)   ended normally - WEXITSTATUS(s) is its exit code
+  WIFSIGNALED(s) killed by a signal - WTERMSIG(s) is the signal
+Waiting also frees the child's slot (no zombie left behind).
+@returns
+The pid of the child that ended, 0 with WNOHANG, or -1 (ECHILD: none).
+@see fork execvp kill
+@example
+#include <stdio.h>
+#include <signal.h>
+#include <unistd.h>
+#include <sys/wait.h>
+
+int main(void)
+{
+    int s, i;
+    pid_t kids[2];
+    kids[0] = fork();
+    if (kids[0] == 0) _exit(3);
+    kids[1] = fork();
+    if (kids[1] == 0) { pause(); _exit(0); }       /* waits to be killed */
+    kill(kids[1], SIGTERM);
+    for (i = 0; i < 2; i++) {
+        waitpid(kids[i], &s, 0);
+        if (WIFEXITED(s)) printf("child %d exited with %d\n", i, WEXITSTATUS(s));
+        else if (WIFSIGNALED(s)) printf("child %d killed by signal %d\n", i, WTERMSIG(s));
+    }
+    return 0;
+}
+@end
+
+@entry signal
+@also bsd_signal sysv_signal SIG_IGN SIG_DFL SIG_ERR sighandler_t sig_atomic_t SIGINT SIGTERM SIGKILL SIGCHLD SIGPIPE SIGSEGV SIGUSR1 SIGUSR2
+@header signal.h
+@syntax void (*signal(int sig, void (*handler)(int)))(int);
+@syntax sighandler_t signal(int sig, sighandler_t handler);
+@summary Choose what happens when a signal arrives.
+@desc
+A signal is a small message from the kernel or another process: SIGINT
+(Ctrl+C), SIGTERM (please stop), SIGKILL (cannot be caught), SIGSEGV
+(bad memory access), SIGPIPE (wrote to a pipe nobody reads), SIGCHLD (a
+child ended), SIGALRM, SIGUSR1/SIGUSR2 (for your own use).
+handler is a function, SIG_IGN (ignore) or SIG_DFL (default action).
+A handler should do very little - set a volatile sig_atomic_t flag and
+return. In rozOS signal() keeps the handler and restarts interrupted calls
+(BSD style); sysv_signal resets it after one use. sigaction gives full
+control.
+@returns
+The previous handler, or SIG_ERR.
+@see sigaction raise kill alarm
+@example
+#include <stdio.h>
+#include <signal.h>
+
+static volatile sig_atomic_t got;
+
+static void on_usr1(int sig) { got = sig; }
+
+int main(void)
+{
+    signal(SIGUSR1, on_usr1);
+    raise(SIGUSR1);
+    printf("handler saw signal %d\n", (int)got);
+    signal(SIGPIPE, SIG_IGN);            /* write() gives EPIPE instead of dying */
+    return 0;
+}
+@end
+
+@entry raise
+@header signal.h
+@syntax int raise(int sig);
+@summary Send a signal to yourself (the calling thread).
+@desc
+The handler runs before raise returns. raise(SIGABRT) is what abort does.
+@returns
+0, or non-zero on failure.
+@see signal kill abort
+@example
+#include <stdio.h>
+#include <signal.h>
+
+static void hello(int sig) { printf("in handler for %d\n", sig); }
+
+int main(void)
+{
+    signal(SIGUSR2, hello);
+    printf("before raise\n");
+    raise(SIGUSR2);
+    printf("after raise\n");
+    return 0;
+}
+@end
+
+@entry kill
+@also killpg tgkill
+@header signal.h
+@syntax int kill(pid_t pid, int sig);
+@syntax int killpg(pid_t pgrp, int sig);
+@syntax int tgkill(pid_t tgid, pid_t tid, int sig);
+@summary Send a signal to another process (or group, or thread).
+@desc
+pid > 0: that process. pid 0: my process group. pid < -1: the group -pid
+(killpg does the same). sig 0 sends nothing but checks the process
+exists. tgkill aims at one thread. The shell's kill command uses kill().
+@returns
+0, or -1 (ESRCH: no such process).
+@see signal waitpid setpgid
+@example
+#include <stdio.h>
+#include <signal.h>
+#include <unistd.h>
+#include <sys/wait.h>
+
+int main(void)
+{
+    int s;
+    pid_t pid = fork();
+    if (pid == 0) { for (;;) pause(); }
+    printf("child alive? %s\n", kill(pid, 0) == 0 ? "yes" : "no");
+    kill(pid, SIGKILL);
+    waitpid(pid, &s, 0);
+    printf("child ended by signal %d\n", WTERMSIG(s));
+    return 0;
+}
+@end
+
+@entry sigaction
+@also struct-sigaction SA_RESTART SA_SIGINFO SA_RESETHAND SA_NODEFER siginfo_t sa_handler sa_sigaction
+@header signal.h
+@syntax int sigaction(int sig, const struct sigaction *act, struct sigaction *old);
+@summary Install a signal handler with full control.
+@desc
+Fill a struct sigaction:
+  sa_handler   void f(int) - or sa_sigaction void f(int, siginfo_t *, void *)
+               together with SA_SIGINFO, to learn who sent it and why
+  sa_mask      signals blocked while the handler runs
+  sa_flags     SA_RESTART (restart interrupted read/write...),
+               SA_RESETHAND (one shot), SA_NODEFER, SA_SIGINFO
+old (if not NULL) receives the previous setting; act NULL only reads.
+@returns
+0, or -1.
+@see signal sigemptyset sigprocmask
+@example
+#include <stdio.h>
+#include <string.h>
+#include <signal.h>
+#include <unistd.h>
+
+static void info(int sig, siginfo_t *si, void *ctx)
+{
+    (void)ctx;
+    printf("signal %d sent by pid %d\n", sig, (int)si->si_pid);
+}
+
+int main(void)
+{
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = info;
+    sa.sa_flags = SA_SIGINFO | SA_RESTART;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGUSR1, &sa, NULL);
+    kill(getpid(), SIGUSR1);
+    return 0;
+}
+@end
+
+@entry sigemptyset
+@also sigfillset sigaddset sigdelset sigismember sigisemptyset sigandset sigorset sigset_t
+@header signal.h
+@syntax int sigemptyset(sigset_t *set);
+@syntax int sigfillset(sigset_t *set);
+@syntax int sigaddset(sigset_t *set, int sig);
+@syntax int sigdelset(sigset_t *set, int sig);
+@syntax int sigismember(const sigset_t *set, int sig);
+@syntax int sigisemptyset(const sigset_t *set);
+@syntax int sigandset(sigset_t *dst, const sigset_t *a, const sigset_t *b);
+@syntax int sigorset(sigset_t *dst, const sigset_t *a, const sigset_t *b);
+@summary Build a set of signals (for sigprocmask, sigaction, sigwait).
+@desc
+Always start with sigemptyset or sigfillset. sigandset/sigorset combine
+two sets.
+@returns
+0 (sigismember / sigisemptyset: 1 or 0); -1 for a bad signal number.
+@see sigprocmask sigaction sigwait
+@example
+#include <stdio.h>
+#include <signal.h>
+
+int main(void)
+{
+    sigset_t s;
+    sigemptyset(&s);
+    sigaddset(&s, SIGINT);
+    sigaddset(&s, SIGTERM);
+    printf("SIGINT in set:  %d\n", sigismember(&s, SIGINT));
+    printf("SIGHUP in set:  %d\n", sigismember(&s, SIGHUP));
+    sigdelset(&s, SIGINT);
+    printf("SIGINT removed: %d\n", sigismember(&s, SIGINT));
+    return 0;
+}
+@end
+
+@entry sigprocmask
+@also pthread_sigmask sigpending sigsuspend SIG_BLOCK SIG_UNBLOCK SIG_SETMASK
+@header signal.h
+@syntax int sigprocmask(int how, const sigset_t *set, sigset_t *old);
+@syntax int pthread_sigmask(int how, const sigset_t *set, sigset_t *old);
+@syntax int sigpending(sigset_t *set);
+@syntax int sigsuspend(const sigset_t *mask);
+@summary Block signals for a while; see which are waiting.
+@desc
+A blocked signal is not lost: it waits (is "pending") until unblocked.
+how is SIG_BLOCK (add set), SIG_UNBLOCK (remove set) or SIG_SETMASK
+(replace). Use it to protect a critical piece of code. pthread_sigmask is
+the same for the calling thread (returns an error number, not -1).
+sigsuspend swaps in mask and waits for a signal in one safe step.
+@returns
+0, or -1 (pthread_sigmask: 0 or an error number).
+@see sigemptyset sigaction sigwait
+@example
+#include <stdio.h>
+#include <signal.h>
+
+static void on_int(int sig) { (void)sig; printf("SIGINT delivered now\n"); }
+
+int main(void)
+{
+    sigset_t block, waiting;
+    signal(SIGINT, on_int);
+    sigemptyset(&block);
+    sigaddset(&block, SIGINT);
+    sigprocmask(SIG_BLOCK, &block, NULL);
+    raise(SIGINT);                               /* held back */
+    sigpending(&waiting);
+    printf("pending while blocked: %d\n", sigismember(&waiting, SIGINT));
+    sigprocmask(SIG_UNBLOCK, &block, NULL);      /* handler runs here */
+    printf("done\n");
+    return 0;
+}
+@end
+
+@entry sigwait
+@also sigwaitinfo sigtimedwait sigqueue sigval
+@header signal.h
+@syntax int sigwait(const sigset_t *set, int *sig);
+@syntax int sigwaitinfo(const sigset_t *set, siginfo_t *info);
+@syntax int sigtimedwait(const sigset_t *set, siginfo_t *info, const struct timespec *timeout);
+@syntax int sigqueue(pid_t pid, int sig, const union sigval value);
+@summary Wait for a blocked signal instead of using a handler.
+@desc
+Block the signals first (sigprocmask), then a loop calls sigwait and acts
+on each one in normal code - no handler rules to worry about.
+sigtimedwait gives up after the timeout (EAGAIN). sigqueue sends a signal;
+in rozOS the extra value is not delivered (it acts like kill).
+@returns
+sigwait: 0 or an error number. The others: the signal number, or -1.
+@see sigprocmask kill
+@example
+#include <stdio.h>
+#include <signal.h>
+#include <unistd.h>
+
+int main(void)
+{
+    sigset_t s;
+    int sig;
+    sigemptyset(&s);
+    sigaddset(&s, SIGUSR1);
+    sigprocmask(SIG_BLOCK, &s, NULL);
+    kill(getpid(), SIGUSR1);
+    if (sigwait(&s, &sig) == 0)
+        printf("sigwait got signal %d\n", sig);
+    return 0;
+}
+@end
+
+@entry sigaltstack
+@also stack_t SA_ONSTACK MINSIGSTKSZ SIGSTKSZ
+@header signal.h
+@syntax int sigaltstack(const stack_t *ss, stack_t *old);
+@summary Give signal handlers their own stack.
+@desc
+Needed to catch a stack overflow (SIGSEGV when the normal stack is full):
+the handler must run somewhere else. Fill stack_t { ss_sp, ss_size,
+ss_flags = 0 } with memory of at least MINSIGSTKSZ bytes, then install the
+handler with SA_ONSTACK in sa_flags.
+@returns
+0, or -1.
+@see sigaction
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <signal.h>
+
+static void on_usr1(int sig) { int here; (void)sig; printf("handler stack at %p\n", (void *)&here); }
+
+int main(void)
+{
+    stack_t ss;
+    struct sigaction sa;
+    int here;
+    ss.ss_sp = malloc(SIGSTKSZ);
+    ss.ss_size = SIGSTKSZ;
+    ss.ss_flags = 0;
+    if (sigaltstack(&ss, NULL) < 0) { perror("sigaltstack"); return 1; }
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_usr1;
+    sa.sa_flags = SA_ONSTACK;
+    sigaction(SIGUSR1, &sa, NULL);
+    printf("main stack at    %p\n", (void *)&here);
+    raise(SIGUSR1);
+    return 0;
+}
+@end
+
+@entry psignal
+@also psiginfo sys_siglist
+@header signal.h
+@syntax void psignal(int sig, const char *msg);
+@syntax void psiginfo(const siginfo_t *info, const char *msg);
+@summary Print a signal's name on standard error (like perror).
+@desc
+Prints "msg: Interrupt" and so on. strsignal(sig) gives the same text as
+a string.
+@returns
+Nothing.
+@see strsignal perror
+@example
+#include <stdio.h>
+#include <signal.h>
+
+int main(void)
+{
+    psignal(SIGINT, "SIGINT is");
+    psignal(SIGSEGV, "SIGSEGV is");
+    return 0;
+}
+@end
+
+@entry sighold
+@also sigrelse sigignore sigpause siginterrupt
+@header signal.h
+@syntax int sighold(int sig);
+@syntax int sigrelse(int sig);
+@syntax int sigignore(int sig);
+@syntax int sigpause(int sig);
+@syntax int siginterrupt(int sig, int flag);
+@summary Older one-signal shortcuts.
+@desc
+sighold/sigrelse block/unblock one signal, sigignore sets SIG_IGN,
+sigpause unblocks sig and waits. siginterrupt(sig, 1) makes the signal
+interrupt slow calls (EINTR) instead of restarting them. New code uses
+sigprocmask and sigaction.
+@returns
+0, or -1.
+@see sigprocmask sigaction
+@example
+#include <stdio.h>
+#include <signal.h>
+
+int main(void)
+{
+    sigset_t s;
+    sighold(SIGTERM);
+    sigprocmask(SIG_BLOCK, NULL, &s);
+    printf("SIGTERM blocked: %d\n", sigismember(&s, SIGTERM));
+    sigrelse(SIGTERM);
+    sigprocmask(SIG_BLOCK, NULL, &s);
+    printf("SIGTERM blocked: %d\n", sigismember(&s, SIGTERM));
+    return 0;
+}
+@end
+
+@entry setjmp
+@also longjmp sigsetjmp siglongjmp jmp_buf sigjmp_buf
+@header setjmp.h
+@syntax int setjmp(jmp_buf env);
+@syntax void longjmp(jmp_buf env, int value);
+@syntax int sigsetjmp(sigjmp_buf env, int savemask);
+@syntax void siglongjmp(sigjmp_buf env, int value);
+@summary Jump back to an earlier point, out of nested function calls.
+@desc
+setjmp saves "where we are" and returns 0. A later longjmp(env, v) from
+any deeper function comes back to that setjmp, which now returns v (1 if
+v was 0). C's way to escape from deep errors, like an exception. The
+function that called setjmp must not have returned yet. Local variables
+changed after setjmp should be volatile. sigsetjmp(env, 1) also saves the
+blocked-signal set, so siglongjmp out of a signal handler is safe.
+@returns
+setjmp: 0 the first time, the longjmp value after a jump.
+@see signal exit
+@example
+#include <stdio.h>
+#include <setjmp.h>
+
+static jmp_buf on_error;
+
+static void parse_digit(char c)
+{
+    if (c < '0' || c > '9') longjmp(on_error, c);
+    printf("digit %c ok\n", c);
+}
+
+int main(void)
+{
+    const char *text = "12x4";
+    volatile int i = 0;
+    int bad = setjmp(on_error);
+    if (bad) {
+        printf("error: '%c' is not a digit\n", bad);
+        return 0;
+    }
+    for (; text[i]; i++) parse_digit(text[i]);
+    return 0;
+}
+@end
+
+@entry gettimeofday
+@also settimeofday timeval
+@header sys/time.h
+@syntax int gettimeofday(struct timeval *tv, void *tz);
+@syntax int settimeofday(const struct timeval *tv, const void *tz);
+@summary Current time in seconds and microseconds.
+@desc
+struct timeval { time_t tv_sec; suseconds_t tv_usec; }. Pass NULL for tz.
+Good for measuring how long something takes (clock_gettime with
+CLOCK_MONOTONIC is better: it never jumps). settimeofday is refused
+(EPERM): the clock comes from the hardware clock.
+@returns
+0, or -1.
+@see time clock_gettime
+@example
+#include <stdio.h>
+#include <sys/time.h>
+
+int main(void)
+{
+    struct timeval a, b;
+    volatile long sum = 0;
+    long i, us;
+    gettimeofday(&a, NULL);
+    for (i = 0; i < 3000000; i++) sum += i;
+    gettimeofday(&b, NULL);
+    us = (b.tv_sec - a.tv_sec) * 1000000L + (b.tv_usec - a.tv_usec);
+    printf("loop took about %ld ms\n", us / 1000);
+    return 0;
+}
+@end
+
+@entry setitimer
+@also getitimer itimerval ITIMER_REAL
+@header sys/time.h
+@syntax int setitimer(int which, const struct itimerval *new, struct itimerval *old);
+@syntax int getitimer(int which, struct itimerval *cur);
+@summary A repeating timer that sends SIGALRM.
+@desc
+which is ITIMER_REAL. struct itimerval has it_value (first expiry) and
+it_interval (period after that; zero = one shot). Each expiry sends
+SIGALRM. Set both to zero to stop it.
+@returns
+0, or -1.
+@see alarm signal
+@example
+#include <stdio.h>
+#include <signal.h>
+#include <unistd.h>
+#include <sys/time.h>
+
+static volatile sig_atomic_t ticks;
+
+static void tick(int sig) { (void)sig; ticks++; }
+
+int main(void)
+{
+    struct itimerval t = {{0, 100000}, {0, 100000}};   /* every 0.1 s */
+    signal(SIGALRM, tick);
+    setitimer(ITIMER_REAL, &t, NULL);
+    while (ticks < 5) pause();
+    t.it_value.tv_usec = t.it_interval.tv_usec = 0;
+    setitimer(ITIMER_REAL, &t, NULL);                   /* stop */
+    printf("%d ticks\n", (int)ticks);
+    return 0;
+}
+@end
+
+@entry getrlimit
+@also setrlimit getrusage getpriority setpriority rlimit RLIMIT_NOFILE RLIMIT_STACK
+@header sys/resource.h
+@syntax int getrlimit(int resource, struct rlimit *r);
+@syntax int setrlimit(int resource, const struct rlimit *r);
+@syntax int getrusage(int who, struct rusage *u);
+@syntax int getpriority(int which, id_t who);
+@syntax int setpriority(int which, id_t who, int prio);
+@summary Resource limits and usage.
+@desc
+rozOS reports fixed limits: RLIMIT_NOFILE 256 descriptors, RLIMIT_STACK
+8 MiB, everything else unlimited (RLIM_INFINITY). setrlimit is accepted
+but changes nothing. getrusage fills ru_utime with the CPU time used
+(other fields 0). get/setpriority: always priority 0.
+@returns
+0, or -1.
+@see sysconf clock times
+@example
+#include <stdio.h>
+#include <sys/resource.h>
+
+int main(void)
+{
+    struct rlimit r;
+    getrlimit(RLIMIT_NOFILE, &r);
+    printf("open files: up to %ld\n", (long)r.rlim_cur);
+    getrlimit(RLIMIT_STACK, &r);
+    printf("stack: %ld KiB\n", (long)(r.rlim_cur / 1024));
+    return 0;
+}
+@end
+
+@entry times
+@also tms
+@header sys/times.h
+@syntax clock_t times(struct tms *t);
+@summary CPU time used by the process (and its children).
+@desc
+Fills tms_utime, tms_stime, tms_cutime, tms_cstime in clock ticks
+(sysconf(_SC_CLK_TCK) per second).
+@returns
+Ticks since some point in the past, or (clock_t)-1.
+@see clock getrusage
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/times.h>
+
+int main(void)
+{
+    struct tms t;
+    volatile double x = 0;
+    long i;
+    for (i = 0; i < 5000000; i++) x += i * 0.5;
+    times(&t);
+    printf("user CPU: %.2f s\n", (double)t.tms_utime / sysconf(_SC_CLK_TCK));
+    return 0;
+}
+@end
+
+@entry uname
+@also utsname
+@header sys/utsname.h
+@syntax int uname(struct utsname *u);
+@summary System name, computer name, version and machine.
+@desc
+Fields: sysname ("rozOS"), nodename (from /etc/hostname), release,
+version, machine ("x86_64"). The uname command prints them.
+@returns
+0, or -1.
+@see gethostname
+@example
+#include <stdio.h>
+#include <sys/utsname.h>
+
+int main(void)
+{
+    struct utsname u;
+    if (uname(&u) < 0) return 1;
+    printf("%s on %s (%s)\n", u.sysname, u.machine, u.nodename);
+    return 0;
+}
+@end
+
+@entry getrandom
+@also getentropy
+@header sys/random.h
+@syntax ssize_t getrandom(void *buf, size_t len, unsigned flags);
+@syntax int getentropy(void *buf, size_t len);
+@summary Fill a buffer with random bytes from the kernel.
+@desc
+Good for keys, seeds and unique names (unlike rand, which repeats the
+same series). getentropy is the simple form for up to 256 bytes. Also
+available as the file /dev/urandom.
+@returns
+getrandom: bytes written or -1. getentropy: 0 or -1.
+@see rand srand
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/random.h>
+
+int main(void)
+{
+    unsigned char key[8];
+    unsigned seed;
+    int i;
+    if (getentropy(key, sizeof key) < 0) return 1;
+    printf("key: ");
+    for (i = 0; i < 8; i++) printf("%02x", key[i]);
+    printf("\n");
+    getrandom(&seed, sizeof seed, 0);
+    srand(seed);                            /* a different series every run */
+    return 0;
+}
+@end
+
+@entry mount
+@also umount umount2
+@header sys/mount.h
+@syntax int mount(const char *src, const char *target, const char *type, unsigned long flags, const void *data);
+@syntax int umount(const char *target);
+@syntax int umount2(const char *target, int flags);
+@summary Attach a file system (a disk partition) to a directory.
+@desc
+Example: mount("/dev/sdb1", "/mnt/usb", "fat", 0, NULL). The mount and
+umount commands use these. Types in rozOS include "ext2" and "fat".
+@returns
+0, or -1.
+@see opendir
+@check compile
+@example
+#include <stdio.h>
+#include <sys/mount.h>
+
+int main(void)
+{
+    if (mount("/dev/sdb1", "/mnt", "fat", 0, NULL) < 0) {
+        perror("mount");
+        return 1;
+    }
+    printf("mounted\n");
+    umount("/mnt");
+    return 0;
+}
+@end
+
+@entry reboot
+@also RB_AUTOBOOT RB_POWER_OFF
+@header sys/reboot.h
+@syntax int reboot(int cmd);
+@summary Restart or power off the computer.
+@desc
+cmd is RB_AUTOBOOT (restart) or RB_POWER_OFF. The reboot and poweroff
+commands call it after syncing the disks.
+@returns
+Does not return on success; -1 on failure.
+@see sync
+@check compile
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/reboot.h>
+
+int main(void)
+{
+    sync();
+    reboot(RB_POWER_OFF);
+    perror("reboot");
+    return 1;
+}
+@end
+
+@entry poll
+@also pollfd POLLIN POLLOUT POLLHUP POLLERR nfds_t
+@header poll.h
+@syntax int poll(struct pollfd *fds, nfds_t n, int timeout_ms);
+@summary Wait until one of several descriptors is ready.
+@desc
+Each struct pollfd has fd, events (what you want: POLLIN to read, POLLOUT
+to write) and revents (what happened, filled in; also POLLHUP, POLLERR).
+timeout_ms: -1 waits forever, 0 just checks. This is how a program serves
+a keyboard, a socket and a pipe at the same time without threads.
+@returns
+Number of ready descriptors, 0 on timeout, -1 on error.
+@see select read
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <poll.h>
+
+int main(void)
+{
+    int fds[2], n;
+    struct pollfd p;
+    pipe(fds);
+    p.fd = fds[0];
+    p.events = POLLIN;
+    printf("empty pipe ready: %d\n", poll(&p, 1, 100));
+    write(fds[1], "x", 1);
+    n = poll(&p, 1, 100);
+    printf("after write ready: %d (revents %s)\n", n, p.revents & POLLIN ? "POLLIN" : "-");
+    return 0;
+}
+@end
+
+@entry select
+@also pselect fd_set FD_ZERO FD_SET FD_CLR FD_ISSET FD_SETSIZE
+@header sys/select.h
+@syntax int select(int nfds, fd_set *rd, fd_set *wr, fd_set *ex, struct timeval *timeout);
+@syntax int pselect(int nfds, fd_set *rd, fd_set *wr, fd_set *ex, const struct timespec *timeout, const sigset_t *mask);
+@summary The older way to wait for several descriptors.
+@desc
+Build sets with FD_ZERO and FD_SET; nfds is the highest descriptor + 1.
+On return the sets hold only the ready ones - test with FD_ISSET, and
+build them again before the next call. timeout NULL waits forever.
+poll is easier for new code.
+@returns
+Number of ready descriptors, 0 on timeout, -1 on error.
+@see poll
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/select.h>
+
+int main(void)
+{
+    int fds[2];
+    fd_set rd;
+    struct timeval tv = {0, 100000};
+    pipe(fds);
+    write(fds[1], "hi", 2);
+    FD_ZERO(&rd);
+    FD_SET(fds[0], &rd);
+    if (select(fds[0] + 1, &rd, NULL, NULL, &tv) > 0 && FD_ISSET(fds[0], &rd))
+        printf("pipe has data\n");
+    return 0;
+}
+@end

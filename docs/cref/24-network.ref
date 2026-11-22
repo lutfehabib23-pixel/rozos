@@ -1,0 +1,503 @@
+# rozOS C reference - networking: <sys/socket.h> <netinet/in.h>
+# <arpa/inet.h> <netdb.h> <sys/un.h> (phase 19b)
+# rozOS has TCP and UDP over IPv4 (the lwIP stack), the loopback address
+# 127.0.0.1, and AF_UNIX sockets between programs on the same computer.
+# For HTTP and HTTPS the easier way is librozhttp (help rozhttp).
+
+@entry socket
+@also AF_INET AF_UNIX AF_LOCAL SOCK_STREAM SOCK_DGRAM SOCK_NONBLOCK SOCK_CLOEXEC sockets sockaddr sockaddr_un
+@header sys/socket.h
+@syntax int socket(int domain, int type, int protocol);
+@summary Make a network endpoint (a socket) and get a descriptor for it.
+@desc
+domain:  AF_INET (IPv4 network) or AF_UNIX (programs on this computer,
+         addressed by a path in struct sockaddr_un from <sys/un.h>)
+type:    SOCK_STREAM (TCP: a reliable connection) or SOCK_DGRAM (UDP:
+         single messages); may add SOCK_NONBLOCK, SOCK_CLOEXEC
+protocol: 0
+A client then calls connect; a server bind, listen and accept. Read and
+write work on a connected socket like on a file; close it when done.
+@returns
+A descriptor, or -1.
+@see connect bind send close
+@example
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/wait.h>
+
+/* two processes talk over an AF_UNIX stream socket */
+int main(void)
+{
+    struct sockaddr_un a;
+    char buf[64];
+    ssize_t n;
+    int srv = socket(AF_UNIX, SOCK_STREAM, 0), c;
+
+    memset(&a, 0, sizeof a);
+    a.sun_family = AF_UNIX;
+    strcpy(a.sun_path, "demo.sock");
+    unlink(a.sun_path);
+    if (bind(srv, (struct sockaddr *)&a, sizeof a) < 0 || listen(srv, 1) < 0) { perror("server"); return 1; }
+
+    if (fork() == 0) {                       /* client */
+        int s = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (connect(s, (struct sockaddr *)&a, sizeof a) < 0) _exit(1);
+        write(s, "hello server", 12);
+        close(s);
+        _exit(0);
+    }
+    c = accept(srv, NULL, NULL);
+    n = read(c, buf, sizeof buf - 1);
+    buf[n > 0 ? n : 0] = '\0';
+    printf("server got: %s\n", buf);
+    close(c);
+    close(srv);
+    wait(NULL);
+    unlink(a.sun_path);
+    return 0;
+}
+@end
+
+@entry connect
+@also sockaddr_in sin_family sin_port sin_addr
+@header sys/socket.h
+@syntax int connect(int fd, const struct sockaddr *addr, socklen_t len);
+@summary Connect a socket to a server (client side).
+@desc
+For TCP fill a struct sockaddr_in: sin_family = AF_INET, sin_port =
+htons(port), sin_addr from inet_pton or getaddrinfo; pass it cast to
+(struct sockaddr *). connect waits until the connection is made (or
+fails: ECONNREFUSED - nobody listens; ETIMEDOUT). On a UDP socket it only
+sets the default address for send.
+@returns
+0, or -1.
+@see socket getaddrinfo send recv
+@check compile
+@example
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <netdb.h>
+#include <sys/socket.h>
+
+/* fetch the first line of a web page over plain HTTP */
+int main(void)
+{
+    struct addrinfo hints, *res;
+    char buf[256];
+    ssize_t n;
+    int fd;
+    const char *req = "HEAD / HTTP/1.0\r\nHost: example.com\r\n\r\n";
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo("example.com", "80", &hints, &res) != 0) { printf("name not found\n"); return 1; }
+    fd = socket(res->ai_family, res->ai_socktype, 0);
+    if (connect(fd, res->ai_addr, res->ai_addrlen) < 0) { perror("connect"); return 1; }
+    freeaddrinfo(res);
+    write(fd, req, strlen(req));
+    n = read(fd, buf, sizeof buf - 1);
+    buf[n > 0 ? n : 0] = '\0';
+    printf("%.*s\n", (int)strcspn(buf, "\r\n"), buf);
+    close(fd);
+    return 0;
+}
+@end
+
+@entry bind
+@also INADDR_ANY INADDR_LOOPBACK socklen_t
+@header sys/socket.h
+@syntax int bind(int fd, const struct sockaddr *addr, socklen_t len);
+@summary Give a socket its own address (the port a server listens on).
+@desc
+A server binds to INADDR_ANY (every network) or INADDR_LOOPBACK
+(127.0.0.1 only) and a port - both in network byte order, so use htonl
+and htons. Set SO_REUSEADDR first so a restarted server can bind the same
+port at once. AF_UNIX sockets bind to a path (unlink it first).
+@returns
+0, or -1 (EADDRINUSE: the port is taken).
+@see listen socket setsockopt htons
+@example
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+
+int main(void)
+{
+    struct sockaddr_in a;
+    socklen_t len = sizeof a;
+    int one = 1, fd = socket(AF_INET, SOCK_STREAM, 0);
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    a.sin_port = htons(0);                 /* 0: let the system pick a free port */
+    if (bind(fd, (struct sockaddr *)&a, sizeof a) < 0) { perror("bind"); return 1; }
+    getsockname(fd, (struct sockaddr *)&a, &len);
+    printf("bound to a port: %s\n", ntohs(a.sin_port) ? "yes" : "no");
+    close(fd);
+    return 0;
+}
+@end
+
+@entry listen
+@also accept SOMAXCONN
+@header sys/socket.h
+@syntax int listen(int fd, int backlog);
+@syntax int accept(int fd, struct sockaddr *peer, socklen_t *len);
+@summary Server side: wait for clients and accept their connections.
+@desc
+listen marks a bound stream socket as a server; backlog is how many
+clients may wait in line. accept waits for the next client and returns a
+NEW descriptor for that connection (the listening one stays open for the
+next client). peer receives the client's address (or pass NULL, NULL).
+A simple server loops: accept, talk, close; poll or fork lets it serve
+several clients at once.
+@returns
+listen: 0 or -1. accept: a descriptor or -1.
+@see bind socket poll fork
+@example
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+
+/* a TCP echo server and a client on 127.0.0.1 */
+int main(void)
+{
+    struct sockaddr_in a;
+    socklen_t len = sizeof a;
+    char buf[64];
+    ssize_t n;
+    int one = 1, srv = socket(AF_INET, SOCK_STREAM, 0), c;
+
+    setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(srv, (struct sockaddr *)&a, sizeof a) < 0 || listen(srv, 4) < 0) { perror("server"); return 1; }
+    getsockname(srv, (struct sockaddr *)&a, &len);       /* which port did we get? */
+
+    if (fork() == 0) {                                   /* client */
+        int s = socket(AF_INET, SOCK_STREAM, 0);
+        close(srv);
+        if (connect(s, (struct sockaddr *)&a, sizeof a) < 0) _exit(1);
+        send(s, "ping", 4, 0);
+        n = recv(s, buf, sizeof buf - 1, 0);
+        buf[n > 0 ? n : 0] = '\0';
+        printf("client got back: %s\n", buf);
+        fflush(stdout);                                  /* _exit does not flush */
+        close(s);
+        _exit(0);
+    }
+    c = accept(srv, NULL, NULL);
+    n = recv(c, buf, sizeof buf, 0);
+    if (n > 0) send(c, buf, (size_t)n, 0);              /* echo */
+    close(c);
+    close(srv);
+    wait(NULL);
+    return 0;
+}
+@end
+
+@entry send
+@also recv sendto recvfrom MSG_PEEK MSG_DONTWAIT MSG_NOSIGNAL
+@header sys/socket.h
+@syntax ssize_t send(int fd, const void *buf, size_t len, int flags);
+@syntax ssize_t recv(int fd, void *buf, size_t len, int flags);
+@syntax ssize_t sendto(int fd, const void *buf, size_t len, int flags, const struct sockaddr *to, socklen_t tolen);
+@syntax ssize_t recvfrom(int fd, void *buf, size_t len, int flags, struct sockaddr *from, socklen_t *fromlen);
+@summary Send and receive data on a socket.
+@desc
+send/recv are write/read with flags: MSG_PEEK (look without removing),
+MSG_DONTWAIT (do not wait), MSG_NOSIGNAL (no SIGPIPE if the other side has
+gone). For UDP use sendto/recvfrom, which carry the other side's address.
+TCP is a stream: one send may arrive as several recvs and the other way
+round, so loop until you have what you need. recv returns 0 when the
+other side has closed the connection.
+@returns
+Bytes sent/received (0 = connection closed), or -1.
+@see socket read write
+@example
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+
+/* UDP: send a message to ourselves on 127.0.0.1 */
+int main(void)
+{
+    struct sockaddr_in a, from;
+    socklen_t len = sizeof a, flen = sizeof from;
+    char buf[64];
+    ssize_t n;
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    bind(fd, (struct sockaddr *)&a, sizeof a);
+    getsockname(fd, (struct sockaddr *)&a, &len);
+    sendto(fd, "datagram", 8, 0, (struct sockaddr *)&a, sizeof a);
+    n = recvfrom(fd, buf, sizeof buf - 1, 0, (struct sockaddr *)&from, &flen);
+    buf[n > 0 ? n : 0] = '\0';
+    printf("received '%s' from %s\n", buf, inet_ntoa(from.sin_addr));
+    close(fd);
+    return 0;
+}
+@end
+
+@entry shutdown
+@also SHUT_RD SHUT_WR SHUT_RDWR
+@header sys/socket.h
+@syntax int shutdown(int fd, int how);
+@summary Close one direction of a connection.
+@desc
+shutdown(fd, SHUT_WR) tells the other side "no more data from me" (it
+sees end of file) while you can still read its answer. SHUT_RD and
+SHUT_RDWR also exist. close() is still needed afterwards.
+@returns
+0, or -1.
+@see close send
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <string.h>
+
+int main(void)
+{
+    struct sockaddr_un a;
+    int srv = socket(AF_UNIX, SOCK_STREAM, 0), cl, c;
+    char buf[16];
+    memset(&a, 0, sizeof a);
+    a.sun_family = AF_UNIX;
+    strcpy(a.sun_path, "sh.sock");
+    unlink(a.sun_path);
+    bind(srv, (struct sockaddr *)&a, sizeof a);
+    listen(srv, 1);
+    cl = socket(AF_UNIX, SOCK_STREAM, 0);
+    connect(cl, (struct sockaddr *)&a, sizeof a);
+    c = accept(srv, NULL, NULL);
+    shutdown(cl, SHUT_WR);                 /* client: done sending */
+    printf("server read after shutdown: %ld (end of file)\n", (long)read(c, buf, sizeof buf));
+    close(c); close(cl); close(srv);
+    unlink(a.sun_path);
+    return 0;
+}
+@end
+
+@entry setsockopt
+@also getsockopt SOL_SOCKET SO_REUSEADDR SO_RCVTIMEO SO_SNDTIMEO SO_KEEPALIVE SO_ERROR SO_BROADCAST TCP_NODELAY
+@header sys/socket.h
+@syntax int setsockopt(int fd, int level, int name, const void *value, socklen_t len);
+@syntax int getsockopt(int fd, int level, int name, void *value, socklen_t *len);
+@summary Change or read socket options.
+@desc
+level SOL_SOCKET with: SO_REUSEADDR (int 1: reuse a port at once),
+SO_RCVTIMEO / SO_SNDTIMEO (struct timeval: give up waiting after that
+long), SO_KEEPALIVE, SO_BROADCAST, SO_ERROR (read the result of a
+non-blocking connect), SO_TYPE. Level IPPROTO_TCP with TCP_NODELAY (from
+<netinet/tcp.h>) sends small writes at once.
+@returns
+0, or -1.
+@see socket bind
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+
+int main(void)
+{
+    struct timeval tv = {2, 0};
+    int type, fd = socket(AF_INET, SOCK_STREAM, 0);
+    socklen_t len = sizeof type;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);   /* recv waits at most 2 s */
+    getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &len);
+    printf("socket type: %s\n", type == SOCK_STREAM ? "SOCK_STREAM" : "other");
+    close(fd);
+    return 0;
+}
+@end
+
+@entry getsockname
+@also getpeername
+@header sys/socket.h
+@syntax int getsockname(int fd, struct sockaddr *addr, socklen_t *len);
+@syntax int getpeername(int fd, struct sockaddr *addr, socklen_t *len);
+@summary The local address of a socket, or the address of the other side.
+@desc
+Set *len to the size of your buffer before the call. getsockname tells
+which port the system picked after bind to port 0 or after connect.
+getpeername tells who is connected (ENOTCONN if nobody).
+@returns
+0, or -1.
+@see bind accept
+@example
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+
+int main(void)
+{
+    struct sockaddr_in a;
+    socklen_t len = sizeof a;
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    bind(fd, (struct sockaddr *)&a, sizeof a);
+    getsockname(fd, (struct sockaddr *)&a, &len);
+    printf("bound to %s, some port above 0: %s\n", inet_ntoa(a.sin_addr), ntohs(a.sin_port) > 0 ? "yes" : "no");
+    printf("getpeername on an unconnected socket: %d\n", getpeername(fd, (struct sockaddr *)&a, &len));
+    close(fd);
+    return 0;
+}
+@end
+
+@entry htons
+@also htonl ntohs ntohl byte-order network-byte-order
+@header netinet/in.h
+@syntax uint16_t htons(uint16_t v);   uint32_t htonl(uint32_t v);
+@syntax uint16_t ntohs(uint16_t v);   uint32_t ntohl(uint32_t v);
+@summary Convert numbers between this computer's byte order and network order.
+@desc
+Networks send numbers big-end first; x86 stores them little-end first.
+h = host, n = network, s = short (16-bit, ports), l = long (32-bit, IPv4
+addresses). Use them for every port and address you put into or take out
+of a sockaddr_in.
+@returns
+The converted number.
+@see bind inet_pton
+@example
+#include <stdio.h>
+#include <netinet/in.h>
+
+int main(void)
+{
+    uint16_t port = 8080;
+    uint16_t net = htons(port);
+    unsigned char *b = (unsigned char *)&net;
+    printf("8080 = 0x%04x; in memory after htons: %02x %02x\n", port, b[0], b[1]);
+    printf("and back: %u\n", ntohs(net));
+    return 0;
+}
+@end
+
+@entry inet_pton
+@also inet_ntop inet_addr inet_aton inet_ntoa INET_ADDRSTRLEN in_addr
+@header arpa/inet.h
+@syntax int inet_pton(int af, const char *text, void *addr);
+@syntax const char *inet_ntop(int af, const void *addr, char *buf, socklen_t size);
+@syntax int inet_aton(const char *text, struct in_addr *addr);
+@syntax in_addr_t inet_addr(const char *text);
+@syntax char *inet_ntoa(struct in_addr addr);
+@summary Convert between "192.168.1.10" text and IPv4 address numbers.
+@desc
+pton (text -> address) and ntop (address -> text) are the modern pair;
+use AF_INET and a buffer of INET_ADDRSTRLEN bytes. inet_aton / inet_addr
+/ inet_ntoa are older forms (inet_ntoa uses a static buffer; inet_addr
+gives INADDR_NONE on error, which is also 255.255.255.255).
+@returns
+inet_pton: 1 ok, 0 not a valid address. inet_ntop: buf or NULL.
+inet_aton: non-zero if valid.
+@see getaddrinfo htons
+@example
+#include <stdio.h>
+#include <arpa/inet.h>
+
+int main(void)
+{
+    struct in_addr a;
+    char text[INET_ADDRSTRLEN];
+    if (inet_pton(AF_INET, "10.0.2.15", &a) == 1) {
+        printf("as a number: 0x%08x\n", ntohl(a.s_addr));
+        printf("back to text: %s\n", inet_ntop(AF_INET, &a, text, sizeof text));
+    }
+    printf("\"10.0.300.1\" valid? %d\n", inet_pton(AF_INET, "10.0.300.1", &a));
+    return 0;
+}
+@end
+
+@entry getaddrinfo
+@also freeaddrinfo gai_strerror addrinfo EAI_NONAME AI_PASSIVE
+@header netdb.h
+@syntax int getaddrinfo(const char *host, const char *service, const struct addrinfo *hints, struct addrinfo **result);
+@syntax void freeaddrinfo(struct addrinfo *result);
+@syntax const char *gai_strerror(int code);
+@summary Look up a host name (DNS) and get addresses ready for connect.
+@desc
+host may be a name ("example.com") or a number ("10.0.2.2"); service is a
+port number as text ("80"). Fill hints with ai_family = AF_INET and
+ai_socktype = SOCK_STREAM (or SOCK_DGRAM); AI_PASSIVE with host NULL gives
+an address for a server to bind. Each result has ai_family, ai_socktype,
+ai_addr and ai_addrlen to pass straight to socket and connect. rozOS
+looks names up in this order: a number, /etc/hosts, then DNS (the server
+from /etc/resolv.conf). Free the list with freeaddrinfo.
+@returns
+0, or an EAI_... code - print it with gai_strerror (not perror).
+@see connect gethostbyname inet_pton
+@example
+#include <stdio.h>
+#include <string.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+
+int main(void)
+{
+    struct addrinfo hints, *res;
+    struct sockaddr_in *sin;
+    int r;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    r = getaddrinfo("127.0.0.1", "8080", &hints, &res);
+    if (r != 0) { printf("lookup failed: %s\n", gai_strerror(r)); return 1; }
+    sin = (struct sockaddr_in *)res->ai_addr;
+    printf("address %s, port %u\n", inet_ntoa(sin->sin_addr), ntohs(sin->sin_port));
+    freeaddrinfo(res);
+    return 0;
+}
+@end
+
+@entry gethostbyname
+@also hostent h_errno
+@header netdb.h
+@syntax struct hostent *gethostbyname(const char *name);
+@summary Old way to look up a host name (IPv4 only).
+@desc
+Returns a static struct hostent with h_name, h_addrtype (AF_INET),
+h_length (4) and h_addr_list (addresses; h_addr_list[0] is the first).
+On failure h_errno says why (HOST_NOT_FOUND, TRY_AGAIN). New code should
+use getaddrinfo.
+@returns
+A pointer to static data, or NULL.
+@see getaddrinfo
+@example
+#include <stdio.h>
+#include <string.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+
+int main(void)
+{
+    struct hostent *h = gethostbyname("127.0.0.1");
+    struct in_addr a;
+    if (!h) { printf("not found\n"); return 1; }
+    memcpy(&a, h->h_addr_list[0], sizeof a);
+    printf("%s -> %s\n", h->h_name, inet_ntoa(a));
+    return 0;
+}
+@end

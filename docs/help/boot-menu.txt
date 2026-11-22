@@ -19,6 +19,19 @@ every disk on a real computer ([[disks]], phase 15b).
 Screen resolution (phase 13): `kinstall --resolution 1024x768` adds a
 "resolution:" line to every entry (`auto` removes it) - see [[fonts]].
 
+== The picture behind the menu (phase 19b) ==
+The rozOS logo behind the menu is /boot/boot-wallpaper.jpg (Limine shows
+BMP, PNG or JPEG). Replace that file with your own picture to change it -
+keep it dark and the middle of the screen empty, because the menu lines
+are drawn there. The menu file gets these lines (kinstall writes them
+while the picture exists; delete the picture to go back to plain black):
+  wallpaper: boot():/boot-wallpaper.jpg
+  wallpaper_style: centered       (shown at its own size, not stretched)
+  backdrop: 000000                (the colour around it)
+  term_background: ff000000       (no dark box behind the menu text)
+After the menu, the desktop shows the full logo while it starts:
+splash= in /etc/rozos.conf ([[desktop]]).
+
 == Disk or CD ==
 `make run-serial` / `make run` / `make run-uefi` boot from the disk
 (Limine is installed on it). The CD image is a rescue copy:

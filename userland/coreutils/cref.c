@@ -59,8 +59,8 @@ int main(int argc, char **argv)
         return 1;
     }
     if (argc < 2) {
-        const char *h[64];
-        int n = cref_headers(h, 64);
+        const char *h[128];             /* ধাপ ১৯খ: ৫৫টা হেডার, ১৯গ-এ আরো */
+        int n = cref_headers(h, 128);
         printf("C reference: %d pages. Headers and topics:\n", cref_count());
         for (i = 0; i < n; i++) printf("  %s\n", h[i]);
         printf("\n");
@@ -83,8 +83,8 @@ int main(int argc, char **argv)
     if (!strcmp(argv[1], "-l")) {
         int n = cref_count(), found = 0;
         if (argc < 3) {
-            const char *h[64];
-            int nh = cref_headers(h, 64);
+            const char *h[128];             /* ধাপ ১৯খ: ৫৫টা হেডার, ১৯গ-এ আরো */
+            int nh = cref_headers(h, 128);
             for (i = 0; i < nh; i++) {
                 int k, c = 0;
                 for (k = 0; k < n; k++) if (!strcmp(cref_at(k)->header, h[i])) c++;

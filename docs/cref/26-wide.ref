@@ -1,0 +1,465 @@
+# rozOS C reference - wide characters, Unicode and locales: <wchar.h>
+# <wctype.h> <locale.h> <langinfo.h> <iconv.h> (phase 19b)
+# In rozOS wchar_t is a 32-bit Unicode code point and "multibyte" always
+# means UTF-8, whatever the locale. Bengali text works: "আমি" is 3 wide
+# characters but 9 bytes of UTF-8.
+
+@entry wchar_t
+@also wint_t WEOF L-prefix wide-characters unicode utf-8 mbstate_t
+@header wchar.h
+@syntax wchar_t c = L'অ';            wchar_t s[] = L"text";
+@summary Wide characters: one array element per Unicode character.
+@desc
+A char string holds UTF-8 bytes: easy to store and print, but one
+letter can take 1 to 4 bytes, so s[i] is not "the i-th letter". A wchar_t
+string (L"...") holds one code point per element, so counting, reversing
+or cutting text by letters is simple. Convert between them with mbstowcs
+/ wcstombs (stdlib.h) or mbrtowc / wcrtomb, print with %ls in printf or
+with wprintf. WEOF is the wide EOF; wint_t can hold any wchar_t or WEOF.
+@returns
+(a type)
+@see mbrtowc wcslen wprintf wcwidth mbstowcs
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <wchar.h>
+
+int main(void)
+{
+    const char *utf8 = "আমি C";
+    wchar_t w[16];
+    size_t n = mbstowcs(w, utf8, 16), i;
+    printf("%lu bytes, %lu characters\n", (unsigned long)strlen(utf8), (unsigned long)n);
+    for (i = 0; i < n; i++) printf("U+%04X ", (unsigned)w[i]);
+    printf("\n");
+    return 0;
+}
+@end
+
+@entry wcslen
+@also wcscpy wcsncpy wcscat wcsncat wcscmp wcsncmp wcscasecmp wcsncasecmp wcschr wcsrchr wcsstr wcsspn wcscspn wcspbrk wcstok wcsdup wcsnlen wcpcpy wcpncpy wcscoll wcsxfrm
+@header wchar.h
+@syntax size_t wcslen(const wchar_t *s);
+@syntax wchar_t *wcscpy(wchar_t *d, const wchar_t *s);   wchar_t *wcsncpy(wchar_t *d, const wchar_t *s, size_t n);
+@syntax wchar_t *wcscat(wchar_t *d, const wchar_t *s);   wchar_t *wcsncat(wchar_t *d, const wchar_t *s, size_t n);
+@syntax int wcscmp(const wchar_t *a, const wchar_t *b);  int wcsncmp(..., size_t n);
+@syntax int wcscasecmp(const wchar_t *a, const wchar_t *b);  int wcsncasecmp(..., size_t n);
+@syntax wchar_t *wcschr(const wchar_t *s, wchar_t c);    wchar_t *wcsrchr(const wchar_t *s, wchar_t c);
+@syntax wchar_t *wcsstr(const wchar_t *s, const wchar_t *find);
+@syntax size_t wcsspn / wcscspn(const wchar_t *s, const wchar_t *set);   wchar_t *wcspbrk(...);
+@syntax wchar_t *wcstok(wchar_t *s, const wchar_t *delim, wchar_t **save);
+@syntax wchar_t *wcsdup(const wchar_t *s);   size_t wcsnlen(const wchar_t *s, size_t max);
+@syntax wchar_t *wcpcpy(wchar_t *d, const wchar_t *s);   wchar_t *wcpncpy(wchar_t *d, const wchar_t *s, size_t n);
+@syntax int wcscoll(const wchar_t *a, const wchar_t *b);   size_t wcsxfrm(wchar_t *d, const wchar_t *s, size_t n);
+@summary The string.h functions for wide strings.
+@desc
+Each works like its char twin (strlen, strcpy, strcat, strcmp,
+strcasecmp, strchr, strstr, strtok, strdup ...) but on wchar_t and counts
+characters, not bytes. Note wcstok needs a third "save" argument (it is
+the thread-safe form, like strtok_r). wcscoll compares like wcscmp in
+rozOS (there is one collation order: code points).
+@returns
+As the char versions.
+@see strlen wchar_t wmemcpy
+@example
+#include <stdio.h>
+#include <wchar.h>
+
+int main(void)
+{
+    wchar_t s[64] = L"rozOS ", *tok, *save;
+    wchar_t list[] = L"one,two,three";
+    wcscat(s, L"বাংলা");
+    printf("%ls has %lu characters\n", s, (unsigned long)wcslen(s));
+    printf("found at %ld\n", (long)(wcsstr(s, L"বা") - s));
+    for (tok = wcstok(list, L",", &save); tok; tok = wcstok(NULL, L",", &save))
+        printf("[%ls]\n", tok);
+    return 0;
+}
+@end
+
+@entry wmemcpy
+@also wmemmove wmemset wmemcmp wmemchr
+@header wchar.h
+@syntax wchar_t *wmemcpy(wchar_t *d, const wchar_t *s, size_t n);
+@syntax wchar_t *wmemmove(wchar_t *d, const wchar_t *s, size_t n);
+@syntax wchar_t *wmemset(wchar_t *d, wchar_t c, size_t n);
+@syntax int wmemcmp(const wchar_t *a, const wchar_t *b, size_t n);
+@syntax wchar_t *wmemchr(const wchar_t *s, wchar_t c, size_t n);
+@summary memcpy / memmove / memset / memcmp / memchr counted in wide characters.
+@desc
+n counts wchar_t elements (4 bytes each), not bytes. They do not stop at
+a 0 character.
+@returns
+As the mem versions.
+@see memcpy wcslen
+@example
+#include <stdio.h>
+#include <wchar.h>
+
+int main(void)
+{
+    wchar_t line[11];
+    wmemset(line, L'*', 10);
+    line[10] = L'\0';
+    wmemcpy(line + 3, L"রোজ", 3);
+    printf("%ls\n", line);
+    return 0;
+}
+@end
+
+@entry mbrtowc
+@also mbrlen mbsinit wcrtomb btowc wctob mbsrtowcs mbsnrtowcs wcsrtombs wcsnrtombs
+@header wchar.h
+@syntax size_t mbrtowc(wchar_t *wc, const char *s, size_t n, mbstate_t *st);
+@syntax size_t wcrtomb(char *s, wchar_t wc, mbstate_t *st);
+@syntax size_t mbrlen(const char *s, size_t n, mbstate_t *st);
+@syntax int mbsinit(const mbstate_t *st);
+@syntax size_t mbsrtowcs(wchar_t *d, const char **src, size_t len, mbstate_t *st);
+@syntax size_t wcsrtombs(char *d, const wchar_t **src, size_t len, mbstate_t *st);
+@syntax size_t mbsnrtowcs / wcsnrtombs (... size_t nsrc, size_t len, mbstate_t *st);
+@syntax wint_t btowc(int c);   int wctob(wint_t c);
+@summary Convert UTF-8 bytes to wide characters and back, one at a time.
+@desc
+mbrtowc reads one character from at most n bytes; it can also continue a
+character that was cut between two buffers (keep the mbstate_t, zeroed
+at the start). wcrtomb writes one character as UTF-8 (up to MB_CUR_MAX =
+4 bytes). The ...srtowcs / ...srtombs forms do whole strings. btowc/wctob
+convert single-byte (ASCII) characters only. Bad UTF-8 gives (size_t)-1
+with errno EILSEQ.
+@returns
+mbrtowc: bytes used, 0 for '\0', (size_t)-2 for "incomplete, need more
+bytes", (size_t)-1 for bad bytes. wcrtomb: bytes written or (size_t)-1.
+@see mbstowcs wchar_t iconv
+@example
+#include <stdio.h>
+#include <string.h>
+#include <wchar.h>
+
+/* walk through a UTF-8 string character by character */
+int main(void)
+{
+    const char *s = "aé অ";
+    mbstate_t st;
+    size_t len = strlen(s), n;
+    wchar_t wc;
+    memset(&st, 0, sizeof st);
+    while (len > 0 && (n = mbrtowc(&wc, s, len, &st)) > 0 && n < (size_t)-2) {
+        printf("U+%04X uses %lu byte(s)\n", (unsigned)wc, (unsigned long)n);
+        s += n;
+        len -= n;
+    }
+    return 0;
+}
+@end
+
+@entry wprintf
+@also fwprintf swprintf vwprintf vfwprintf vswprintf wscanf fwscanf swscanf vswscanf %ls %lc
+@header wchar.h
+@syntax int wprintf(const wchar_t *fmt, ...);
+@syntax int fwprintf(FILE *f, const wchar_t *fmt, ...);
+@syntax int swprintf(wchar_t *buf, size_t n, const wchar_t *fmt, ...);
+@syntax int wscanf(const wchar_t *fmt, ...);   int fwscanf(FILE *f, ...);   int swscanf(const wchar_t *s, ...);
+@syntax int vwprintf / vfwprintf / vswprintf / vswscanf (..., va_list ap);
+@summary printf and scanf with a wide format string.
+@desc
+The format is L"..." and %s means a char string, %ls a wide string, %lc a
+wide character - the same as in printf. Output goes out as UTF-8. Plain
+printf with %ls is often all you need. swprintf always takes the buffer
+size and gives -1 if the text does not fit.
+@returns
+Characters written / items read, or a negative number.
+@see printf wchar_t fputws
+@example
+#include <stdio.h>
+#include <wchar.h>
+
+int main(void)
+{
+    wchar_t buf[40];
+    int n;
+    swprintf(buf, 40, L"%ls = %d", L"সংখ্যা", 42);
+    wprintf(L"%ls\n", buf);
+    swscanf(L"12 apples", L"%d", &n);
+    wprintf(L"read %d\n", n);
+    return 0;
+}
+@end
+
+@entry fputws
+@also fgetwc fgetws fputwc getwc getwchar putwc putwchar ungetwc fwide
+@header wchar.h
+@syntax wint_t fgetwc(FILE *f);   wint_t getwc(FILE *f);   wint_t getwchar(void);
+@syntax wint_t fputwc(wchar_t c, FILE *f);   wint_t putwc(wchar_t c, FILE *f);   wint_t putwchar(wchar_t c);
+@syntax wchar_t *fgetws(wchar_t *buf, int n, FILE *f);
+@syntax int fputws(const wchar_t *s, FILE *f);
+@syntax wint_t ungetwc(wint_t c, FILE *f);
+@syntax int fwide(FILE *f, int mode);
+@summary Read and write files one wide character at a time.
+@desc
+The file itself holds UTF-8; these functions decode and encode it, so
+fgetwc gives whole letters. In rozOS a FILE may mix wide and byte calls;
+fwide only reports the orientation asked for.
+@returns
+The character (WEOF at end or error), or buf / NULL, or >= 0 / -1.
+@see fgetc fputs wprintf
+@example
+#include <stdio.h>
+#include <wchar.h>
+
+int main(void)
+{
+    FILE *f = fopen("words.txt", "w+");
+    wint_t c;
+    int letters = 0;
+    fputws(L"ঢাকা\n", f);
+    rewind(f);
+    while ((c = fgetwc(f)) != WEOF)
+        if (c != L'\n') letters++;
+    fclose(f);
+    printf("the word has %d letters (code points)\n", letters);
+    return 0;
+}
+@end
+
+@entry wcstol
+@also wcstoll wcstoul wcstoull wcstod wcstof wcstold
+@header wchar.h
+@syntax long wcstol(const wchar_t *s, wchar_t **end, int base);
+@syntax long long wcstoll / unsigned long wcstoul / unsigned long long wcstoull (... int base);
+@syntax double wcstod(const wchar_t *s, wchar_t **end);   float wcstof(...);   long double wcstold(...);
+@summary Wide-string versions of strtol / strtod.
+@desc
+Same rules as strtol and strtod: skip spaces, read the number, set *end
+to the first character not used. Only ASCII digits count.
+@returns
+The number (0 if none; errno ERANGE on overflow).
+@see strtol strtod
+@example
+#include <stdio.h>
+#include <wchar.h>
+
+int main(void)
+{
+    wchar_t *end;
+    long n = wcstol(L"  250 km", &end, 10);
+    double d = wcstod(L"3.75", NULL);
+    printf("%ld, rest '%ls', %.2f\n", n, end, d);
+    return 0;
+}
+@end
+
+@entry wcwidth
+@also wcswidth
+@header wchar.h
+@syntax int wcwidth(wchar_t c);
+@syntax int wcswidth(const wchar_t *s, size_t n);
+@summary How many screen columns a character takes.
+@desc
+Most letters take 1, Chinese/Japanese/Korean and emoji 2, and combining
+marks 0 - including Bengali vowel signs (কার) and hasanta, which sit on
+the letter before them. Terminals and text editors use it to line text
+up. wcswidth adds up a string.
+@returns
+Columns, or -1 for a non-printable character.
+@see wcslen
+@example
+#include <stdio.h>
+#include <wchar.h>
+
+int main(void)
+{
+    const wchar_t *words[] = { L"abc", L"কি", L"日本" };
+    int i;
+    for (i = 0; i < 3; i++)
+        printf("%ls: %lu characters, %d columns\n", words[i],
+               (unsigned long)wcslen(words[i]), wcswidth(words[i], 16));
+    return 0;
+}
+@end
+
+@entry wcsftime
+@header wchar.h
+@syntax size_t wcsftime(wchar_t *buf, size_t max, const wchar_t *fmt, const struct tm *tm);
+@summary strftime that writes a wide string.
+@desc
+Same % codes as strftime.
+@returns
+Characters written (without the '\0'), or 0 if buf is too small.
+@see strftime
+@example
+#include <stdio.h>
+#include <time.h>
+#include <wchar.h>
+
+int main(void)
+{
+    wchar_t buf[64];
+    struct tm tm = {0};
+    tm.tm_year = 126; tm.tm_mon = 10; tm.tm_mday = 23;
+    wcsftime(buf, 64, L"%Y-%m-%d", &tm);
+    printf("%ls\n", buf);
+    return 0;
+}
+@end
+
+@entry iswalpha
+@also iswalnum iswblank iswcntrl iswdigit iswgraph iswlower iswprint iswpunct iswspace iswupper iswxdigit iswctype wctype wctype_t
+@header wctype.h
+@syntax int iswalpha(wint_t c);   /* and iswalnum iswblank iswcntrl iswdigit iswgraph */
+@syntax int iswlower(wint_t c);   /* iswprint iswpunct iswspace iswupper iswxdigit */
+@syntax wctype_t wctype(const char *name);   int iswctype(wint_t c, wctype_t type);
+@summary The ctype.h tests for wide (Unicode) characters.
+@desc
+iswalpha is true for letters of every script (Bengali letters too),
+iswdigit only for 0-9. wctype("alpha") etc. gives a test you can pass to
+iswctype (handy when the class name comes from a pattern like
+[[:alpha:]]).
+@returns
+Non-zero if true, 0 if not.
+@see isalpha towupper
+@example
+#include <stdio.h>
+#include <wctype.h>
+#include <wchar.h>
+
+int main(void)
+{
+    const wchar_t *s = L"rozOS ২০২৬!";
+    int letters = 0, spaces = 0, other = 0;
+    for (; *s; s++) {
+        if (iswalpha(*s)) letters++;
+        else if (iswspace(*s)) spaces++;
+        else other++;
+    }
+    printf("letters %d, spaces %d, other %d\n", letters, spaces, other);
+    return 0;
+}
+@end
+
+@entry towupper
+@also towlower towctrans wctrans wctrans_t
+@header wctype.h
+@syntax wint_t towupper(wint_t c);
+@syntax wint_t towlower(wint_t c);
+@syntax wctrans_t wctrans(const char *name);   wint_t towctrans(wint_t c, wctrans_t t);
+@summary Change the case of a wide character.
+@desc
+Works for Latin, Greek and Cyrillic letters with case; scripts without
+case (Bengali, Chinese ...) come back unchanged. wctrans("toupper") /
+("tolower") with towctrans is the table-driven form.
+@returns
+The converted character.
+@see toupper iswalpha
+@example
+#include <stdio.h>
+#include <wctype.h>
+#include <wchar.h>
+
+int main(void)
+{
+    wchar_t s[] = L"straße ära ক";
+    size_t i;
+    for (i = 0; s[i]; i++) s[i] = (wchar_t)towupper((wint_t)s[i]);
+    printf("%ls\n", s);
+    return 0;
+}
+@end
+
+@entry setlocale
+@also localeconv newlocale duplocale freelocale uselocale locale_t lconv LC_ALL LC_CTYPE LC_NUMERIC LC_TIME locale
+@header locale.h
+@syntax char *setlocale(int category, const char *name);
+@syntax struct lconv *localeconv(void);
+@syntax locale_t newlocale(int mask, const char *name, locale_t base);
+@syntax locale_t duplocale(locale_t l);   void freelocale(locale_t l);
+@syntax locale_t uselocale(locale_t l);
+@summary Choose the program's locale (language/region rules).
+@desc
+rozOS has one set of rules: the "C" locale with UTF-8 text. setlocale
+accepts "C", "POSIX" and any name ending in UTF-8 (such as
+"bn_BD.UTF-8"); setlocale(LC_ALL, "") takes the name from LANG / LC_ALL
+and falls back to "C". Numbers always use '.' as the decimal point
+(localeconv()->decimal_point). newlocale / uselocale exist for programs
+that use them, all giving the same rules.
+@returns
+setlocale: the locale name, or NULL if not accepted.
+@see nl_langinfo strftime
+@example
+#include <stdio.h>
+#include <locale.h>
+
+int main(void)
+{
+    const char *now = setlocale(LC_ALL, "");
+    printf("locale: %s\n", now ? now : "(not accepted)");
+    printf("bn_BD.UTF-8 accepted? %s\n", setlocale(LC_ALL, "bn_BD.UTF-8") ? "yes" : "no");
+    printf("decimal point: '%s'\n", localeconv()->decimal_point);
+    return 0;
+}
+@end
+
+@entry nl_langinfo
+@also nl_langinfo_l CODESET nl_item
+@header langinfo.h
+@syntax char *nl_langinfo(nl_item item);
+@syntax char *nl_langinfo_l(nl_item item, locale_t l);
+@summary Ask the locale for names and formats (e.g. the text encoding).
+@desc
+nl_langinfo(CODESET) gives "UTF-8" in rozOS; other items give month and
+day names, D_FMT (date format) and RADIXCHAR (decimal point).
+@returns
+A string (never NULL).
+@see setlocale
+@example
+#include <stdio.h>
+#include <locale.h>
+#include <langinfo.h>
+
+int main(void)
+{
+    setlocale(LC_ALL, "");
+    printf("encoding: %s\n", nl_langinfo(CODESET));
+    printf("date format: %s\n", nl_langinfo(D_FMT));
+    return 0;
+}
+@end
+
+@entry iconv
+@also iconv_open iconv_close iconv_t character-set encoding
+@header iconv.h
+@syntax iconv_t iconv_open(const char *to, const char *from);
+@syntax size_t iconv(iconv_t cd, char **in, size_t *inleft, char **out, size_t *outleft);
+@syntax int iconv_close(iconv_t cd);
+@summary Convert text from one encoding to another.
+@desc
+rozOS knows UTF-8, ASCII, ISO-8859-1 (LATIN1), CP1252 (WINDOWS-1252),
+UTF-16 / UTF-16LE / UTF-16BE, UTF-32 (LE/BE) and WCHAR_T. Add "//IGNORE"
+to the target to skip characters it cannot hold, or "//TRANSLIT" to
+replace them with something close. iconv moves *in and *out forward and
+lowers the counts as it works. Call iconv_close when done.
+@returns
+iconv_open: a handle or (iconv_t)-1 (EINVAL: unknown encoding). iconv:
+number of non-reversible conversions, or (size_t)-1 with errno (EILSEQ
+bad input, E2BIG output full, EINVAL input ends mid-character).
+@see mbrtowc
+@example
+#include <stdio.h>
+#include <string.h>
+#include <iconv.h>
+
+int main(void)
+{
+    char in[] = "caf\xe9";                  /* "café" in LATIN1 */
+    char out[16], *ip = in, *op = out;
+    size_t il = strlen(in), ol = sizeof out - 1;
+    iconv_t cd = iconv_open("UTF-8", "LATIN1");
+    if (cd == (iconv_t)-1) { perror("iconv_open"); return 1; }
+    if (iconv(cd, &ip, &il, &op, &ol) == (size_t)-1) { perror("iconv"); return 1; }
+    *op = '\0';
+    printf("%s (%lu bytes in UTF-8)\n", out, (unsigned long)strlen(out));
+    iconv_close(cd);
+    return 0;
+}
+@end

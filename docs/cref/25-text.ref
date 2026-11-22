@@ -1,0 +1,296 @@
+# rozOS C reference - terminals, command lines, patterns and text:
+# <termios.h> <pty.h> <getopt.h> <regex.h> <fnmatch.h> <glob.h> <libgen.h>
+# (phase 19b)
+
+@entry tcgetattr
+@also tcsetattr cfmakeraw termios TCSANOW TCSAFLUSH ECHO ICANON ISIG VMIN VTIME raw-mode
+@header termios.h
+@syntax int tcgetattr(int fd, struct termios *t);
+@syntax int tcsetattr(int fd, int when, const struct termios *t);
+@syntax void cfmakeraw(struct termios *t);
+@summary Read or change terminal settings (echo, line editing, raw keys).
+@desc
+Normally the terminal collects a whole line (ICANON) and shows what you
+type (ECHO). For a game or a full-screen editor turn both off in c_lflag
+so every key arrives at once and unseen; also turn off ISIG to get Ctrl+C
+as a key. c_cc[VMIN] = 1, c_cc[VTIME] = 0 makes read wait for one key.
+cfmakeraw sets everything for raw mode. when is TCSANOW (at once) or
+TCSAFLUSH. Always save the old settings and put them back before exit.
+@returns
+0, or -1 (ENOTTY if fd is not a terminal).
+@see isatty read ioctl
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <termios.h>
+
+int main(void)
+{
+    struct termios old, raw;
+    char c;
+    if (tcgetattr(0, &old) < 0) {
+        printf("standard input is not a terminal\n");
+        return 0;
+    }
+    raw = old;
+    raw.c_lflag &= ~(ICANON | ECHO);           /* key by key, no echo */
+    raw.c_cc[VMIN] = 1;
+    raw.c_cc[VTIME] = 0;
+    tcsetattr(0, TCSANOW, &raw);
+    printf("press a key (it will not be shown)...\n");
+    if (read(0, &c, 1) == 1) printf("you pressed code %d\n", c);
+    tcsetattr(0, TCSANOW, &old);               /* always restore */
+    return 0;
+}
+@end
+
+@entry tcsetpgrp
+@also tcgetpgrp
+@header termios.h
+@syntax pid_t tcgetpgrp(int fd);
+@syntax int tcsetpgrp(int fd, pid_t pgrp);
+@summary Which process group owns the terminal (gets keyboard and Ctrl+C).
+@desc
+A shell gives the terminal to the job it runs in the foreground, and
+takes it back afterwards. Declared in both <unistd.h> and <termios.h>.
+@returns
+tcgetpgrp: the group, or -1. tcsetpgrp: 0 or -1.
+@see setpgid tcgetattr
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <termios.h>
+
+int main(void)
+{
+    pid_t fg = tcgetpgrp(0);
+    if (fg < 0) printf("no controlling terminal on stdin\n");
+    else printf("foreground group %d, mine %d\n", (int)fg, (int)getpgrp());
+    return 0;
+}
+@end
+
+@entry openpty
+@also pty pseudo-terminal
+@header pty.h
+@syntax int openpty(int *master, int *slave, char *name, const struct termios *t, const struct winsize *ws);
+@summary Make a pseudo-terminal pair (how terminal windows run a shell).
+@desc
+Whatever is written to the master appears as keyboard input on the slave,
+and what a program writes to the slave can be read from the master. A
+terminal emulator (like rozterm) starts the shell with the slave as its
+stdin/stdout/stderr and draws what it reads from the master. name, t and
+ws may be NULL.
+@returns
+0, or -1.
+@see tcgetattr fork dup
+@check compile
+@example
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <pty.h>
+
+int main(void)
+{
+    int m, s;
+    char buf[64];
+    ssize_t n;
+    if (openpty(&m, &s, NULL, NULL, NULL) < 0) { perror("openpty"); return 1; }
+    write(s, "output of a program\n", 20);     /* program side */
+    n = read(m, buf, sizeof buf - 1);           /* terminal side */
+    buf[n > 0 ? n : 0] = '\0';
+    printf("terminal read: %s", buf);
+    close(s);
+    close(m);
+    return 0;
+}
+@end
+
+@entry getopt
+@also getopt_long getopt_long_only optarg optind opterr optopt option
+@header getopt.h
+@syntax int getopt(int argc, char *const argv[], const char *optstring);   /* unistd.h */
+@syntax int getopt_long(int argc, char *const argv[], const char *optstring, const struct option *longopts, int *index);
+@syntax int getopt_long_only(int argc, char *const argv[], const char *optstring, const struct option *longopts, int *index);
+@summary Read command-line options like -v, -o file, --help.
+@desc
+Call in a loop until it returns -1. optstring lists the letters; a ':'
+after a letter means it takes a value (then in optarg). Unknown options
+give '?' (with a message, unless opterr = 0). After the loop
+argv[optind] .. argv[argc-1] are the remaining arguments (file names...).
+getopt_long also accepts --name options from an array of struct option
+{ name, has_arg (no_argument / required_argument / optional_argument),
+flag, val } ending with a zero entry. getopt_long_only accepts -name too.
+@returns
+The option letter (or val), '?' for an unknown option, -1 at the end.
+@see main-args
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <getopt.h>
+
+int main(void)
+{
+    /* as if run: prog -v -o out.txt --size 3 a.c b.c */
+    char *argv[] = { "prog", "-v", "-o", "out.txt", "--size", "3", "a.c", "b.c", NULL };
+    int argc = 8, c, verbose = 0, size = 1;
+    const char *out = "a.out";
+    static const struct option longs[] = {
+        { "size", required_argument, NULL, 's' },
+        { "help", no_argument, NULL, 'h' },
+        { NULL, 0, NULL, 0 }
+    };
+    while ((c = getopt_long(argc, argv, "vo:s:h", longs, NULL)) != -1) {
+        switch (c) {
+        case 'v': verbose = 1; break;
+        case 'o': out = optarg; break;
+        case 's': size = atoi(optarg); break;
+        case 'h': printf("usage: prog [-v] [-o file] [--size N] files\n"); return 0;
+        default:  return 1;
+        }
+    }
+    printf("verbose=%d out=%s size=%d\n", verbose, out, size);
+    for (; optind < argc; optind++) printf("file: %s\n", argv[optind]);
+    return 0;
+}
+@end
+
+@entry regcomp
+@also regexec regerror regfree regex_t regmatch_t REG_EXTENDED REG_ICASE REG_NOSUB REG_NEWLINE REG_NOMATCH regex regular-expression
+@header regex.h
+@syntax int regcomp(regex_t *re, const char *pattern, int flags);
+@syntax int regexec(const regex_t *re, const char *text, size_t nmatch, regmatch_t match[], int eflags);
+@syntax size_t regerror(int code, const regex_t *re, char *buf, size_t size);
+@syntax void regfree(regex_t *re);
+@summary Search text with regular expressions (POSIX regex, as grep uses).
+@desc
+Compile the pattern once with regcomp, test many strings with regexec,
+then regfree. flags: REG_EXTENDED (modern syntax: + ? | ( ) without
+backslashes - use it), REG_ICASE (ignore case), REG_NOSUB (only yes/no),
+REG_NEWLINE (. and [^...] do not match a newline; ^ $ match at lines).
+match[0] gets the whole match as offsets rm_so..rm_eo; match[1..] the
+parts in ( ). Unused parts have rm_so == -1.
+@returns
+regcomp: 0 or an error code (text from regerror). regexec: 0 if it
+matches, REG_NOMATCH if not.
+@see fnmatch strstr
+@example
+#include <stdio.h>
+#include <regex.h>
+
+int main(void)
+{
+    regex_t re;
+    regmatch_t m[3];
+    const char *lines[] = { "date: 2026-11-23", "no date here", "born 1999-01-05!" };
+    int i, r = regcomp(&re, "([0-9]{4})-([0-9]{2})-[0-9]{2}", REG_EXTENDED);
+    if (r != 0) {
+        char err[100];
+        regerror(r, &re, err, sizeof err);
+        printf("bad pattern: %s\n", err);
+        return 1;
+    }
+    for (i = 0; i < 3; i++) {
+        if (regexec(&re, lines[i], 3, m, 0) == 0)
+            printf("'%s': year %.*s, month %.*s\n", lines[i],
+                   (int)(m[1].rm_eo - m[1].rm_so), lines[i] + m[1].rm_so,
+                   (int)(m[2].rm_eo - m[2].rm_so), lines[i] + m[2].rm_so);
+        else
+            printf("'%s': no match\n", lines[i]);
+    }
+    regfree(&re);
+    return 0;
+}
+@end
+
+@entry fnmatch
+@also FNM_NOMATCH FNM_PATHNAME FNM_PERIOD FNM_NOESCAPE wildcard
+@header fnmatch.h
+@syntax int fnmatch(const char *pattern, const char *name, int flags);
+@summary Does a name match a shell wildcard like "*.c" or "file?.[ch]"?
+@desc
+* any text, ? one character, [abc] / [a-z] / [!x] a set. flags:
+FNM_PATHNAME (wildcards do not match '/'), FNM_PERIOD (a leading '.' must
+be matched literally, like hidden files in the shell), FNM_NOESCAPE.
+@returns
+0 if it matches, FNM_NOMATCH if not.
+@see glob regcomp
+@example
+#include <stdio.h>
+#include <fnmatch.h>
+
+int main(void)
+{
+    const char *names[] = { "main.c", "util.h", "notes.txt", ".hidden.c" };
+    int i;
+    for (i = 0; i < 4; i++)
+        printf("%-10s *.[ch]: %s\n", names[i],
+               fnmatch("*.[ch]", names[i], FNM_PERIOD) == 0 ? "yes" : "no");
+    return 0;
+}
+@end
+
+@entry glob
+@also globfree glob_t GLOB_NOMATCH GLOB_MARK GLOB_NOCHECK
+@header glob.h
+@syntax int glob(const char *pattern, int flags, int (*errfunc)(const char *path, int err), glob_t *g);
+@syntax void globfree(glob_t *g);
+@summary Find files whose names match a wildcard pattern ("src/*.c").
+@desc
+The result is in g->gl_pathv[0 .. g->gl_pathc-1], sorted. flags:
+GLOB_MARK (add '/' to directories), GLOB_NOCHECK (give the pattern itself
+if nothing matches), GLOB_NOSORT. errfunc may be NULL. Free with globfree.
+@returns
+0, GLOB_NOMATCH, GLOB_NOSPACE or GLOB_ABORTED.
+@see fnmatch opendir
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <glob.h>
+
+int main(void)
+{
+    glob_t g;
+    size_t i;
+    close(open("one.c", O_WRONLY | O_CREAT, 0644));
+    close(open("two.c", O_WRONLY | O_CREAT, 0644));
+    close(open("three.h", O_WRONLY | O_CREAT, 0644));
+    if (glob("*.c", 0, NULL, &g) == 0) {
+        for (i = 0; i < g.gl_pathc; i++) printf("%s\n", g.gl_pathv[i]);
+        globfree(&g);
+    }
+    return 0;
+}
+@end
+
+@entry basename
+@also dirname
+@header libgen.h
+@syntax char *basename(char *path);
+@syntax char *dirname(char *path);
+@summary Split a path into its directory part and its last part.
+@desc
+basename("/usr/src/main.c") is "main.c", dirname of it is "/usr/src".
+Both may change the string you pass, so give them a copy you can write
+(not a string literal), and copy the result before calling again.
+@returns
+A pointer to the part (inside path or a static buffer).
+@see strrchr
+@example
+#include <stdio.h>
+#include <string.h>
+#include <libgen.h>
+
+int main(void)
+{
+    char a[64], b[64];
+    const char *path = "/usr/src/rozos/main.c";
+    strcpy(a, path);
+    strcpy(b, path);
+    printf("dirname:  %s\n", dirname(a));
+    printf("basename: %s\n", basename(b));
+    return 0;
+}
+@end

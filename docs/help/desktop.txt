@@ -28,6 +28,9 @@ it once; for always: `mode=text` in /etc/rozos.conf ([[boot-menu]]).
   mode=desktop        or text
   utc_offset=+06:00   the clock's time zone (Dhaka); +00:00 = UTC
   wallpaper=          a picture: /usr/share/images/x.jpg (.jpg .png .bmp)
+  splash=             picture shown while the desktop starts (phase 19b;
+                      default /usr/share/images/rozos-boot.jpg, empty = none)
+  splash_ms=1500      how long it stays at least (milliseconds; 0 = off)
 
 == The serial line ==
 While the desktop runs, the keyboard belongs to it; the serial line

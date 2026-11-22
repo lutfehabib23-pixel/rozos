@@ -65,6 +65,10 @@ entry() {  # title path extra
     printf '# rozOS boot menu — kinstall লেখে (হাতে বদলালে পরের kinstall-এ নতুন করে লেখা হবে)\n'
     printf '# help kinstall, help boot-menu\n\n'
     printf 'timeout: 3\n'
+    # ধাপ ১৯খ: বুট পর্দার ছবি (Makefile-এর disk-update এটা boot partition-এ রাখে)
+    if mdir -i "$M" ::/boot-wallpaper.jpg >/dev/null 2>&1; then
+        printf 'wallpaper: boot():/boot-wallpaper.jpg\nwallpaper_style: centered\nbackdrop: 000000\nterm_background: ff000000\n'
+    fi
     printf 'default_entry: %d\n\n' $(( ${#IDS[@]} + 1 ))
     n=0
     for id in "${IDS[@]}"; do

@@ -1,0 +1,475 @@
+# rozOS C reference - files and directories: <fcntl.h> <sys/stat.h>
+# <dirent.h> <sys/mman.h> <sys/uio.h> <sys/ioctl.h> <utime.h> (phase 19b)
+
+@entry open
+@also creat O_RDONLY O_WRONLY O_RDWR O_CREAT O_TRUNC O_APPEND O_EXCL O_NONBLOCK O_CLOEXEC O_DIRECTORY
+@header fcntl.h
+@syntax int open(const char *path, int flags, ... /* mode_t mode */);
+@syntax int creat(const char *path, mode_t mode);
+@summary Open a file and get a file descriptor for read/write.
+@desc
+flags: exactly one of O_RDONLY, O_WRONLY, O_RDWR, plus any of
+  O_CREAT     make the file if it is missing (then give mode, e.g. 0644)
+  O_TRUNC     empty the file first
+  O_APPEND    every write goes to the end
+  O_EXCL      with O_CREAT: fail if the file already exists
+  O_NONBLOCK  reads/writes never wait (EAGAIN instead)
+  O_CLOEXEC   close automatically on exec
+  O_DIRECTORY fail unless path is a directory
+creat(path, mode) is open(path, O_WRONLY | O_CREAT | O_TRUNC, mode).
+fdopen turns the descriptor into a FILE * if you want stdio on it.
+@returns
+A descriptor (the lowest free number), or -1 with errno.
+@see read write close fopen fcntl stat
+@example
+#include <stdio.h>
+#include <errno.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+int main(void)
+{
+    int fd = open("new.txt", O_WRONLY | O_CREAT | O_EXCL, 0644);
+    if (fd >= 0) {
+        write(fd, "first\n", 6);
+        close(fd);
+        printf("made new.txt\n");
+    }
+    fd = open("new.txt", O_WRONLY | O_CREAT | O_EXCL, 0644);
+    if (fd < 0) printf("second try: %s\n", strerror(errno));
+    fd = open("/no/such/dir/x", O_RDONLY);
+    if (fd < 0) printf("missing: %s\n", strerror(errno));
+    return 0;
+}
+@end
+
+@entry openat
+@also AT_FDCWD mkdirat fstatat
+@header fcntl.h
+@syntax int openat(int dirfd, const char *path, int flags, ... /* mode */);
+@syntax int mkdirat(int dirfd, const char *path, mode_t mode);   /* sys/stat.h */
+@syntax int fstatat(int dirfd, const char *path, struct stat *st, int flags);
+@summary open / mkdir / stat relative to a directory descriptor.
+@desc
+rozOS supports these with dirfd = AT_FDCWD (the current directory) or an
+absolute path; a real directory descriptor with a relative path gives
+ENOSYS. Plain open, mkdir and stat do the same job.
+@returns
+As open, mkdir and stat.
+@see open mkdir stat
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+
+int main(void)
+{
+    struct stat st;
+    int fd = openat(AT_FDCWD, "at.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    write(fd, "abc", 3);
+    close(fd);
+    if (fstatat(AT_FDCWD, "at.txt", &st, 0) == 0)
+        printf("at.txt has %ld bytes\n", (long)st.st_size);
+    return 0;
+}
+@end
+
+@entry fcntl
+@also F_GETFL F_SETFL F_GETFD F_SETFD F_DUPFD F_DUPFD_CLOEXEC FD_CLOEXEC F_SETLK F_GETLK
+@header fcntl.h
+@syntax int fcntl(int fd, int cmd, ... /* long arg */);
+@summary Read or change the settings of an open descriptor.
+@desc
+  F_GETFL / F_SETFL         status flags, mostly to switch O_NONBLOCK on/off
+  F_GETFD / F_SETFD         FD_CLOEXEC (close on exec)
+  F_DUPFD, F_DUPFD_CLOEXEC  like dup, but the new number is >= arg
+  F_GETLK / F_SETLK(W)      record locks: accepted, rozOS keeps none
+@returns
+Depends on cmd (flags, a descriptor, or 0); -1 on error.
+@see open dup flock
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+int main(void)
+{
+    int fds[2], flags;
+    char c;
+    pipe(fds);
+    flags = fcntl(fds[0], F_GETFL);
+    fcntl(fds[0], F_SETFL, flags | O_NONBLOCK);       /* read must not wait */
+    if (read(fds[0], &c, 1) < 0)
+        printf("empty pipe: read did not wait\n");
+    printf("copy of fd %d is %d\n", fds[0], fcntl(fds[0], F_DUPFD, 10));
+    return 0;
+}
+@end
+
+@entry posix_fadvise
+@also POSIX_FADV_NORMAL
+@header fcntl.h
+@syntax int posix_fadvise(int fd, off_t offset, off_t len, int advice);
+@summary Tell the system how you will read a file (a hint only).
+@desc
+Accepted and ignored by rozOS (it gives 0 for a valid descriptor), so
+programs that give the hint run unchanged.
+@returns
+0, or an error number (not -1).
+@see open read
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+int main(void)
+{
+    int fd = open("/", O_RDONLY);
+    printf("posix_fadvise: %d\n", posix_fadvise(fd, 0, 0, POSIX_FADV_NORMAL));
+    close(fd);
+    return 0;
+}
+@end
+
+@entry stat
+@also fstat lstat struct-stat S_ISDIR S_ISREG S_ISCHR st_size st_mode st_mtime
+@header sys/stat.h
+@syntax int stat(const char *path, struct stat *st);
+@syntax int fstat(int fd, struct stat *st);
+@syntax int lstat(const char *path, struct stat *st);
+@summary Get information about a file: size, kind, times.
+@desc
+Useful fields of struct stat:
+  st_size   size in bytes
+  st_mode   kind and permissions - test with S_ISDIR(m), S_ISREG(m),
+            S_ISCHR(m) (device), S_ISFIFO(m)
+  st_mtime  last change (time_t; st_mtim has nanoseconds too)
+  st_ino, st_nlink, st_blocks
+lstat is the same as stat in rozOS (there are no symbolic links).
+@returns
+0, or -1 (ENOENT if the file does not exist).
+@see access opendir open
+@example
+#include <stdio.h>
+#include <time.h>
+#include <sys/stat.h>
+
+int main(void)
+{
+    const char *paths[] = { "/", "/etc/motd", "/dev/null" };
+    struct stat st;
+    int i;
+    for (i = 0; i < 3; i++) {
+        if (stat(paths[i], &st) < 0) { printf("%-10s missing\n", paths[i]); continue; }
+        printf("%-10s %s, %ld bytes\n", paths[i],
+               S_ISDIR(st.st_mode) ? "directory" : S_ISREG(st.st_mode) ? "file" : "device",
+               (long)st.st_size);
+    }
+    return 0;
+}
+@end
+
+@entry mkdir
+@also mode_t
+@header sys/stat.h
+@syntax int mkdir(const char *path, mode_t mode);
+@summary Make a directory.
+@desc
+mode is the permission (0755 is usual). The parent must exist; make each
+level in turn for a path like a/b/c (as "mkdir -p" does).
+@returns
+0, or -1 (EEXIST if it is already there).
+@see rmdir getcwd opendir
+@example
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include <sys/stat.h>
+
+/* mkdir -p */
+static int make_path(const char *path)
+{
+    char tmp[256], *p;
+    snprintf(tmp, sizeof tmp, "%s", path);
+    for (p = tmp + 1; *p; p++)
+        if (*p == '/') {
+            *p = '\0';
+            if (mkdir(tmp, 0755) < 0 && errno != EEXIST) return -1;
+            *p = '/';
+        }
+    return mkdir(tmp, 0755) < 0 && errno != EEXIST ? -1 : 0;
+}
+
+int main(void)
+{
+    struct stat st;
+    make_path("a/b/c");
+    printf("a/b/c is %s\n", stat("a/b/c", &st) == 0 && S_ISDIR(st.st_mode) ? "a directory" : "missing");
+    return 0;
+}
+@end
+
+@entry chmod
+@also fchmod umask
+@header sys/stat.h
+@syntax int chmod(const char *path, mode_t mode);
+@syntax int fchmod(int fd, mode_t mode);
+@syntax mode_t umask(mode_t mask);
+@summary Change file permissions (kept simple in rozOS).
+@desc
+rozOS has one user and does not store permission bits per file, so chmod
+and fchmod only check that the file exists. umask always reports 022.
+Programs that set permissions (e.g. make a script executable) still work.
+@returns
+0 or -1; umask the old mask.
+@see stat chown
+@example
+#include <stdio.h>
+#include <sys/stat.h>
+
+int main(void)
+{
+    printf("chmod /: %d\n", chmod("/", 0755));
+    printf("umask: %03o\n", (unsigned)umask(077));
+    return 0;
+}
+@end
+
+@entry mkfifo
+@also mknod
+@header sys/stat.h
+@syntax int mkfifo(const char *path, mode_t mode);
+@syntax int mknod(const char *path, mode_t mode, dev_t dev);
+@summary Make a named pipe or device file (not supported in rozOS).
+@desc
+mkfifo gives ENOSYS and mknod EPERM. Use pipe() between related
+processes, or an AF_UNIX socket between unrelated ones.
+@returns
+-1 in rozOS.
+@see pipe socket
+@example
+#include <stdio.h>
+#include <errno.h>
+#include <string.h>
+#include <sys/stat.h>
+
+int main(void)
+{
+    if (mkfifo("fifo", 0644) < 0) printf("mkfifo: %s\n", strerror(errno));
+    return 0;
+}
+@end
+
+@entry utimensat
+@also futimens utimes utime UTIME_NOW UTIME_OMIT
+@header sys/stat.h
+@syntax int utimensat(int dirfd, const char *path, const struct timespec t[2], int flags);
+@syntax int futimens(int fd, const struct timespec t[2]);
+@syntax int utimes(const char *path, const struct timeval t[2]);   /* sys/time.h */
+@syntax int utime(const char *path, const struct utimbuf *t);       /* utime.h */
+@summary Set a file's access and change times.
+@desc
+t[0] is the access time, t[1] the change time; NULL means "now" (what
+the touch command does). The rozOS kernel cannot set file times yet, so
+all four give -1 with errno ENOSYS. A program that only touches a file can
+ignore that error (opening with O_CREAT makes the file if needed).
+@returns
+0, or -1 (ENOSYS in rozOS).
+@see stat time
+@example
+#include <stdio.h>
+#include <utime.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+int main(void)
+{
+    close(open("touched.txt", O_WRONLY | O_CREAT, 0644));
+    if (utime("touched.txt", NULL) < 0)
+        printf("utime: setting times is not supported here\n");
+    else
+        printf("utime: time set to now\n");
+    return 0;
+}
+@end
+
+@entry opendir
+@also readdir closedir rewinddir dirfd DIR dirent d_name d_type DT_DIR DT_REG
+@header dirent.h
+@syntax DIR *opendir(const char *path);
+@syntax struct dirent *readdir(DIR *dir);
+@syntax int closedir(DIR *dir);
+@syntax void rewinddir(DIR *dir);
+@syntax int dirfd(DIR *dir);
+@summary List the files in a directory.
+@desc
+readdir gives one entry at a time, NULL at the end. Each struct dirent
+has d_name (the name) and d_type (DT_DIR, DT_REG, DT_CHR, DT_UNKNOWN...).
+"." and ".." may appear - skip them. The entry is overwritten by the next
+readdir, so copy the name if you keep it. rewinddir starts over.
+@returns
+opendir: a DIR * or NULL. readdir: an entry or NULL. closedir: 0.
+@see stat glob mkdir
+@example
+#include <stdio.h>
+#include <string.h>
+#include <dirent.h>
+
+int main(void)
+{
+    DIR *d = opendir("/");
+    struct dirent *e;
+    int files = 0, dirs = 0;
+    if (!d) { perror("opendir"); return 1; }
+    while ((e = readdir(d)) != NULL) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        if (e->d_type == DT_DIR) dirs++; else files++;
+    }
+    closedir(d);
+    printf("/ holds %d directories and %d other entries\n", dirs, files);
+    return 0;
+}
+@end
+
+@entry mmap
+@also munmap mprotect MAP_ANONYMOUS MAP_PRIVATE MAP_SHARED PROT_READ PROT_WRITE MAP_FAILED
+@header sys/mman.h
+@syntax void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset);
+@syntax int munmap(void *addr, size_t len);
+@syntax int mprotect(void *addr, size_t len, int prot);
+@summary Map memory pages: plain memory, a copy of a file, or shared memory.
+@desc
+prot: PROT_READ | PROT_WRITE (| PROT_EXEC), or PROT_NONE.
+flags in rozOS:
+  MAP_PRIVATE | MAP_ANONYMOUS   fresh zeroed memory (fd = -1)
+  MAP_SHARED | MAP_ANONYMOUS    memory shared with children after fork
+  MAP_PRIVATE with a file       a private copy of the file (changes are
+                                not written back)
+  MAP_SHARED with shm_open/fb0  shared memory, the frame buffer
+MAP_SHARED of an ordinary file is not supported (ENODEV). Lengths are
+rounded up to whole 4 KiB pages. mprotect changes the protection later.
+@returns
+The address, or MAP_FAILED (not NULL!). munmap/mprotect: 0 or -1.
+@see malloc shm_open fork
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/wait.h>
+
+int main(void)
+{
+    int *counter = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (counter == MAP_FAILED) { perror("mmap"); return 1; }
+    *counter = 1;
+    if (fork() == 0) {
+        *counter = 42;                    /* the parent sees this */
+        _exit(0);
+    }
+    wait(NULL);
+    printf("child wrote %d into shared memory\n", *counter);
+    munmap(counter, 4096);
+    return 0;
+}
+@end
+
+@entry shm_open
+@also shm_unlink
+@header sys/mman.h
+@syntax int shm_open(const char *name, int oflag, mode_t mode);
+@syntax int shm_unlink(const char *name);
+@summary Named shared memory that unrelated processes can map.
+@desc
+name looks like "/mybuffer". Open with O_RDWR | O_CREAT, give it a size
+with ftruncate, then mmap(..., MAP_SHARED, fd, 0). Another program that
+opens the same name sees the same bytes - rozwm and its windows share
+their pictures this way. shm_unlink removes the name.
+@returns
+A descriptor, or -1. shm_unlink: 0 or -1.
+@see mmap ftruncate
+@check compile
+@example
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+
+int main(void)
+{
+    char *p;
+    int fd = shm_open("/demo-shm", O_RDWR | O_CREAT, 0600);
+    if (fd < 0) { perror("shm_open"); return 1; }
+    ftruncate(fd, 4096);
+    p = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (p == MAP_FAILED) { perror("mmap"); return 1; }
+    strcpy(p, "visible to every process that maps /demo-shm");
+    printf("%s\n", p);
+    munmap(p, 4096);
+    close(fd);
+    shm_unlink("/demo-shm");
+    return 0;
+}
+@end
+
+@entry readv
+@also writev preadv pwritev iovec
+@header sys/uio.h
+@syntax ssize_t readv(int fd, const struct iovec *iov, int count);
+@syntax ssize_t writev(int fd, const struct iovec *iov, int count);
+@syntax ssize_t preadv(int fd, const struct iovec *iov, int count, off_t offset);
+@syntax ssize_t pwritev(int fd, const struct iovec *iov, int count, off_t offset);
+@summary Read or write several buffers in one call.
+@desc
+struct iovec { void *iov_base; size_t iov_len; } describes one buffer.
+writev sends a header and a body without copying them together first.
+preadv/pwritev also take an offset, like pread.
+@returns
+Total bytes moved, or -1.
+@see read write pread
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/uio.h>
+
+int main(void)
+{
+    char head[] = "header: ", body[] = "body text\n";
+    struct iovec v[2];
+    v[0].iov_base = head; v[0].iov_len = sizeof head - 1;
+    v[1].iov_base = body; v[1].iov_len = sizeof body - 1;
+    fflush(stdout);
+    printf("\n(writev wrote %ld bytes)\n", (long)writev(STDOUT_FILENO, v, 2));
+    return 0;
+}
+@end
+
+@entry ioctl
+@also TIOCGWINSZ winsize
+@header sys/ioctl.h
+@syntax int ioctl(int fd, unsigned long request, ...);
+@summary Device-specific requests (terminal size and more).
+@desc
+The request number decides what the third argument is. The most used one:
+TIOCGWINSZ fills a struct winsize { ws_row, ws_col, ... } with the
+terminal size. rozOS also has TIOCSWINSZ, TIOCGPGRP/TIOCSPGRP, and its own
+TIOCROZ... requests for the console.
+@returns
+Usually 0, or -1 (ENOTTY: not a terminal).
+@see isatty tcgetattr
+@example
+#include <stdio.h>
+#include <sys/ioctl.h>
+
+int main(void)
+{
+    struct winsize ws;
+    if (ioctl(1, TIOCGWINSZ, &ws) == 0)
+        printf("terminal: %d columns x %d rows\n", ws.ws_col, ws.ws_row);
+    else
+        printf("standard output is not a terminal\n");
+    return 0;
+}
+@end

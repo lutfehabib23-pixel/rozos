@@ -216,6 +216,8 @@ static int write_menu(void)
     fprintf(f, "# rozOS boot menu — kinstall লেখে (হাতে বদলালে পরের kinstall-এ নতুন করে লেখা হবে)\n");
     fprintf(f, "# help kinstall, help boot-menu\n\n");
     fprintf(f, "timeout: 3\n");
+    if (access(BOOT "/boot-wallpaper.jpg", F_OK) == 0)        /* ধাপ ১৯খ: বুট পর্দার ছবি */
+        fprintf(f, "wallpaper: boot():/boot-wallpaper.jpg\nwallpaper_style: centered\nbackdrop: 000000\nterm_background: ff000000\n");
     load_resolution();
     for (i = 0; i < nids; i++) if (!strcmp(ids[i], def_id)) def = i + 1;
     if (!strcmp(def_id, "factory")) def = nids + 1;

@@ -1708,8 +1708,8 @@ static void test_phase19a(void)
     ok = t && strstr(t, "Syntax:") && strstr(t, "Example:") && strstr(t, "size_t strlen");
     free(t);
     {
-        const char *h[16];
-        int nh = cref_headers(h, 16), i, has_math = 0;
+        const char *h[128];                          /* ধাপ ১৯খ: হেডার এখন ৫৫টা */
+        int nh = cref_headers(h, 128), i, has_math = 0;
         for (i = 0; i < nh; i++) if (!strcmp(h[i], "math.h")) has_math = 1;
         ok = ok && nh >= 7 && has_math;
     }
@@ -1740,6 +1740,89 @@ static void test_phase19a(void)
     check(ok, "cref -x puts prints the example program");
 }
 
+/* ধাপ ১৯খ: POSIX-এর পাতা (unistd, signal, pthread, socket ...), উদাহরণ rozOS-এর tcc দিয়ে
+ * কম্পাইল করে চালানো, বুট ছবি */
+static void test_phase19b(void)
+{
+    const cref_entry *e, *hits[16];
+    int n, ok, st, i;
+    const char *need[] = { "unistd.h", "fcntl.h", "sys/stat.h", "signal.h", "pthread.h", "sys/socket.h",
+                           "netdb.h", "termios.h", "regex.h", "wchar.h", "dirent.h", "sys/mman.h" };
+
+    n = cref_load(NULL);
+    check(n >= 330, "C reference has the POSIX pages too (330+)");
+    e = cref_find("pthread_mutex_lock");
+    ok = e && !strcmp(e->header, "pthread.h") && cref_find("pthread_mutex_unlock") == e &&
+         cref_find("fork") && !strcmp(cref_find("fork")->header, "unistd.h") &&
+         cref_find("execlp") == cref_find("execvp") && cref_find("FD_SET") == cref_find("select");
+    check(ok, "cref_find: pthread_mutex_*, fork, exec family, FD_SET");
+    {
+        const char *h[128];
+        int nh = cref_headers(h, 128), k, found = 0;
+        for (i = 0; i < (int)(sizeof need / sizeof need[0]); i++)
+            for (k = 0; k < nh; k++) if (!strcmp(h[k], need[i])) { found++; break; }
+        check(found == (int)(sizeof need / sizeof need[0]) && nh >= 50, "cref headers: unistd, signal, pthread, socket ...");
+    }
+    n = cref_search("semaphore", hits, 16);
+    ok = 0;
+    while (n-- > 0) if (!strcmp(hits[n]->name, "sem_init")) ok = 1;
+    check(ok, "cref_search finds sem_init for 'semaphore'");
+
+    if (access("/bin/tcc", X_OK) == 0) {
+        /* cref -x pipe > ফাইল, tcc দিয়ে কম্পাইল, চালিয়ে আউটপুট দেখা */
+        static const char *const ex[] = { "pipe", "pthread_create", "regcomp" };
+        static const char *const want[] = { "parent got: hello through the pipe", "= 500500", "year 2026" };
+        int good = 0;
+        for (i = 0; i < 3; i++) {
+            char *xargv[] = { "cref", "-x", (char *)ex[i], NULL };
+            char *cargv[] = { "tcc", "-o", "/tmp/cref19b", "/tmp/cref19b.c", NULL };
+            char *rargv[] = { "cref19b", NULL };
+            char buf[512];
+            int fd, saved;
+            size_t got;
+            FILE *f;
+            fflush(stdout);
+            fd = open("/tmp/cref19b.c", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            saved = dup(1);
+            dup2(fd, 1);
+            close(fd);
+            ok = run("/bin/cref", xargv, &st) > 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0;
+            fflush(stdout);
+            dup2(saved, 1);
+            close(saved);
+            ok = ok && run("/bin/tcc", cargv, &st) > 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0;
+            if (ok) {
+                fd = open("/tmp/cref19b.out", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                saved = dup(1);
+                dup2(fd, 1);
+                close(fd);
+                ok = run("/tmp/cref19b", rargv, &st) > 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0;
+                fflush(stdout);
+                dup2(saved, 1);
+                close(saved);
+            }
+            f = ok ? fopen("/tmp/cref19b.out", "r") : NULL;
+            got = f ? fread(buf, 1, sizeof buf - 1, f) : 0;
+            if (f) fclose(f);
+            buf[got] = 0;
+            if (ok && strstr(buf, want[i])) good++;
+            else printf("    (example %s: %s)\n", ex[i], ok ? buf : "did not build/run");
+        }
+        unlink("/tmp/cref19b.c");
+        unlink("/tmp/cref19b.out");
+        unlink("/tmp/cref19b");
+        check(good == 3, "POSIX examples (pipe+fork, threads, regex) build with tcc and run");
+    } else {
+        check(1, "tcc not installed - POSIX example test skipped");
+    }
+    {
+        unsigned char m[3] = {0};
+        FILE *f = fopen("/usr/share/images/rozos-boot.jpg", "rb");
+        if (f) { fread(m, 1, 3, f); fclose(f); }
+        check(m[0] == 0xff && m[1] == 0xd8 && m[2] == 0xff, "boot picture /usr/share/images/rozos-boot.jpg (JPEG)");
+    }
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -1764,6 +1847,7 @@ int main(int argc, char **argv)
     test_phase18a();
     test_phase18b();
     test_phase19a();
+    test_phase19b();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

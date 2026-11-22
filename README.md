@@ -6,7 +6,7 @@
 
 rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphical desktop. It includes a C compiler, a text editor, `make`, a TCP/IP stack with HTTPS, and a package manager, so you can write, compile and even rebuild the rozOS kernel **from inside rozOS itself**.
 
-> Status: hobby / educational OS, under active development (current: **0.19.0-phase19a**).
+> Status: hobby / educational OS, under active development (current: **0.19.1-phase19b**).
 > It runs in QEMU. Real hardware has not been tested yet.
 
 ---
@@ -15,7 +15,7 @@ rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphica
 
 | Area | What exists today |
 |---|---|
-| **Boot** | Limine, BIOS + UEFI, ISO and GPT disk image, boot menu with several kernels (`kinstall`) |
+| **Boot** | Limine, BIOS + UEFI, ISO and GPT disk image, boot menu with several kernels (`kinstall`), rozOS logo behind the menu and as a splash before the desktop |
 | **Kernel** | x86_64 long mode, GDT/IDT, PIC/PIT, PMM + VMM (4-level paging), kernel heap, preemptive multitasking, threads (`clone`, `futex`, TLS), `fork`/`exec`/`wait`, Linux-like syscall ABI |
 | **Processes** | process groups and sessions, Ctrl+C to the foreground job, real signal handlers (`sigaction`, SA_SIGINFO, SA_RESTART, masks, `sigsuspend`, `sigaltstack`, `alarm`/`setitimer`, SIGCHLD, SIGWINCH, catching SIGSEGV/SIGFPE) |
 | **Filesystems** | VFS, ext2 (read/write root), FAT32 (boot partition), devfs, tmpfs, initrd; `rename()`, `mount`/`umount` |
@@ -32,7 +32,7 @@ rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphica
 | **Desktop** | **rozwm** compositing window manager: flicker-free damage-based drawing, movable/resizable windows with minimise/maximise/close, Start menu, taskbar, clock; **rozterm** terminal windows (VT100, scrollback, copy and paste, blinking cursor); dark 3D theme (Ebony, Obsidian, Onyx, Jet Black) |
 | **Desktop apps** | **Code** (graphical C editor: menus, syntax colours, compile and run with tcc, clickable errors), **Files** (file manager), calculator, paint, image viewer |
 | **Shell** | `rozsh`: pipes, redirection, `&&`/`||`, job control, history; about 50 programs in `/bin` |
-| **C reference** | Turbo C-style help for C: the language and every function of `<stdio.h>`, `<stdlib.h>`, `<string.h>`, `<strings.h>`, `<ctype.h>`, `<math.h>`, `<time.h>` (214 pages) with syntax, explanation and a runnable example; Ctrl+F1 on a word in Code or `edit`, the `crefview` window (Copy / Try it), and `cref` in a terminal; every example is compiled and run by `make cref-check` |
+| **C reference** | Turbo C-style help for C: the language and every function of `<stdio.h>`, `<stdlib.h>`, `<string.h>`, `<strings.h>`, `<ctype.h>`, `<math.h>`, `<time.h>`, and POSIX - `<unistd.h>`, `<fcntl.h>`, `<sys/*.h>`, `<signal.h>`, `<pthread.h>`, sockets, `<termios.h>`, `<regex.h>`, `<wchar.h>`, `<locale.h>`, `<iconv.h>` ... (343 pages, 55 headers) with syntax, explanation and a runnable example; Ctrl+F1 on a word in Code or `edit`, the `crefview` window (Copy / Try it), and `cref` in a terminal; every example is compiled and run by `make cref-check` |
 | **Docs** | 108 built-in help pages (`help`, `help desktop`, `help syscalls`, …) |
 
 ---

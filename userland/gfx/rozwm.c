@@ -1050,6 +1050,45 @@ static void mouse_event(const gfx_event *ev)
 
 /* ---------- শুরু, লুপ, শেষ ---------- */
 
+/* ধাপ ১৯খ: ডেস্কটপ আসার আগে বুট ছবি (splash) — /etc/rozos.conf-এর splash= (খালি = বন্ধ),
+ * splash_ms= (কমপক্ষে কতক্ষণ দেখাবে)। ছবি অনুপাত ঠিক রেখে পর্দায় বসে, চারপাশ কালো। */
+static long splash_until;
+
+static void show_splash(void)
+{
+    FILE *f = fopen("/etc/rozos.conf", "r");
+    char line[256], path[200] = "/usr/share/images/rozos-boot.jpg";
+    int ms = 1500;
+    gfx_surface *img;
+    if (f) {
+        while (fgets(line, sizeof(line), f)) {
+            char *v = strchr(line, '=');
+            if (line[0] == '#' || !v) continue;
+            *v++ = '\0';
+            v[strcspn(v, "\r\n")] = '\0';
+            if (!strcmp(line, "splash")) snprintf(path, sizeof(path), "%s", v);
+            else if (!strcmp(line, "splash_ms")) ms = atoi(v);
+        }
+        fclose(f);
+    }
+    if (!path[0] || ms <= 0 || !(img = gfx_load_image(path))) return;
+    {
+        int dw = W, dh = (int)((long)img->h * W / img->w);
+        if (dh > H) { dh = H; dw = (int)((long)img->w * H / img->h); }
+        gfx_fill_rect(S, 0, 0, W, H, 0x000000);
+        gfx_blit_scaled(S, (W - dw) / 2, (H - dh) / 2, dw, dh, img);
+        gfx_present();
+        gfx_surface_free(img);
+    }
+    splash_until = gfx_ticks_ms() + ms;
+}
+
+static void splash_wait(void)
+{
+    long left = splash_until - gfx_ticks_ms();
+    if (splash_until && left > 0) gfx_sleep_ms((int)left);
+}
+
 static void load_config(void)
 {
     FILE *f = fopen("/etc/rozos.conf", "r");
@@ -1129,6 +1168,7 @@ int main(int argc, char **argv)
     }
     signal(SIGINT, SIG_IGN);
     signal(SIGPIPE, SIG_IGN);
+    show_splash();
     load_config();
 
     listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -1140,6 +1180,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "rozwm: %s: %s (is rozwm already running?)\n", ROZWM_SOCKET, strerror(errno));
         return 1;
     }
+    splash_wait();
     mx = W / 2;
     my = H / 2;
     damage_all();
