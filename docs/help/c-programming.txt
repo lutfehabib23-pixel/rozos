@@ -22,6 +22,8 @@
 
 == What can I use? ==
 Everything in [[rozlibc]]: stdio, stdlib, string, math, time, files,
-directories, fork/exec. Not yet: threads, sockets, signals handlers.
+directories, fork/exec, threads ([[threads]]), sockets ([[sockets]]),
+signal handlers ([[signals]]). Every function with an example: [[cref]]
+(Ctrl+F1 on a word in Code or edit).
 Your program can also read the console directly with read(0, ...) -
 the console is raw, see [[keys]].

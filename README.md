@@ -6,7 +6,7 @@
 
 rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphical desktop. It includes a C compiler, a text editor, `make`, a TCP/IP stack with HTTPS, and a package manager, so you can write, compile and even rebuild the rozOS kernel **from inside rozOS itself**.
 
-> Status: hobby / educational OS, under active development (current: **0.18.1-phase18b**).
+> Status: hobby / educational OS, under active development (current: **0.19.0-phase19a**).
 > It runs in QEMU. Real hardware has not been tested yet.
 
 ---
@@ -32,7 +32,8 @@ rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphica
 | **Desktop** | **rozwm** compositing window manager: flicker-free damage-based drawing, movable/resizable windows with minimise/maximise/close, Start menu, taskbar, clock; **rozterm** terminal windows (VT100, scrollback, copy and paste, blinking cursor); dark 3D theme (Ebony, Obsidian, Onyx, Jet Black) |
 | **Desktop apps** | **Code** (graphical C editor: menus, syntax colours, compile and run with tcc, clickable errors), **Files** (file manager), calculator, paint, image viewer |
 | **Shell** | `rozsh`: pipes, redirection, `&&`/`||`, job control, history; about 50 programs in `/bin` |
-| **Docs** | 107 built-in help pages (`help`, `help desktop`, `help syscalls`, …) |
+| **C reference** | Turbo C-style help for C: the language and every function of `<stdio.h>`, `<stdlib.h>`, `<string.h>`, `<strings.h>`, `<ctype.h>`, `<math.h>`, `<time.h>` (214 pages) with syntax, explanation and a runnable example; Ctrl+F1 on a word in Code or `edit`, the `crefview` window (Copy / Try it), and `cref` in a terminal; every example is compiled and run by `make cref-check` |
+| **Docs** | 108 built-in help pages (`help`, `help desktop`, `help syscalls`, …) |
 
 ---
 
@@ -85,6 +86,7 @@ help            index of all help pages
 systest         self-test (191 checks should pass)
 snake, breakout, tetris, platformer   games (Start > Games); help rozgame to write your own
 luagame /usr/share/games/stars.lua    a game in Lua (help luagame)
+cref printf     C reference in the terminal; crefview, or Ctrl+F1 in Code/edit
 lsusb           USB devices; pen drives appear on /mnt/usb
 code hello.c    graphical editor (F5 runs);  edit hello.c in a terminal
 files           file manager
@@ -110,6 +112,7 @@ userland/      init, shell, coreutils, editor, net tools, gfx apps, games, rozwm
 sysroot/       files copied as-is to the root disk (/etc, /usr/share, apps, fonts)
 modules/       example kernel modules (built into /lib/modules/*.ko)
 docs/help/     the built-in help pages (plain text, [[links]])
+docs/cref/     the C reference pages (checked with make cref-check)
 ports/         build glue for TinyCC, pdpmake, BearSSL, packages
 toolchain/     host scripts: disk image, boot menu, fetchers, font converter, game art
 config.mk      build settings (CROSS, KVM, QEMU flags, memory)

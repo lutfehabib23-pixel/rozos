@@ -1,0 +1,383 @@
+# rozOS C reference - <time.h> (phase 19a)
+# time_t counts seconds since 1 Jan 1970 00:00 UTC. The local time zone comes from the
+# TZ variable (export TZ=Asia/Dhaka, or a POSIX rule like TZ=BDT-6), see `help date`.
+
+@entry time
+@also time_t
+@header time.h
+@syntax time_t time(time_t *t);
+@summary The current time as seconds since 1970 (UTC).
+@desc
+Use localtime or strftime to turn it into a readable date, difftime to
+subtract two times. Also good as a seed: srand(time(NULL)).
+@returns
+The time (also stored in *t if t is not NULL), or -1.
+@see localtime strftime difftime clock_gettime
+@example
+#include <stdio.h>
+#include <time.h>
+
+int main(void)
+{
+    time_t now = time(NULL);
+    printf("seconds since 1970: %lld\n", (long long)now);
+    printf("that is about %lld years\n", (long long)now / (365 * 24 * 3600));
+    printf("now: %s", ctime(&now));
+    return 0;
+}
+@end
+
+@entry localtime
+@also localtime_r struct-tm tm
+@header time.h
+@syntax struct tm *localtime(const time_t *t);
+@syntax struct tm *localtime_r(const time_t *t, struct tm *result);
+@summary Split a time_t into year, month, day, hour ... in the local time zone.
+@desc
+struct tm fields:
+  tm_year  years since 1900        tm_mon   month 0-11 (0 = January!)
+  tm_mday  day 1-31                tm_hour 0-23   tm_min 0-59   tm_sec 0-60
+  tm_wday  0-6 (0 = Sunday)        tm_yday  0-365
+  tm_isdst daylight saving         tm_gmtoff seconds east of UTC, tm_zone name
+localtime returns a pointer to a static struct (overwritten by the next
+call); localtime_r fills your own struct (safe with threads).
+@returns
+A pointer to the struct tm, or NULL.
+@see gmtime mktime strftime time
+@example
+#include <stdio.h>
+#include <time.h>
+
+int main(void)
+{
+    static const char *const days[] = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
+    time_t now = time(NULL);
+    struct tm t;
+    localtime_r(&now, &t);
+    printf("%02d/%02d/%d %02d:%02d, %s, day %d of the year (%s)\n",
+           t.tm_mday, t.tm_mon + 1, t.tm_year + 1900, t.tm_hour, t.tm_min,
+           days[t.tm_wday], t.tm_yday + 1, t.tm_zone ? t.tm_zone : "?");
+    return 0;
+}
+@end
+
+@entry gmtime
+@also gmtime_r
+@header time.h
+@syntax struct tm *gmtime(const time_t *t);
+@syntax struct tm *gmtime_r(const time_t *t, struct tm *result);
+@summary Like localtime, but in UTC.
+@returns
+A pointer to the struct tm, or NULL.
+@see localtime timegm
+@example
+#include <stdio.h>
+#include <time.h>
+
+int main(void)
+{
+    time_t zero = 0;
+    struct tm t;
+    gmtime_r(&zero, &t);
+    printf("time 0 is %d-%02d-%02d %02d:%02d UTC\n", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min);
+    return 0;
+}
+@end
+
+@entry mktime
+@also timegm
+@header time.h
+@syntax time_t mktime(struct tm *tm);
+@syntax time_t timegm(struct tm *tm);
+@summary Turn a date (struct tm, local time) back into a time_t.
+@desc
+Fields out of range are corrected: day 32 becomes the next month, so
+"add 100 days" is tm_mday += 100; mktime(&tm). It also fills in tm_wday
+and tm_yday. timegm treats the struct as UTC.
+@returns
+The time, or -1.
+@see localtime difftime strftime
+@example
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+
+int main(void)
+{
+    struct tm t;
+    char buf[64];
+    memset(&t, 0, sizeof t);
+    t.tm_year = 2026 - 1900;
+    t.tm_mon = 11;             /* December */
+    t.tm_mday = 16;
+    t.tm_hour = 12;
+    t.tm_isdst = -1;
+    mktime(&t);
+    strftime(buf, sizeof buf, "%A", &t);
+    printf("16 December 2026 is a %s\n", buf);
+    t.tm_mday += 100;
+    mktime(&t);
+    strftime(buf, sizeof buf, "%d %B %Y", &t);
+    printf("100 days later: %s\n", buf);
+    return 0;
+}
+@end
+
+@entry difftime
+@header time.h
+@syntax double difftime(time_t end, time_t start);
+@summary Seconds between two times.
+@see time mktime clock
+@example
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+
+int main(void)
+{
+    struct tm a, b;
+    double days;
+    memset(&a, 0, sizeof a);
+    memset(&b, 0, sizeof b);
+    a.tm_year = 2026 - 1900; a.tm_mon = 0; a.tm_mday = 1; a.tm_hour = 12;
+    b.tm_year = 2026 - 1900; b.tm_mon = 11; b.tm_mday = 25; b.tm_hour = 12;
+    days = difftime(timegm(&b), timegm(&a)) / 86400;
+    printf("from 1 Jan to 25 Dec 2026: %.0f days\n", days);
+    return 0;
+}
+@end
+
+@entry strftime
+@header time.h
+@syntax size_t strftime(char *buf, size_t size, const char *format, const struct tm *tm);
+@summary Format a date and time as text, with % codes.
+@desc
+  %Y 2026   %y 26   %m 11   %B November   %b Nov   %d 23   %e 23 (space-padded)
+  %A Monday %a Mon  %H 14 (24 h)  %I 02 (12 h)  %M 05  %S 09  %p PM
+  %j day of year  %U %W week number  %Z time zone  %z +0600
+  %F = %Y-%m-%d   %T = %H:%M:%S   %D = %m/%d/%y   %c full date and time
+  %s seconds since 1970   %%  a %
+@returns
+The number of characters written (without '\0'), or 0 if buf was too small.
+@see localtime strptime printf-format
+@example
+#include <stdio.h>
+#include <time.h>
+
+int main(void)
+{
+    time_t now = time(NULL);
+    struct tm t;
+    char buf[100];
+    localtime_r(&now, &t);
+    strftime(buf, sizeof buf, "%A, %d %B %Y  %I:%M %p", &t);
+    printf("%s\n", buf);
+    strftime(buf, sizeof buf, "%F %T %z", &t);
+    printf("%s\n", buf);
+    return 0;
+}
+@end
+
+@entry strptime
+@header time.h
+@syntax char *strptime(const char *s, const char *format, struct tm *tm);
+@summary Read a date from text (the opposite of strftime).
+@returns
+A pointer just after the part that was read, or NULL if it did not match.
+@see strftime mktime
+@example
+#define _XOPEN_SOURCE 700
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+
+int main(void)
+{
+    struct tm t;
+    char out[64];
+    memset(&t, 0, sizeof t);
+    if (strptime("2026-03-26 09:30", "%Y-%m-%d %H:%M", &t) == NULL) return 1;
+    t.tm_isdst = -1;
+    mktime(&t);
+    strftime(out, sizeof out, "%A %d %B, %H:%M", &t);
+    printf("%s\n", out);
+    return 0;
+}
+@end
+
+@entry asctime
+@also asctime_r
+@header time.h
+@syntax char *asctime(const struct tm *tm);
+@syntax char *asctime_r(const struct tm *tm, char *buf);
+@summary A fixed date format: "Mon Nov 23 14:05:09 2026\n".
+@desc
+Old style; strftime gives you any format you like. asctime_r needs a
+buffer of at least 26 bytes.
+@see ctime strftime
+@example
+#include <stdio.h>
+#include <time.h>
+
+int main(void)
+{
+    time_t now = time(NULL);
+    struct tm t;
+    gmtime_r(&now, &t);
+    printf("UTC: %s", asctime(&t));
+    return 0;
+}
+@end
+
+@entry ctime
+@also ctime_r
+@header time.h
+@syntax char *ctime(const time_t *t);
+@syntax char *ctime_r(const time_t *t, char *buf);
+@summary asctime(localtime(t)) in one call.
+@see asctime time
+@example
+#include <stdio.h>
+#include <time.h>
+
+int main(void)
+{
+    time_t t = time(NULL);
+    char buf[32];
+    printf("now:      %s", ctime(&t));
+    t += 7 * 24 * 3600;
+    printf("in a week %s", ctime_r(&t, buf));
+    return 0;
+}
+@end
+
+@entry clock
+@also CLOCKS_PER_SEC clock_t
+@header time.h
+@syntax clock_t clock(void);
+@summary Processor time used by the program (to measure how long code takes).
+@desc
+Divide by CLOCKS_PER_SEC to get seconds. For wall-clock time with
+nanoseconds use clock_gettime(CLOCK_MONOTONIC, ...).
+@returns
+The time used, or (clock_t)-1.
+@see clock_gettime difftime
+@example
+#include <stdio.h>
+#include <time.h>
+
+int main(void)
+{
+    clock_t start = clock();
+    volatile double x = 0;
+    long i;
+    for (i = 0; i < 3000000; i++) x += i * 0.5;
+    printf("loop took %.3f s of CPU time\n", (double)(clock() - start) / CLOCKS_PER_SEC);
+    return 0;
+}
+@end
+
+@entry clock_gettime
+@also clock_getres clock_settime timespec_get CLOCK_REALTIME CLOCK_MONOTONIC struct-timespec timespec
+@header time.h
+@syntax int clock_gettime(clockid_t clock, struct timespec *ts);
+@syntax int clock_getres(clockid_t clock, struct timespec *res);
+@syntax int clock_settime(clockid_t clock, const struct timespec *ts);
+@syntax int timespec_get(struct timespec *ts, int base);
+@summary Precise time: seconds + nanoseconds.
+@desc
+CLOCK_REALTIME is the date (like time()); CLOCK_MONOTONIC counts from boot
+and never jumps - use it to measure intervals and for game loops.
+struct timespec has tv_sec and tv_nsec. timespec_get(&ts, TIME_UTC) is the
+C11 form. clock_settime is not possible in rozOS yet (EPERM).
+@returns
+0, or -1 on error. timespec_get returns base, or 0.
+@see time nanosleep clock
+@example
+#include <stdio.h>
+#include <time.h>
+
+static double now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+int main(void)
+{
+    double t0 = now();
+    struct timespec res, wall;
+    volatile long i, s = 0;
+    for (i = 0; i < 2000000; i++) s += i;
+    printf("took %.6f s\n", now() - t0);
+    clock_getres(CLOCK_MONOTONIC, &res);
+    printf("resolution %ld ns\n", res.tv_nsec);
+    timespec_get(&wall, TIME_UTC);
+    printf("UTC seconds %lld\n", (long long)wall.tv_sec);
+    return 0;
+}
+@end
+
+@entry nanosleep
+@also clock_nanosleep
+@header time.h
+@syntax int nanosleep(const struct timespec *req, struct timespec *rem);
+@syntax int clock_nanosleep(clockid_t clock, int flags, const struct timespec *req, struct timespec *rem);
+@summary Sleep for a precise time (seconds and nanoseconds).
+@desc
+If a signal interrupts it, it returns -1 with errno EINTR and the time
+left in *rem. sleep() (seconds) and usleep() (microseconds) in
+<unistd.h> are simpler.
+@returns
+0, or -1.
+@see clock_gettime clock
+@example
+#include <stdio.h>
+#include <time.h>
+
+int main(void)
+{
+    struct timespec quarter = { 0, 250000000 };     /* 0.25 s */
+    int i;
+    for (i = 3; i > 0; i--) {
+        printf("%d...\n", i);
+        fflush(stdout);
+        nanosleep(&quarter, NULL);
+    }
+    printf("go!\n");
+    return 0;
+}
+@end
+
+@entry tzset
+@also TZ tzname timezone daylight
+@header time.h
+@syntax void tzset(void);
+@summary Read the TZ variable again (after you change it with setenv).
+@desc
+TZ can be a name from the built-in table ("Asia/Dhaka", "Europe/London",
+"UTC" ...) or a POSIX rule ("BDT-6": 6 hours east of UTC; rules with
+daylight saving work too). After tzset, tzname[0] is the zone name and
+timezone is seconds WEST of UTC.
+@see localtime setenv strftime
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+int main(void)
+{
+    time_t t = 1800000000;
+    char buf[64];
+    const char *zones[] = { "UTC", "Asia/Dhaka", "America/New_York" };
+    int i;
+    for (i = 0; i < 3; i++) {
+        setenv("TZ", zones[i], 1);
+        tzset();
+        strftime(buf, sizeof buf, "%Y-%m-%d %H:%M %Z", localtime(&t));
+        printf("%-18s %s\n", zones[i], buf);
+    }
+    return 0;
+}
+@end

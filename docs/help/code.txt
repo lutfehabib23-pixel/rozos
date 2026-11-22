@@ -11,7 +11,8 @@ a .c file in [[filemanager|Files]].
   Search  Find... Ctrl+F, Find Next F3, Replace... Ctrl+E, Go to Line Ctrl+G
   Build   Compile Ctrl+B (F7), Compile and Run Ctrl+R (F5)
   View    line numbers, Output panel F8, text size 16 / 20 / 24
-  Help    Keyboard shortcuts F1
+  Help    Keyboard shortcuts F1, C reference: word at cursor Ctrl+F1,
+          C reference: index Shift+F1 ([[cref]] - every C function with an example)
 F10 opens the menu from the keyboard (arrows, Enter, Esc).
 
 == Editing ==

@@ -748,7 +748,8 @@ enum {
     M_FIND, M_NEXT, M_REPL, M_GOTO,
     M_COMPILE, M_RUN, M_COMPILE2, M_RUN2,
     M_NUMS, M_OUT, M_F16, M_F20, M_F24,
-    M_KEYS, M_ABOUT
+    M_KEYS, M_ABOUT,
+    M_CREF_WORD, M_CREF_INDEX                    /* ধাপ ১৯ক */
 };
 static const struct ui_menuitem file_items[] = {
     { "New", "Ctrl+N", M_NEW }, { "New game", NULL, M_NEWGAME }, { "Open...", "Ctrl+O", M_OPEN }, { "-", NULL, 0 },
@@ -773,11 +774,14 @@ static struct ui_menuitem view_items[] = {
     { "(o) Text size 16", NULL, M_F16 }, { "( ) Text size 20", NULL, M_F20 }, { "( ) Text size 24", NULL, M_F24 }
 };
 static const struct ui_menuitem help_items[] = {
-    { "Keyboard shortcuts", "F1", M_KEYS }, { "About Code", NULL, M_ABOUT }
+    { "Keyboard shortcuts", "F1", M_KEYS },
+    { "C reference: word at cursor", "Ctrl+F1", M_CREF_WORD },   /* ধাপ ১৯ক */
+    { "C reference: index", "Shift+F1", M_CREF_INDEX },
+    { "-", NULL, 0 }, { "About Code", NULL, M_ABOUT }
 };
 static const struct ui_menu menus[] = {
     { "File", file_items, 8 }, { "Edit", edit_items, 8 }, { "Search", search_items, 5 },
-    { "Build", build_items, 5 }, { "View", view_items, 6 }, { "Help", help_items, 2 }
+    { "Build", build_items, 5 }, { "View", view_items, 6 }, { "Help", help_items, 5 }
 };
 
 static void set_font(int px)
@@ -801,6 +805,32 @@ static void menu_labels(void)
     view_items[3].label = font_px == 16 ? "(o) Text size 16" : "( ) Text size 16";
     view_items[4].label = font_px == 20 ? "(o) Text size 20" : "( ) Text size 20";
     view_items[5].label = font_px == 24 ? "(o) Text size 24" : "( ) Text size 24";
+}
+
+/* ধাপ ১৯ক: C সহায়িকা (crefview) — word = 1 হলে কার্সরের শব্দের পাতা */
+static void cref_open(int word)
+{
+    char w[64] = "";
+    const char *argv[3];
+    if (word && cy >= 0 && cy < nl) {
+        const struct line *l = &L[cy];
+        int a = cx, b;
+        if (a > l->len) a = l->len;
+        if (a > 0 && (a == l->len || !(isalnum((unsigned char)l->s[a]) || l->s[a] == '_')) &&
+            (isalnum((unsigned char)l->s[a - 1]) || l->s[a - 1] == '_')) a--;
+        while (a > 0 && (isalnum((unsigned char)l->s[a - 1]) || l->s[a - 1] == '_')) a--;
+        b = a;
+        while (b < l->len && (isalnum((unsigned char)l->s[b]) || l->s[b] == '_')) b++;
+        if (b > a && (size_t)(b - a) < sizeof(w)) {
+            memcpy(w, l->s + a, (size_t)(b - a));
+            w[b - a] = 0;
+        }
+    }
+    argv[0] = "crefview";
+    argv[1] = w[0] ? w : NULL;
+    argv[2] = NULL;
+    if (ui_launch(argv, NULL) < 0) ui_msgbox("Code", "Cannot start crefview", UI_MB_OK | UI_MB_ERROR);
+    else if (word && !w[0]) snprintf(status_msg, sizeof(status_msg), "Put the cursor on a word (like printf) for Ctrl+F1");
 }
 
 static void do_action(int id)
@@ -836,10 +866,13 @@ static void do_action(int id)
                   "Ctrl+F find  F3 find next  Ctrl+E replace   Ctrl+G go to line\n"
                   "Ctrl+B or F7 compile        Ctrl+R or F5 compile and run\n"
                   "F8 output panel   F10 menu   Shift+arrows select\n"
+                  "Ctrl+F1 C help for the word   Shift+F1 C reference index\n"
                   "Ctrl+Left/Right word   Ctrl+Home/End start/end of file\n"
                   "Mouse: click, drag to select, double-click a word, wheel to scroll",
                   UI_MB_OK | UI_MB_INFO);
         break;
+    case M_CREF_WORD: cref_open(1); break;
+    case M_CREF_INDEX: cref_open(0); break;
     case M_ABOUT:
         ui_msgbox("About Code",
                   "Code - the rozOS C editor (phase 14b)\n"
@@ -1051,6 +1084,11 @@ static void frame(void)
     gfx_surface *s;
     int act, W, H, ey, eh, ew, gut, outh, page, i;
     menu_labels();
+    /* ধাপ ১৯ক: Ctrl+F1 / Shift+F1 — মেনুর "F1"-এর আগে ধরা */
+    if (U.key == GFX_KEY_F1 && (U.mods & (GFX_MOD_CTRL | GFX_MOD_SHIFT))) {
+        cref_open((U.mods & GFX_MOD_CTRL) != 0);
+        U.key = 0;
+    }
     act = ui_menubar(&U, 0, 0, U.w, menus, 6);
     if (act) do_action(act);
     s = U.s;

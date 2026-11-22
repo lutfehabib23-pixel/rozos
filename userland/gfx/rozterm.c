@@ -440,7 +440,9 @@ static void send_key(int key, int mods)
             return;
         }
         if (key >= GFX_KEY_F1 && key <= GFX_KEY_F4) {
-            snprintf(b, sizeof(b), "\x1bO%c", 'P' + (key - GFX_KEY_F1));
+            /* ধাপ ১৯ক: Shift/Ctrl/Alt থাকলে xterm-এর মতো ESC[1;<m>P (edit-এর Ctrl+F1) */
+            if (m) snprintf(b, sizeof(b), "\x1b[1;%d%c", m, 'P' + (key - GFX_KEY_F1));
+            else snprintf(b, sizeof(b), "\x1bO%c", 'P' + (key - GFX_KEY_F1));
             pty_puts(b);
         }
     }

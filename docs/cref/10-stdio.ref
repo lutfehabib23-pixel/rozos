@@ -1,0 +1,1251 @@
+# rozOS C reference - <stdio.h> (phase 19a)
+
+@entry printf
+@also vprintf
+@header stdio.h
+@syntax int printf(const char *format, ...);
+@syntax int vprintf(const char *format, va_list ap);
+@summary Print formatted text on the screen (stdout).
+@desc
+Writes the format string to stdout, replacing each % code with the next
+argument (see printf-format for all codes). vprintf takes the arguments
+as a va_list - use it inside your own functions with "..." parameters.
+On a terminal stdout is line buffered: text appears at each '\n' (or call
+fflush(stdout)).
+@returns
+The number of characters printed, or a negative value on error.
+@see printf-format fprintf sprintf snprintf puts
+@example
+#include <stdio.h>
+#include <stdarg.h>
+
+static void say(const char *fmt, ...)        /* own printf-like function */
+{
+    va_list ap;
+    printf("[log] ");
+    va_start(ap, fmt);
+    vprintf(fmt, ap);
+    va_end(ap);
+}
+
+int main(void)
+{
+    int n = printf("%s has %d letters and costs %.2f\n", "rozOS", 5, 0.0);
+    say("printf wrote %d characters\n", n);
+    return 0;
+}
+@end
+
+@entry fprintf
+@also vfprintf dprintf vdprintf
+@header stdio.h
+@syntax int fprintf(FILE *stream, const char *format, ...);
+@syntax int vfprintf(FILE *stream, const char *format, va_list ap);
+@syntax int dprintf(int fd, const char *format, ...);
+@syntax int vdprintf(int fd, const char *format, va_list ap);
+@summary printf into a file or another stream (stderr, a file you opened).
+@desc
+Same as printf but writes to stream. fprintf(stderr, ...) is the usual way
+to print error messages (stderr is not buffered). dprintf writes to a file
+descriptor (an int from open()) instead of a FILE *.
+@returns
+The number of characters written, or a negative value on error.
+@see printf fopen fputs printf-format
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f = fopen("scores.txt", "w");
+    if (!f) {
+        fprintf(stderr, "cannot create scores.txt\n");
+        return 1;
+    }
+    fprintf(f, "%-8s %5d\n", "Rahim", 87);
+    fprintf(f, "%-8s %5d\n", "Karim", 92);
+    fclose(f);
+    dprintf(1, "written to scores.txt (fd 1 is stdout)\n");
+    remove("scores.txt");
+    return 0;
+}
+@end
+
+@entry sprintf
+@also vsprintf
+@header stdio.h
+@syntax int sprintf(char *str, const char *format, ...);
+@syntax int vsprintf(char *str, const char *format, va_list ap);
+@summary printf into a char array (no size check - prefer snprintf).
+@desc
+Writes the formatted text and a final '\0' into str. If the text is longer
+than the array, memory after it is overwritten - a classic bug. Use
+snprintf, which takes the size.
+@returns
+The number of characters written (without the '\0').
+@see snprintf asprintf printf
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    char buf[64];
+    int n = sprintf(buf, "%d + %d = %d", 2, 3, 2 + 3);
+    printf("'%s' (%d chars)\n", buf, n);
+    return 0;
+}
+@end
+
+@entry snprintf
+@also vsnprintf
+@header stdio.h
+@syntax int snprintf(char *str, size_t size, const char *format, ...);
+@syntax int vsnprintf(char *str, size_t size, const char *format, va_list ap);
+@summary Safe sprintf: never writes more than size bytes.
+@desc
+Writes at most size-1 characters and always ends with '\0' (when size > 0).
+The return value tells how long the full text would have been, so a
+result >= size means the text was cut. snprintf(NULL, 0, ...) only
+measures.
+@returns
+The length the whole text needs (without '\0'), or negative on error.
+@see sprintf asprintf strlcpy printf-format
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    char small[8];
+    int need = snprintf(small, sizeof small, "temperature %d C", 31);
+    printf("got '%s', needed %d chars%s\n", small, need,
+           need >= (int)sizeof small ? " (cut)" : "");
+    printf("measure only: %d\n", snprintf(NULL, 0, "%f", 3.14));
+    return 0;
+}
+@end
+
+@entry asprintf
+@also vasprintf
+@header stdio.h
+@syntax int asprintf(char **strp, const char *format, ...);
+@syntax int vasprintf(char **strp, const char *format, va_list ap);
+@summary printf into new memory of exactly the right size.
+@desc
+Allocates a buffer with malloc, prints into it and stores its address in
+*strp. You must free() it. Handy when you do not know how long the text
+will be.
+@returns
+The number of characters, or -1 if memory ran out (then *strp is unusable).
+@see snprintf free
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    char *msg;
+    if (asprintf(&msg, "%s-%d-%s", "file", 42, "backup.tar") < 0) return 1;
+    printf("%s\n", msg);
+    free(msg);
+    return 0;
+}
+@end
+
+@entry scanf
+@also vscanf
+@header stdio.h
+@syntax int scanf(const char *format, ...);
+@syntax int vscanf(const char *format, va_list ap);
+@summary Read formatted input from the keyboard (stdin).
+@desc
+Reads text and converts it according to the % codes (see scanf-format),
+storing into the variables whose ADDRESSES you pass (&n). Spaces and
+newlines between numbers are skipped. If the input does not match,
+scanf stops; the wrong text stays in stdin. Reading whole lines with
+fgets and then sscanf is often easier and safer.
+@returns
+The number of values stored (may be less than asked), or EOF at the end
+of input.
+@input
+21 Rahim
+3.5
+@see scanf-format sscanf fscanf fgets
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    int age;
+    char name[32];
+    double hours;
+    printf("Enter your age and name: ");
+    if (scanf("%d %31s", &age, name) != 2) {
+        printf("please type a number and a name\n");
+        return 1;
+    }
+    printf("Hours of sleep: ");
+    if (scanf("%lf", &hours) != 1) return 1;
+    printf("\n%s is %d and sleeps %.1f hours\n", name, age, hours);
+    return 0;
+}
+@end
+
+@entry fscanf
+@also vfscanf
+@header stdio.h
+@syntax int fscanf(FILE *stream, const char *format, ...);
+@syntax int vfscanf(FILE *stream, const char *format, va_list ap);
+@summary scanf from a file.
+@desc
+Like scanf, but reads from stream. A loop "while (fscanf(f, ...) == N)"
+reads a file of records until it ends or a line does not match.
+@returns
+The number of values stored, or EOF at end of file.
+@see scanf sscanf fopen scanf-format
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f = fopen("data.txt", "w+");
+    char name[32];
+    int qty;
+    double price, total = 0;
+    if (!f) return 1;
+    fputs("pen 3 10.5\nbook 2 120\nbag 1 450.75\n", f);
+    rewind(f);
+    while (fscanf(f, "%31s %d %lf", name, &qty, &price) == 3) {
+        printf("%-5s %d x %7.2f\n", name, qty, price);
+        total += qty * price;
+    }
+    printf("total %.2f\n", total);
+    fclose(f);
+    remove("data.txt");
+    return 0;
+}
+@end
+
+@entry sscanf
+@also vsscanf
+@header stdio.h
+@syntax int sscanf(const char *str, const char *format, ...);
+@syntax int vsscanf(const char *str, const char *format, va_list ap);
+@summary scanf from a string: take numbers and words out of text.
+@desc
+Reads from the string str instead of the keyboard. Together with fgets it
+is the safe way to read input: read a whole line, then pick it apart.
+@returns
+The number of values stored, or EOF if str ended before the first one.
+@see scanf-format scanf fgets strtol
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    const char *line = "2026-11-23 01:45 temp=27.5";
+    int y, mo, d, h, mi;
+    double t;
+    if (sscanf(line, "%d-%d-%d %d:%d temp=%lf", &y, &mo, &d, &h, &mi, &t) == 6)
+        printf("date %02d/%02d/%d, time %02d:%02d, %.1f degrees\n", d, mo, y, h, mi, t);
+    return 0;
+}
+@end
+
+@entry fopen
+@header stdio.h
+@syntax FILE *fopen(const char *path, const char *mode);
+@summary Open a file for reading or writing.
+@desc
+  "r"   read (the file must exist)        "r+"  read and write
+  "w"   write: create, or empty it        "w+"  write and read
+  "a"   write at the end (append)         "a+"  append and read
+  add "b" for binary ("rb") - in rozOS text and binary are the same.
+  add "x" ("wx") to fail if the file already exists.
+Paths are like "notes.txt" (current folder) or "/home/notes.txt".
+@returns
+A FILE * to use with the other functions, or NULL (errno says why).
+@see fclose fgets fputs fread fprintf files perror
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f = fopen("hello.txt", "w");
+    if (f == NULL) {
+        perror("hello.txt");
+        return 1;
+    }
+    fputs("Hello, file!\n", f);
+    fclose(f);
+    f = fopen("does-not-exist.txt", "r");
+    if (f == NULL) perror("does-not-exist.txt");
+    remove("hello.txt");
+    return 0;
+}
+@end
+
+@entry fclose
+@header stdio.h
+@syntax int fclose(FILE *stream);
+@summary Close a file (writes what is still in the buffer).
+@desc
+Writes out buffered data and frees the FILE. Do not use the FILE * after
+this. Files still open when the program ends are closed automatically,
+but closing them yourself is good practice (and needed if you open many).
+@returns
+0, or EOF if writing the last data failed.
+@see fopen fflush
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f = fopen("tmp.txt", "w");
+    if (!f) return 1;
+    fprintf(f, "data\n");
+    if (fclose(f) != 0) perror("fclose");
+    else printf("saved and closed\n");
+    remove("tmp.txt");
+    return 0;
+}
+@end
+
+@entry freopen
+@header stdio.h
+@syntax FILE *freopen(const char *path, const char *mode, FILE *stream);
+@summary Re-open an existing stream on a new file (e.g. send stdout to a file).
+@desc
+Closes stream, then opens path with mode on the SAME FILE object.
+Used to redirect stdin/stdout/stderr from inside the program.
+@returns
+stream, or NULL on error.
+@see fopen fclose
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f;
+    char line[64];
+    if (!freopen("out.txt", "w", stdout)) return 1;
+    printf("this line goes into out.txt\n");
+    fclose(stdout);
+    f = fopen("out.txt", "r");
+    if (f && fgets(line, sizeof line, f))
+        fprintf(stderr, "out.txt contains: %s", line);
+    if (f) fclose(f);
+    remove("out.txt");
+    return 0;
+}
+@end
+
+@entry fdopen
+@also fileno fileno_unlocked
+@header stdio.h
+@syntax FILE *fdopen(int fd, const char *mode);
+@syntax int fileno(FILE *stream);
+@summary Turn a file descriptor into a FILE *, and back.
+@desc
+Low-level calls (open, pipe, socket) give an int file descriptor; fdopen
+wraps it so you can use fprintf/fgets. fileno gives the descriptor of a
+FILE (stdin is 0, stdout 1, stderr 2).
+@returns
+fdopen: a FILE * or NULL. fileno: the descriptor, or -1.
+@see fopen popen
+@example
+#include <stdio.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+int main(void)
+{
+    int fd = open("raw.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    FILE *f;
+    if (fd < 0) return 1;
+    f = fdopen(fd, "w");
+    if (!f) return 1;
+    fprintf(f, "written through fd %d\n", fileno(f));
+    fclose(f);                         /* closes fd too */
+    printf("stdin %d, stdout %d, stderr %d\n", fileno(stdin), fileno(stdout), fileno(stderr));
+    unlink("raw.txt");
+    return 0;
+}
+@end
+
+@entry fread
+@also fread_unlocked
+@header stdio.h
+@syntax size_t fread(void *ptr, size_t size, size_t count, FILE *stream);
+@summary Read binary data (count items of size bytes each).
+@desc
+Copies raw bytes from the file into memory - for arrays, structs, images.
+A short count means end of file or an error (check feof / ferror).
+@returns
+The number of whole items read (not bytes).
+@see fwrite fopen feof
+@example
+#include <stdio.h>
+
+struct rec { int id; double value; };
+
+int main(void)
+{
+    struct rec out[3] = { { 1, 1.5 }, { 2, 2.5 }, { 3, 3.5 } }, in[3];
+    FILE *f = fopen("recs.bin", "wb");
+    size_t n, i;
+    if (!f) return 1;
+    fwrite(out, sizeof out[0], 3, f);
+    fclose(f);
+    f = fopen("recs.bin", "rb");
+    if (!f) return 1;
+    n = fread(in, sizeof in[0], 3, f);
+    fclose(f);
+    for (i = 0; i < n; i++) printf("id %d value %.1f\n", in[i].id, in[i].value);
+    remove("recs.bin");
+    return 0;
+}
+@end
+
+@entry fwrite
+@also fwrite_unlocked
+@header stdio.h
+@syntax size_t fwrite(const void *ptr, size_t size, size_t count, FILE *stream);
+@summary Write binary data (count items of size bytes each).
+@desc
+Writes raw memory to the file. Files written this way are read back with
+fread on the same kind of machine.
+@returns
+The number of whole items written; less than count means an error.
+@see fread fopen fputs
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    unsigned char pixels[4] = { 255, 128, 64, 0 };
+    FILE *f = fopen("p.bin", "wb");
+    long size;
+    if (!f) return 1;
+    if (fwrite(pixels, 1, sizeof pixels, f) != sizeof pixels) perror("fwrite");
+    size = ftell(f);
+    fclose(f);
+    printf("wrote %ld bytes\n", size);
+    remove("p.bin");
+    return 0;
+}
+@end
+
+@entry fgetc
+@also getc fgetc_unlocked getc_unlocked
+@header stdio.h
+@syntax int fgetc(FILE *stream);
+@syntax int getc(FILE *stream);
+@summary Read one character from a file.
+@desc
+Returns the next byte as an unsigned char value (0..255), or EOF (-1) at
+the end. Keep the result in an int, not a char, or EOF cannot be told
+apart from byte 255. getc is the same.
+@returns
+The character, or EOF at end of file or on error.
+@see fputc getchar fgets ungetc feof
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f = fopen("count.txt", "w+");
+    int c, lines = 0, chars = 0;
+    if (!f) return 1;
+    fputs("one\ntwo\nthree\n", f);
+    rewind(f);
+    while ((c = fgetc(f)) != EOF) {
+        chars++;
+        if (c == '\n') lines++;
+    }
+    printf("%d characters, %d lines\n", chars, lines);
+    fclose(f);
+    remove("count.txt");
+    return 0;
+}
+@end
+
+@entry getchar
+@also getchar_unlocked
+@header stdio.h
+@syntax int getchar(void);
+@summary Read one character from the keyboard (stdin).
+@desc
+Same as getc(stdin). The terminal sends the line only after Enter, so
+getchar waits for Enter and then returns the characters one by one
+(including the '\n').
+@returns
+The character, or EOF at the end of input.
+@input
+Hello
+@see putchar fgetc fgets
+@example
+#include <stdio.h>
+#include <ctype.h>
+
+int main(void)
+{
+    int c;
+    printf("Type a word: ");
+    while ((c = getchar()) != EOF && c != '\n')
+        putchar(toupper(c));
+    putchar('\n');
+    return 0;
+}
+@end
+
+@entry fgets
+@header stdio.h
+@syntax char *fgets(char *buf, int size, FILE *stream);
+@summary Read one line (safely - at most size-1 characters).
+@desc
+Reads until a newline (which is kept in buf), end of file, or size-1
+characters, then adds '\0'. The best way to read input lines:
+fgets(line, sizeof line, stdin). Remove the '\n' with
+line[strcspn(line, "\n")] = 0.
+@returns
+buf, or NULL at end of file (or on error) when nothing was read.
+@input
+Rahim Uddin
+@see getline sscanf fputs gets
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char line[80];
+    printf("Your full name: ");
+    if (!fgets(line, sizeof line, stdin)) return 1;
+    line[strcspn(line, "\n")] = '\0';           /* cut the newline */
+    printf("\nHello, %s! (%zu characters)\n", line, strlen(line));
+    return 0;
+}
+@end
+
+@entry gets
+@header language
+@summary gets() is not in rozOS - it cannot be used safely. Use fgets.
+@desc
+gets(buf) read a line with no limit, so any long line overflowed the
+buffer. It was removed from C in 2011 and rozlibc does not have it.
+Write fgets(buf, sizeof buf, stdin) instead (and remove the '\n').
+@see fgets getline
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char buf[16];
+    if (fgets(buf, sizeof buf, stdin)) {
+        buf[strcspn(buf, "\n")] = 0;
+        printf("read '%s'\n", buf);
+    } else {
+        printf("no input\n");
+    }
+    return 0;
+}
+@end
+
+@entry getline
+@also getdelim
+@header stdio.h
+@syntax ssize_t getline(char **line, size_t *size, FILE *stream);
+@syntax ssize_t getdelim(char **line, size_t *size, int delim, FILE *stream);
+@summary Read a whole line of any length (the buffer grows by itself).
+@desc
+Start with char *line = NULL; size_t size = 0; getline allocates and
+re-allocates the buffer as needed. The '\n' is kept. free(line) at the
+end. getdelim stops at delim instead of '\n'.
+@returns
+The number of characters read, or -1 at end of file.
+@input
+a short line
+and a much longer second line that would not fit in a small array
+@see fgets free
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    char *line = NULL;
+    size_t size = 0;
+    ssize_t n;
+    int no = 0;
+    while ((n = getline(&line, &size, stdin)) != -1)
+        printf("line %d: %zd chars\n", ++no, n);
+    free(line);
+    return 0;
+}
+@end
+
+@entry ungetc
+@header stdio.h
+@syntax int ungetc(int c, FILE *stream);
+@summary Push one character back so the next read gets it again.
+@desc
+Useful when reading "one too many" characters (e.g. reading a number digit
+by digit). At least one character can be pushed back.
+@returns
+c, or EOF on error.
+@see fgetc getchar
+@example
+#include <stdio.h>
+#include <ctype.h>
+
+static int read_number(FILE *f)
+{
+    int c, n = 0;
+    while ((c = fgetc(f)) != EOF && isdigit(c))
+        n = n * 10 + (c - '0');
+    if (c != EOF) ungetc(c, f);          /* not a digit: give it back */
+    return n;
+}
+
+int main(void)
+{
+    FILE *f = fopen("expr.txt", "w+");
+    if (!f) return 1;
+    fputs("123+45", f);
+    rewind(f);
+    printf("%d", read_number(f));
+    printf(" then '%c'", fgetc(f));
+    printf(" then %d\n", read_number(f));
+    fclose(f);
+    remove("expr.txt");
+    return 0;
+}
+@end
+
+@entry fputc
+@also putc fputc_unlocked putc_unlocked
+@header stdio.h
+@syntax int fputc(int c, FILE *stream);
+@syntax int putc(int c, FILE *stream);
+@summary Write one character to a file.
+@returns
+The character written, or EOF on error.
+@see fgetc putchar fputs
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f = fopen("abc.txt", "w");
+    int c;
+    if (!f) return 1;
+    for (c = 'a'; c <= 'z'; c++) fputc(c, f);
+    fputc('\n', f);
+    fclose(f);
+    printf("wrote the alphabet to abc.txt\n");
+    remove("abc.txt");
+    return 0;
+}
+@end
+
+@entry putchar
+@also putchar_unlocked
+@header stdio.h
+@syntax int putchar(int c);
+@summary Write one character on the screen (stdout).
+@returns
+The character, or EOF on error.
+@see getchar puts printf
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    int row, col;
+    for (row = 1; row <= 4; row++) {
+        for (col = 0; col < row; col++) putchar('*');
+        putchar('\n');
+    }
+    return 0;
+}
+@end
+
+@entry fputs
+@also fputs_unlocked
+@header stdio.h
+@syntax int fputs(const char *s, FILE *stream);
+@summary Write a string to a file (no newline added).
+@returns
+A non-negative number, or EOF on error.
+@see puts fprintf fgets
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    fputs("no newline here, ", stdout);
+    fputs("so add it yourself\n", stdout);
+    fputs("errors go to stderr\n", stderr);
+    return 0;
+}
+@end
+
+@entry puts
+@header stdio.h
+@syntax int puts(const char *s);
+@summary Write a string and a newline on the screen.
+@desc
+The quickest way to print a fixed line. Unlike printf it does not look
+for % codes, so "100%" prints as it is.
+@returns
+A non-negative number, or EOF on error.
+@see fputs printf putchar
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    puts("Hello!");
+    puts("100% sure");
+    return 0;
+}
+@end
+
+@entry fseek
+@also fseeko SEEK_SET SEEK_CUR SEEK_END
+@header stdio.h
+@syntax int fseek(FILE *stream, long offset, int whence);
+@syntax int fseeko(FILE *stream, off_t offset, int whence);
+@summary Move the read/write position in a file.
+@desc
+whence: SEEK_SET (from the start), SEEK_CUR (from here), SEEK_END (from
+the end). fseek(f, 0, SEEK_END) then ftell(f) gives the file size.
+@returns
+0, or -1 on error.
+@see ftell rewind fgetpos
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f = fopen("seek.txt", "w+");
+    char buf[8] = "";
+    if (!f) return 1;
+    fputs("0123456789", f);
+    fseek(f, 0, SEEK_END);
+    printf("size: %ld bytes\n", ftell(f));
+    fseek(f, 3, SEEK_SET);
+    if (fgets(buf, 5, f)) printf("from offset 3: %s\n", buf);
+    fclose(f);
+    remove("seek.txt");
+    return 0;
+}
+@end
+
+@entry ftell
+@also ftello
+@header stdio.h
+@syntax long ftell(FILE *stream);
+@syntax off_t ftello(FILE *stream);
+@summary Where in the file you are (bytes from the start).
+@returns
+The position, or -1 on error.
+@see fseek rewind
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f = fopen("t.txt", "w");
+    if (!f) return 1;
+    printf("start %ld\n", ftell(f));
+    fputs("hello", f);
+    printf("after 5 letters %ld\n", ftell(f));
+    fclose(f);
+    remove("t.txt");
+    return 0;
+}
+@end
+
+@entry rewind
+@header stdio.h
+@syntax void rewind(FILE *stream);
+@summary Go back to the start of the file (and clear the error/EOF flags).
+@see fseek ftell clearerr
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f = fopen("r.txt", "w+");
+    char buf[16];
+    if (!f) return 1;
+    fputs("again\n", f);
+    rewind(f);
+    if (fgets(buf, sizeof buf, f)) printf("first read: %s", buf);
+    rewind(f);
+    if (fgets(buf, sizeof buf, f)) printf("second read: %s", buf);
+    fclose(f);
+    remove("r.txt");
+    return 0;
+}
+@end
+
+@entry fgetpos
+@also fsetpos fpos_t
+@header stdio.h
+@syntax int fgetpos(FILE *stream, fpos_t *pos);
+@syntax int fsetpos(FILE *stream, const fpos_t *pos);
+@summary Remember a position in a file and come back to it later.
+@returns
+0, or -1 on error.
+@see fseek ftell
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f = fopen("pos.txt", "w+");
+    fpos_t mark;
+    char buf[16];
+    if (!f) return 1;
+    fputs("header\n", f);
+    fgetpos(f, &mark);
+    fputs("body\n", f);
+    fsetpos(f, &mark);
+    if (fgets(buf, sizeof buf, f)) printf("at the mark: %s", buf);
+    fclose(f);
+    remove("pos.txt");
+    return 0;
+}
+@end
+
+@entry feof
+@also feof_unlocked EOF
+@header stdio.h
+@syntax int feof(FILE *stream);
+@summary Has a read already hit the end of the file?
+@desc
+feof becomes true only AFTER a read failed at the end - so loop on the
+read result (while (fgets(...))) and use feof afterwards to tell "end of
+file" from "error".
+@returns
+Non-zero at end of file, otherwise 0.
+@see ferror clearerr fgets
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f = fopen("e.txt", "w+");
+    char buf[32];
+    if (!f) return 1;
+    fputs("only line\n", f);
+    rewind(f);
+    while (fgets(buf, sizeof buf, f)) printf("read: %s", buf);
+    if (feof(f)) printf("stopped: end of file\n");
+    else if (ferror(f)) printf("stopped: read error\n");
+    fclose(f);
+    remove("e.txt");
+    return 0;
+}
+@end
+
+@entry ferror
+@also ferror_unlocked
+@header stdio.h
+@syntax int ferror(FILE *stream);
+@summary Did an error happen on this stream?
+@returns
+Non-zero if the error flag is set.
+@see feof clearerr perror
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f = fopen("ro.txt", "w");
+    if (!f) return 1;
+    fclose(f);
+    f = fopen("ro.txt", "r");                 /* opened for reading only */
+    if (!f) return 1;
+    fputc('x', f);                            /* writing fails */
+    printf("ferror: %s\n", ferror(f) ? "yes" : "no");
+    clearerr(f);
+    printf("after clearerr: %s\n", ferror(f) ? "yes" : "no");
+    fclose(f);
+    remove("ro.txt");
+    return 0;
+}
+@end
+
+@entry clearerr
+@also clearerr_unlocked
+@header stdio.h
+@syntax void clearerr(FILE *stream);
+@summary Reset the end-of-file and error flags of a stream.
+@see feof ferror rewind
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f = fopen("c.txt", "w+");
+    if (!f) return 1;
+    rewind(f);
+    fgetc(f);                         /* empty file: hits EOF */
+    printf("eof %d\n", feof(f) != 0);
+    clearerr(f);
+    printf("eof after clearerr %d\n", feof(f) != 0);
+    fclose(f);
+    remove("c.txt");
+    return 0;
+}
+@end
+
+@entry fflush
+@also fflush_unlocked
+@header stdio.h
+@syntax int fflush(FILE *stream);
+@summary Send buffered output now (fflush(NULL) = all streams).
+@desc
+Output is collected in a buffer and written in pieces. On a terminal,
+stdout is flushed at each newline; into a file or pipe only when the
+buffer is full. Call fflush(stdout) after a prompt without '\n', or
+before fork/system so text is not printed twice or out of order.
+@returns
+0, or EOF on error.
+@see setvbuf fclose
+@example
+#include <stdio.h>
+#include <unistd.h>
+
+int main(void)
+{
+    int i;
+    printf("working");
+    for (i = 0; i < 3; i++) {
+        printf(".");
+        fflush(stdout);               /* show the dot now */
+        usleep(100000);
+    }
+    printf(" done\n");
+    return 0;
+}
+@end
+
+@entry setvbuf
+@also setbuf setlinebuf _IOFBF _IOLBF _IONBF BUFSIZ
+@header stdio.h
+@syntax int setvbuf(FILE *stream, char *buf, int mode, size_t size);
+@syntax void setbuf(FILE *stream, char *buf);
+@syntax void setlinebuf(FILE *stream);
+@summary Choose how a stream is buffered.
+@desc
+mode: _IONBF (no buffer - every write goes out at once), _IOLBF (at each
+newline), _IOFBF (when the buffer is full). buf may be NULL (the library
+allocates). Call it right after opening, before any reading or writing.
+setbuf(f, NULL) turns buffering off; setlinebuf(f) = line buffered.
+@returns
+setvbuf: 0, or non-zero on error.
+@see fflush
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    setvbuf(stdout, NULL, _IONBF, 0);     /* every printf appears at once */
+    printf("unbuffered ");
+    printf("output\n");
+    return 0;
+}
+@end
+
+@entry perror
+@header stdio.h
+@syntax void perror(const char *msg);
+@summary Print your message and the reason for the last error (errno).
+@desc
+Prints "msg: reason" on stderr, e.g. "data.txt: no such file or
+directory". Call it right after the failing function.
+@see strerror errors fopen
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    if (fopen("/missing/file.txt", "r") == NULL)
+        perror("/missing/file.txt");
+    if (remove("/also-missing") != 0)
+        perror("remove");
+    return 0;
+}
+@end
+
+@entry remove
+@header stdio.h
+@syntax int remove(const char *path);
+@summary Delete a file (or an empty folder).
+@returns
+0, or -1 on error (errno set).
+@see rename fopen
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f = fopen("junk.txt", "w");
+    if (f) fclose(f);
+    if (remove("junk.txt") == 0) printf("junk.txt deleted\n");
+    if (remove("junk.txt") != 0) perror("second remove");
+    return 0;
+}
+@end
+
+@entry rename
+@header stdio.h
+@syntax int rename(const char *old, const char *new);
+@summary Rename or move a file or folder.
+@desc
+If new already exists it is replaced. Moving to another disk (another
+mount) fails with EXDEV - then copy and delete instead (mv does this).
+@returns
+0, or -1 on error.
+@see remove
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *f = fopen("draft.txt", "w");
+    if (!f) return 1;
+    fputs("text\n", f);
+    fclose(f);
+    if (rename("draft.txt", "final.txt") == 0) printf("renamed to final.txt\n");
+    else perror("rename");
+    remove("final.txt");
+    return 0;
+}
+@end
+
+@entry tmpfile
+@header stdio.h
+@syntax FILE *tmpfile(void);
+@summary Open a new temporary file that is deleted automatically.
+@desc
+Opened for reading and writing ("w+"). The file disappears when it is
+closed or the program ends.
+@returns
+A FILE *, or NULL on error.
+@see tmpnam mkstemp
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *t = tmpfile();
+    char buf[32];
+    if (!t) return 1;
+    fputs("scratch data\n", t);
+    rewind(t);
+    if (fgets(buf, sizeof buf, t)) printf("read back: %s", buf);
+    fclose(t);
+    return 0;
+}
+@end
+
+@entry tmpnam
+@also tempnam L_tmpnam P_tmpdir
+@header stdio.h
+@syntax char *tmpnam(char *s);
+@syntax char *tempnam(const char *dir, const char *prefix);
+@summary Make up a file name that does not exist yet (in /tmp).
+@desc
+tmpnam writes into s (at least L_tmpnam chars) or a static buffer if s is
+NULL. tempnam returns malloc'ed memory (free it). Another program could
+create the same name before you do - mkstemp is the safe way.
+@returns
+The name, or NULL.
+@see mkstemp tmpfile
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    char name[L_tmpnam + 32];
+    char *other = tempnam(NULL, "game");
+    if (tmpnam(name)) printf("tmpnam: %s\n", name);
+    if (other) {
+        printf("tempnam: %s\n", other);
+        free(other);
+    }
+    return 0;
+}
+@end
+
+@entry popen
+@also pclose
+@header stdio.h
+@syntax FILE *popen(const char *command, const char *mode);
+@syntax int pclose(FILE *stream);
+@summary Run a shell command and read its output (or write its input).
+@desc
+mode "r": read what the command prints. mode "w": what you write becomes
+the command's input. pclose waits for it and returns its exit status.
+In rozOS popen runs the command through a temporary file in /tmp: with
+"r" the command finishes first, then you read; with "w" it starts at
+pclose. Use pipe() and fork() for programs that must talk at the same
+time.
+@returns
+popen: a FILE *, or NULL. pclose: the command's status (like system).
+@see system fdopen
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    FILE *p = popen("echo one; echo two", "r");
+    char line[64];
+    if (!p) return 1;
+    while (fgets(line, sizeof line, p)) printf("got: %s", line);
+    printf("exit status %d\n", pclose(p));
+    return 0;
+}
+@end
+
+@entry fmemopen
+@header stdio.h
+@syntax FILE *fmemopen(void *buf, size_t size, const char *mode);
+@summary Use a memory buffer as if it were a file.
+@desc
+Reading and writing go to buf (size bytes). Lets you use fscanf/fgets on
+a string, or fprintf into an array, with the normal stream functions.
+@returns
+A FILE *, or NULL.
+@see open_memstream sscanf
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    char data[] = "10 20 30";
+    FILE *m = fmemopen(data, sizeof data - 1, "r");
+    int x, sum = 0;
+    if (!m) return 1;
+    while (fscanf(m, "%d", &x) == 1) sum += x;
+    fclose(m);
+    printf("sum %d\n", sum);
+    return 0;
+}
+@end
+
+@entry open_memstream
+@header stdio.h
+@syntax FILE *open_memstream(char **bufp, size_t *sizep);
+@summary A stream that writes into memory that grows as needed.
+@desc
+After fflush or fclose, *bufp points to the text written so far
+(ending with '\0') and *sizep is its length. free(*bufp) when done.
+@returns
+A FILE *, or NULL.
+@see fmemopen asprintf
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    char *text = NULL;
+    size_t len = 0;
+    FILE *m = open_memstream(&text, &len);
+    int i;
+    if (!m) return 1;
+    for (i = 1; i <= 5; i++) fprintf(m, "%d squared is %d\n", i, i * i);
+    fclose(m);
+    printf("%zu bytes:\n%s", len, text);
+    free(text);
+    return 0;
+}
+@end
+
+@entry fopencookie
+@also cookie_io_functions_t
+@header stdio.h
+@syntax FILE *fopencookie(void *cookie, const char *mode, cookie_io_functions_t io);
+@summary Make a FILE * whose reads and writes call your own functions.
+@desc
+io holds four function pointers: read, write, seek, close (any may be
+NULL). Every fprintf/fputs on the stream ends up in your write function -
+e.g. to count, encrypt, or send text somewhere special.
+@returns
+A FILE *, or NULL.
+@see fmemopen open_memstream
+@example
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <ctype.h>
+
+static ssize_t shout(void *cookie, const char *buf, size_t size)
+{
+    size_t i;
+    (void)cookie;
+    for (i = 0; i < size; i++) putchar(toupper((unsigned char)buf[i]));
+    return (ssize_t)size;
+}
+
+int main(void)
+{
+    cookie_io_functions_t io = { NULL, shout, NULL, NULL };
+    FILE *f = fopencookie(NULL, "w", io);
+    if (!f) return 1;
+    fprintf(f, "this text is %s\n", "loud");
+    fclose(f);
+    return 0;
+}
+@end
+
+@entry flockfile
+@also funlockfile ftrylockfile
+@header stdio.h
+@syntax void flockfile(FILE *stream);
+@syntax void funlockfile(FILE *stream);
+@syntax int ftrylockfile(FILE *stream);
+@summary Keep several stdio calls together when threads share a stream.
+@desc
+In rozOS every stdio call already takes a lock, so lines from different
+threads never mix inside one call. flockfile/funlockfile exist for
+programs written for other systems; in rozOS they do nothing, and
+ftrylockfile always succeeds (returns 0).
+@see printf
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    flockfile(stdout);
+    printf("these two lines ");
+    printf("stay together\n");
+    funlockfile(stdout);
+    return 0;
+}
+@end
+
+@entry ctermid
+@also L_ctermid
+@header stdio.h
+@syntax char *ctermid(char *s);
+@summary The name of the controlling terminal ("/dev/tty").
+@returns
+s (filled in), or a static buffer if s is NULL.
+@see fopen
+@example
+#include <stdio.h>
+
+int main(void)
+{
+    char name[L_ctermid];
+    printf("terminal: %s\n", ctermid(name));
+    return 0;
+}
+@end

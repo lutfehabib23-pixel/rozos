@@ -16,3 +16,4 @@ ports/pdpmake/src/
 *.before-grow
 ports/lua/src/
 ports/zlib/src/
+__pycache__/

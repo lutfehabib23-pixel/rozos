@@ -121,7 +121,11 @@ ROZUI_A      := $(USER_BUILD)/lib/librozui.a
 ROZGAME_SRCS := userland/lib/rozgame.c
 ROZGAME_OBJS := $(patsubst userland/lib/%.c,$(USER_BUILD)/lib/%.o,$(ROZGAME_SRCS))
 ROZGAME_A    := $(USER_BUILD)/lib/librozgame.a
-USER_LIBS    := $(ROZHTTP_A) $(ROZUI_A) $(ROZGAME_A) $(ROZGFX_A)
+# ধাপ ১৯ক: librozcref (C সহায়িকার .ref পড়া) — cref, crefview, Code, edit
+ROZCREF_SRCS := userland/lib/rozcref.c
+ROZCREF_OBJS := $(patsubst userland/lib/%.c,$(USER_BUILD)/lib/%.o,$(ROZCREF_SRCS))
+ROZCREF_A    := $(USER_BUILD)/lib/librozcref.a
+USER_LIBS    := $(ROZHTTP_A) $(ROZUI_A) $(ROZGAME_A) $(ROZCREF_A) $(ROZGFX_A)
 ifeq ($(HAVE_BEARSSL),1)
   USER_CFLAGS += -DROZOS_HAVE_BEARSSL -I$(BEARSSL_SRC)/inc
   USER_LIBS += $(BEARSSL_A)
@@ -134,9 +138,9 @@ CA_EXTRA     ?=
 CA_PEM       := $(BUILD)/ssl/certs.pem
 # TCC দিয়ে rozOS-এর ভেতরে https প্রোগ্রাম লেখার জন্য: /usr/lib + /usr/include-এ বসে
 # (debug তথ্য ছাড়া কপি — libbearssl.a 4.5 MB থেকে অনেক ছোট হয়)
-DEV_LIBS     := $(BUILD)/devlib/librozhttp.a $(BUILD)/devlib/librozgfx.a $(BUILD)/devlib/librozui.a $(BUILD)/devlib/librozgame.a $(if $(HAVE_BEARSSL),$(BUILD)/devlib/libbearssl.a) \
+DEV_LIBS     := $(BUILD)/devlib/librozhttp.a $(BUILD)/devlib/librozgfx.a $(BUILD)/devlib/librozui.a $(BUILD)/devlib/librozgame.a $(BUILD)/devlib/librozcref.a $(if $(HAVE_BEARSSL),$(BUILD)/devlib/libbearssl.a) \
                 $(if $(wildcard ports/lua/src/lua.h),$(BUILD)/devlib/liblua.a) $(if $(wildcard ports/zlib/src/zlib.h),$(BUILD)/devlib/libz.a)
-DEV_HEADERS  := userland/lib/rozhttp.h userland/lib/rozgfx.h userland/lib/rozui.h userland/lib/rozgame.h userland/lib/rozwm_proto.h $(if $(HAVE_BEARSSL),$(wildcard $(BEARSSL_SRC)/inc/*.h))
+DEV_HEADERS  := userland/lib/rozhttp.h userland/lib/rozgfx.h userland/lib/rozui.h userland/lib/rozgame.h userland/lib/rozcref.h userland/lib/rozwm_proto.h $(if $(HAVE_BEARSSL),$(wildcard $(BEARSSL_SRC)/inc/*.h))
 
 # ধাপ ১১: kernel-এর সোর্স rozOS-এর /usr/src/rozos-এ — ভেতরে `make` (pdpmake + tcc) দিয়ে বিল্ড।
 # সেখানকার Makefile হোস্টে toolchain/gen-kernel-mk.sh বানায় (ফাইলের তালিকা এখানের সাথে মেলে)।
@@ -244,6 +248,8 @@ GFX_SRC_FILES := $(wildcard userland/gfx/*.c)
 # ধাপ ১৮ক: গেমের সোর্স /usr/src/games-এ, ছবি /usr/share/games-এ
 GAME_SRC_FILES := $(wildcard userland/games/*.c) userland/lua/luagame.c
 GAME_DATA_FILES := $(wildcard sysroot/usr/share/games/*)
+# ধাপ ১৯ক: C সহায়িকা (docs/cref/*.ref → /usr/share/cref)
+CREF_FILES   := $(wildcard docs/cref/*.ref)
 
 # initrd ও ডিস্কের জন্য sysroot + বিল্ড করা প্রোগ্রাম একসাথে
 ROOT_STAGE   := $(BUILD)/root-stage
@@ -380,6 +386,11 @@ $(ROZGAME_A): $(ROZGAME_OBJS)
 	@rm -f $@
 	@$(USER_AR) rcs $@ $(ROZGAME_OBJS)
 
+$(ROZCREF_A): $(ROZCREF_OBJS)
+	@echo "  AR      $@"
+	@rm -f $@
+	@$(USER_AR) rcs $@ $(ROZCREF_OBJS)
+
 $(ROZHTTP_A): $(ROZHTTP_OBJS)
 	@echo "  AR      $@"
 	@rm -f $@
@@ -511,7 +522,7 @@ tcc-check:
 	@test -n "$(HAVE_ZLIB)" || echo "  NOTE    zlib সোর্স নেই — libz ও gzip বাদ। আনতে: ./toolchain/get-zlib.sh"
 
 # মধ্যবর্তী .o ফাইল make যেন মুছে না ফেলে (নইলে প্রতিবার আবার বিল্ড)
-.SECONDARY: $(LUA_OBJS) $(LUA_BUILD)/lua.o $(ZLIB_OBJS) $(ZLIB_BUILD)/minigzip.o $(PDPMAKE_OBJS) $(BEARSSL_OBJS) $(ROZHTTP_OBJS) $(ROZGFX_OBJS) $(ROZUI_OBJS) $(ROZGAME_OBJS) $(LIBC_OBJS) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_LIB1_OBJS) $(TCC_RUNMAIN) $(TCC_BUILD)/tcc.o $(patsubst %,$(USER_BUILD)/obj/%.o,$(USER_PROGS)) $(USER_BINS)
+.SECONDARY: $(LUA_OBJS) $(LUA_BUILD)/lua.o $(ZLIB_OBJS) $(ZLIB_BUILD)/minigzip.o $(PDPMAKE_OBJS) $(BEARSSL_OBJS) $(ROZHTTP_OBJS) $(ROZGFX_OBJS) $(ROZUI_OBJS) $(ROZGAME_OBJS) $(ROZCREF_OBJS) $(LIBC_OBJS) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_LIB1_OBJS) $(TCC_RUNMAIN) $(TCC_BUILD)/tcc.o $(patsubst %,$(USER_BUILD)/obj/%.o,$(USER_PROGS)) $(USER_BINS)
 
 # sysroot + /bin-এর প্রোগ্রাম + rozlibc (/usr/include, /usr/lib — ধাপ ৮-এর TCC-র জন্য)
 $(BUILD)/modules/%.ko: modules/%.c kernel/include/rozos/module.h
@@ -532,6 +543,7 @@ define stage_root
 	@cp $(DEV_LIBS) $(1)/usr/lib/ && cp $(DEV_HEADERS) $(1)/usr/include/
 	@mkdir -p $(1)/usr/src/gfx && cp $(GFX_SRC_FILES) $(1)/usr/src/gfx/
 	@mkdir -p $(1)/usr/src/games $(1)/usr/share/games && cp $(GAME_SRC_FILES) $(1)/usr/src/games/
+	@mkdir -p $(1)/usr/share/cref && $(if $(CREF_FILES),cp $(CREF_FILES) $(1)/usr/share/cref/,true)
 	@mkdir -p $(1)/lib/modules $(1)/usr/src/modules && cp $(MOD_KOS) $(1)/lib/modules/ && cp $(MOD_SRCS) $(1)/usr/src/modules/
 	@mkdir -p $(1)/usr/src/rozos && cp -r kernel $(1)/usr/src/rozos/ && cp $(KSRC_MK) $(1)/usr/src/rozos/Makefile && cp $(KSRC_OBJS) $(1)/usr/src/rozos/objs.list && (cat $(BUILD_NUMBER_FILE) 2>/dev/null || echo 0) > $(1)/usr/src/rozos/.build-base
 	$(if $(HAVE_TCC),@mkdir -p $(1)/usr/lib/tcc/include && cp $(TCC_SRC)/include/*.h $(1)/usr/lib/tcc/include/ && cp $(TCC_LIB1) $(TCC_RUNMAIN) $(1)/usr/lib/tcc/)
@@ -553,6 +565,10 @@ $(BUILD)/devlib/librozui.a: $(ROZUI_A)
 	@strip --strip-debug -o $@ $<
 
 $(BUILD)/devlib/librozgame.a: $(ROZGAME_A)
+	@mkdir -p $(dir $@)
+	@strip --strip-debug -o $@ $<
+
+$(BUILD)/devlib/librozcref.a: $(ROZCREF_A)
 	@mkdir -p $(dir $@)
 	@strip --strip-debug -o $@ $<
 
@@ -578,7 +594,7 @@ $(CA_PEM): $(wildcard $(CA_BUNDLE)) $(CA_EXTRA)
 # USTAR ফরম্যাট (কার্নেলের initrd.c এটাই পড়ে); মালিক root, যাতে হোস্টের ইউজার নাম না ঢোকে
 initrd: $(INITRD)
 
-$(INITRD): $(SYSROOT_FILES) $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES) $(MOD_KOS)
+$(INITRD): $(SYSROOT_FILES) $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(CREF_FILES) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES) $(MOD_KOS)
 	@mkdir -p $(dir $@)
 	@echo "  TAR     $@"
 	$(call stage_root,$(ROOT_STAGE))
@@ -664,7 +680,7 @@ disk-check: $(DISK)
 # ভেতরে লেখা বাকি সব ফাইল থাকে। QEMU চলার সময় চালাবেন না।
 disk-update: $(DISK_BIN_STAMP)
 
-$(DISK_BIN_STAMP): $(USER_STRIPPED) $(if $(HAVE_ZLIB),$(ZLIB_ZCONF)) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(APP_FILES) $(TEMPLATE_FILES) $(FONT_FILES) $(IMAGE_FILES) $(ICON_FILES) $(GFX_SRC_FILES) $(GAME_SRC_FILES) $(GAME_DATA_FILES) $(MOD_KOS) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES) $(KERNEL) $(INITRD) | $(DISK)
+$(DISK_BIN_STAMP): $(USER_STRIPPED) $(if $(HAVE_ZLIB),$(ZLIB_ZCONF)) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(APP_FILES) $(TEMPLATE_FILES) $(FONT_FILES) $(IMAGE_FILES) $(ICON_FILES) $(GFX_SRC_FILES) $(GAME_SRC_FILES) $(GAME_DATA_FILES) $(CREF_FILES) $(MOD_KOS) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES) $(KERNEL) $(INITRD) | $(DISK)
 	@command -v debugfs >/dev/null || { echo "debugfs নেই — sudo apt install e2fsprogs"; exit 1; }
 	@if [ "$$(./toolchain/disk-offsets.sh $(DISK))" = old ]; then $(MAKE) --no-print-directory disk-migrate; fi
 	@./toolchain/disk-grow.sh $(DISK) $(DISK_MIB)
@@ -711,6 +727,8 @@ $(DISK_BIN_STAMP): $(USER_STRIPPED) $(if $(HAVE_ZLIB),$(ZLIB_ZCONF)) $(LIBC_A) $
 	   echo "mkdir /usr/src/games"; echo "mkdir /usr/share/games"; \
 	   for f in $(GAME_SRC_FILES); do echo "rm /usr/src/games/$$(basename $$f)"; echo "write $$f /usr/src/games/$$(basename $$f)"; done; \
 	   for f in $(GAME_DATA_FILES); do echo "rm /usr/share/games/$$(basename $$f)"; echo "write $$f /usr/share/games/$$(basename $$f)"; done; \
+	   echo "mkdir /usr/share/cref"; \
+	   for f in $(CREF_FILES); do echo "rm /usr/share/cref/$$(basename $$f)"; echo "write $$f /usr/share/cref/$$(basename $$f)"; done; \
 	   echo "mkdir /usr/src"; echo "mkdir /usr/src/rozos"; \
 	   for d in $(KSRC_DIRS); do echo "mkdir /usr/src/rozos/$$d"; done; \
 	   for f in $(KSRC_FILES); do echo "rm /usr/src/rozos/$$f"; echo "write $$f /usr/src/rozos/$$f"; done; \
@@ -867,3 +885,12 @@ info:
 
 clean:
 	rm -rf $(BUILD) $(ISO) $(SELF_ISO)
+
+# ধাপ ১৯ক: C সহায়িকা যাচাই — ফরম্যাট, সব ফাংশন আছে কিনা, প্রতিটা উদাহরণ কম্পাইল করে চালানো।
+# CREF_TCC="tcc ..." দিলে উদাহরণ tcc দিয়েও কম্পাইল হয় (rozOS-এর ভেতরের মতো)।
+CREF_COVER ?= stdio.h stdlib.h string.h strings.h ctype.h math.h time.h
+cref-check: $(LIBC_A) $(LIBC_CRT0)
+	@python3 toolchain/cref-check.py --dir docs/cref --include libc/include --cover "$(CREF_COVER)" \
+	  --cc "$(CC)" --cflags "$(USER_CFLAGS)" --ldflags "$(USER_LDFLAGS) $(LIBC_CRT0)" --libs "$(LIBC_A) -lgcc" \
+	  $(if $(CREF_TCC),--tcc "$(CREF_TCC)") $(if $(CREF_ONLY),--only "$(CREF_ONLY)")
+.PHONY: cref-check

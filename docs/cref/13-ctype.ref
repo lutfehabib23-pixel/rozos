@@ -1,0 +1,252 @@
+# rozOS C reference - <ctype.h> (phase 19a)
+# All take an int that is EOF or an unsigned char value: write isalpha((unsigned char)c)
+# when c is a char that might be negative (bytes above 127, e.g. UTF-8).
+
+@entry isalpha
+@header ctype.h
+@syntax int isalpha(int c);
+@summary Is c a letter (A-Z, a-z)?
+@desc
+Only ASCII letters - not accented or Bengali characters (those are
+several UTF-8 bytes; see <wctype.h> iswalpha). Cast plain char to
+unsigned char first.
+@returns
+Non-zero (true) or 0.
+@see isdigit isalnum isupper toupper
+@example
+#include <stdio.h>
+#include <ctype.h>
+
+int main(void)
+{
+    const char *s = "rozOS 2026!";
+    int i, letters = 0;
+    for (i = 0; s[i]; i++)
+        if (isalpha((unsigned char)s[i])) letters++;
+    printf("%d letters in '%s'\n", letters, s);
+    return 0;
+}
+@end
+
+@entry isdigit
+@header ctype.h
+@syntax int isdigit(int c);
+@summary Is c a digit 0-9?
+@returns
+Non-zero or 0.
+@see isxdigit isalnum atoi
+@example
+#include <stdio.h>
+#include <ctype.h>
+
+int main(void)
+{
+    const char *s = "Phone: 01711-223344";
+    int i, n = 0;
+    for (i = 0; s[i]; i++)
+        if (isdigit((unsigned char)s[i])) n++;
+    printf("%d digits\n", n);
+    return 0;
+}
+@end
+
+@entry isalnum
+@header ctype.h
+@syntax int isalnum(int c);
+@summary Is c a letter or a digit?
+@returns
+Non-zero or 0.
+@see isalpha isdigit
+@example
+#include <stdio.h>
+#include <ctype.h>
+
+int main(void)
+{
+    const char *name = "user_42";
+    int i, ok = 1;
+    for (i = 0; name[i]; i++)
+        if (!isalnum((unsigned char)name[i]) && name[i] != '_') ok = 0;
+    printf("'%s' is %sa valid name\n", name, ok ? "" : "not ");
+    return 0;
+}
+@end
+
+@entry isspace
+@header ctype.h
+@syntax int isspace(int c);
+@summary Is c white space: ' ', '\t', '\n', '\r', '\v', '\f'?
+@returns
+Non-zero or 0.
+@see isblank strspn
+@example
+#include <stdio.h>
+#include <ctype.h>
+#include <string.h>
+
+int main(void)
+{
+    char s[] = "   trim me   \n";
+    char *start = s, *end;
+    while (isspace((unsigned char)*start)) start++;
+    end = start + strlen(start);
+    while (end > start && isspace((unsigned char)end[-1])) *--end = '\0';
+    printf("'%s'\n", start);
+    return 0;
+}
+@end
+
+@entry isblank
+@header ctype.h
+@syntax int isblank(int c);
+@summary Is c a space or a tab (not a newline)?
+@returns
+Non-zero or 0.
+@see isspace
+@example
+#include <stdio.h>
+#include <ctype.h>
+
+int main(void)
+{
+    printf("space %d, tab %d, newline %d\n", isblank(' ') != 0, isblank('\t') != 0, isblank('\n') != 0);
+    return 0;
+}
+@end
+
+@entry isupper
+@also islower
+@header ctype.h
+@syntax int isupper(int c);
+@syntax int islower(int c);
+@summary Is c a capital (A-Z) / small (a-z) letter?
+@returns
+Non-zero or 0.
+@see toupper isalpha
+@example
+#include <stdio.h>
+#include <ctype.h>
+
+int main(void)
+{
+    const char *s = "Hello World";
+    int i, up = 0, low = 0;
+    for (i = 0; s[i]; i++) {
+        if (isupper((unsigned char)s[i])) up++;
+        if (islower((unsigned char)s[i])) low++;
+    }
+    printf("%d capital, %d small\n", up, low);
+    return 0;
+}
+@end
+
+@entry toupper
+@also tolower
+@header ctype.h
+@syntax int toupper(int c);
+@syntax int tolower(int c);
+@summary Change a letter to capital / small (other characters stay).
+@returns
+The changed character.
+@see isupper strcasecmp
+@example
+#include <stdio.h>
+#include <ctype.h>
+
+int main(void)
+{
+    char s[] = "Make Me LOUD";
+    int i;
+    for (i = 0; s[i]; i++) s[i] = (char)toupper((unsigned char)s[i]);
+    printf("%s\n", s);
+    for (i = 0; s[i]; i++) s[i] = (char)tolower((unsigned char)s[i]);
+    printf("%s\n", s);
+    return 0;
+}
+@end
+
+@entry ispunct
+@header ctype.h
+@syntax int ispunct(int c);
+@summary Is c punctuation (printable, not a letter, digit or space)?
+@returns
+Non-zero or 0.
+@see isalnum isprint
+@example
+#include <stdio.h>
+#include <ctype.h>
+
+int main(void)
+{
+    const char *s = "Hi! How are you? (fine)";
+    int i;
+    for (i = 0; s[i]; i++)
+        if (ispunct((unsigned char)s[i])) putchar(s[i]);
+    putchar('\n');
+    return 0;
+}
+@end
+
+@entry isprint
+@also isgraph
+@header ctype.h
+@syntax int isprint(int c);
+@syntax int isgraph(int c);
+@summary Can c be printed? (isgraph: and is not a space)
+@returns
+Non-zero or 0.
+@see iscntrl ispunct
+@example
+#include <stdio.h>
+#include <ctype.h>
+
+int main(void)
+{
+    const char data[] = "ok\x01\x7f!";
+    int i;
+    for (i = 0; data[i]; i++)
+        printf(isprint((unsigned char)data[i]) ? "%c" : "\\x%02x", (unsigned char)data[i]);
+    printf("\n");
+    return 0;
+}
+@end
+
+@entry iscntrl
+@header ctype.h
+@syntax int iscntrl(int c);
+@summary Is c a control character (0-31 or 127: tab, newline, escape ...)?
+@returns
+Non-zero or 0.
+@see isprint
+@example
+#include <stdio.h>
+#include <ctype.h>
+
+int main(void)
+{
+    printf("'\\n' %d, 'A' %d, 27 %d\n", iscntrl('\n') != 0, iscntrl('A') != 0, iscntrl(27) != 0);
+    return 0;
+}
+@end
+
+@entry isxdigit
+@header ctype.h
+@syntax int isxdigit(int c);
+@summary Is c a hexadecimal digit (0-9, a-f, A-F)?
+@returns
+Non-zero or 0.
+@see isdigit strtol
+@example
+#include <stdio.h>
+#include <ctype.h>
+
+int main(void)
+{
+    const char *colour = "1e90ff";
+    int i, ok = 1;
+    for (i = 0; colour[i]; i++)
+        if (!isxdigit((unsigned char)colour[i])) ok = 0;
+    printf("%s is %sa hex colour\n", colour, ok ? "" : "not ");
+    return 0;
+}
+@end

@@ -39,6 +39,7 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <poll.h>
+#include <rozcref.h>
 
 #define TAB_STOP   4
 #define MSG_MAX    160
@@ -48,7 +49,8 @@
 
 enum {
     K_UP = 1000, K_DOWN, K_LEFT, K_RIGHT, K_HOME, K_END, K_PGUP, K_PGDN, K_DEL, K_ESC, K_MOUSE,
-    K_F1, K_F10, K_NEWFILE, K_NONE           /* ধাপ ১৪খ */
+    K_F1, K_F10, K_NEWFILE, K_NONE,          /* ধাপ ১৪খ */
+    K_CREFW, K_CREFI                         /* ধাপ ১৯ক: C সহায়িকা (মেনু থেকে) */
 };
 #define K_SHIFT 0x10000                /* বিশেষ কী-র সাথে Shift */
 #define K_CTRLM 0x20000                /* ... Ctrl */
@@ -1152,10 +1154,14 @@ static const struct emenu_item em_build[] = {
 static const struct emenu_item em_view[] = {
     { "Line numbers on/off", "^N", CTRL('n') }, { "Redraw / fit window", "^L", CTRL('l') }
 };
-static const struct emenu_item em_help[] = { { "Keyboard shortcuts", "F1", K_F1 } };
+static const struct emenu_item em_help[] = {
+    { "Keyboard shortcuts", "F1", K_F1 },
+    { "C reference: word at cursor", "Ctrl+F1", K_CREFW },     /* ধাপ ১৯ক */
+    { "C reference: look up...", "Shift+F1", K_CREFI }
+};
 static const struct emenu emenus[] = {
     { "File", em_file, 5 }, { "Edit", em_edit, 8 }, { "Search", em_search, 2 },
-    { "Build", em_build, 1 }, { "View", em_view, 2 }, { "Help", em_help, 1 }
+    { "Build", em_build, 1 }, { "View", em_view, 2 }, { "Help", em_help, 3 }
 };
 #define NEMENU 6
 
@@ -1257,6 +1263,130 @@ static int run_menu(int m)
 }
 
 /* F1: সব কী — পর্দার মাঝখানে বাক্স, যেকোনো কী-তে বন্ধ */
+/* ---------- ধাপ ১৯ক: C সহায়িকা (Ctrl+F1 = কার্সরের শব্দ, Shift+F1 = নাম লিখে) ---------- */
+
+/* কার্সরের নিচের (বা ঠিক আগের) শনাক্তকারী — printf, strcpy, struct … */
+static void word_at_cursor(char *out, size_t size)
+{
+    const struct line *l;
+    int a, b;
+    out[0] = 0;
+    if (cy < 0 || cy >= nlines) return;
+    l = &lines[cy];
+    a = cx;
+    if (a > l->len) a = l->len;
+    if (a > 0 && (a == l->len || !(isalnum((unsigned char)l->s[a]) || l->s[a] == '_')) &&
+        (isalnum((unsigned char)l->s[a - 1]) || l->s[a - 1] == '_')) a--;
+    while (a > 0 && (isalnum((unsigned char)l->s[a - 1]) || l->s[a - 1] == '_')) a--;
+    b = a;
+    while (b < l->len && (isalnum((unsigned char)l->s[b]) || l->s[b] == '_')) b++;
+    if (b - a <= 0 || (size_t)(b - a) >= size) return;
+    memcpy(out, l->s + a, (size_t)(b - a));
+    out[b - a] = 0;
+}
+
+/* পুরো পর্দায় পাতা দেখানো; ↑↓ PgUp PgDn স্ক্রল, C = উদাহরণ ক্লিপবোর্ডে (তারপর ^V), Esc = ফেরা */
+static void show_cref(const char *name)
+{
+    const cref_entry *e;
+    char *text, **row = NULL, b[512];
+    int nrow = 0, cap = 0, top = 0, i;
+    if (cref_load(NULL) < 0) {
+        set_message("%s", "No C reference installed (/usr/share/cref)");
+        return;
+    }
+    e = cref_find(name);
+    if (!e) {
+        const cref_entry *hits[1];
+        if (name[0] && cref_search(name, hits, 1) == 1) e = hits[0];
+    }
+    if (!e) {
+        snprintf(b, sizeof(b), "No C reference page for '%s' - try Shift+F1, or cref -k in a terminal", name);
+        set_message("%s", b);
+        return;
+    }
+    text = cref_format(e, screen_cols - 2);
+    if (!text) return;
+    {
+        char *p = text;
+        while (*p) {                                       /* লাইনে ভাগ */
+            char *eol = strchr(p, '\n');
+            if (nrow == cap) {
+                char **n = (char **)realloc(row, sizeof(char *) * (size_t)(cap ? cap * 2 : 128));
+                if (!n) break;
+                row = n;
+                cap = cap ? cap * 2 : 128;
+            }
+            row[nrow++] = p;
+            if (!eol) break;
+            *eol = 0;
+            p = eol + 1;
+        }
+    }
+    for (;;) {
+        int k, kb, body = screen_rows - 2;
+        forget_frame();
+        snprintf(b, sizeof(b), "\x1b[1;1H\x1b[0;30;47m%-*.*s\x1b[0m", screen_cols, screen_cols,
+                 " C reference   Up/Down/PgUp/PgDn scroll   C copy the example (then ^V)   Esc back");
+        ostr(b);
+        for (i = 0; i < body; i++) {
+            const char *t = top + i < nrow ? row[top + i] : "";
+            int code = 0, title = top + i == 0;
+            if (top + i < nrow && t[0] == ' ' && t[1] == ' ' && t[2] == ' ' && t[3] == ' ') code = 1;
+            snprintf(b, sizeof(b), "\x1b[%d;1H\x1b[0;%sm%-*.*s\x1b[0m", i + 2,
+                     title ? "1;93" : code ? "92" : (t[0] && t[0] != ' ' && t[strlen(t) - 1] == ':') ? "1;96" : "97",
+                     screen_cols, screen_cols, t);
+            ostr(b);
+        }
+        snprintf(b, sizeof(b), "\x1b[%d;1H\x1b[0;30;47m%-*.*s\x1b[0m", screen_rows, screen_cols, screen_cols,
+                 message[0] ? message : " ");
+        ostr(b);
+        ostr("\x1b[?25l");
+        oflush();
+        k = read_key();
+        kb = KEYBASE(k);
+        message[0] = 0;
+        if (kb == K_ESC || k == 'q' || k == CTRL('q')) break;
+        if (kb == K_DOWN || k == 'j') top++;
+        else if (kb == K_UP || k == 'k') top--;
+        else if (kb == K_PGDN || k == ' ') top += body - 1;
+        else if (kb == K_PGUP) top -= body - 1;
+        else if (kb == K_HOME) top = 0;
+        else if (kb == K_END) top = nrow - body;
+        else if (k == K_MOUSE) {
+            if (mouse_b & 64) top += (mouse_b & 1) ? 3 : -3;
+        } else if ((k == 'c' || k == 'C') && *e->example) {
+            char *t = strdup(e->example);
+            if (t) set_clip(t, (int)strlen(t), 0);
+            set_message("%s", " Example copied - Esc, then ^V pastes it");
+        }
+        if (top > nrow - body) top = nrow - body;
+        if (top < 0) top = 0;
+    }
+    free(row);
+    free(text);
+    forget_frame();
+}
+
+static void cref_word(void)
+{
+    char w[64];
+    word_at_cursor(w, sizeof(w));
+    if (!w[0]) {
+        set_message("%s", "Put the cursor on a word (like printf), then Ctrl+F1");
+        return;
+    }
+    show_cref(w);
+}
+
+static void cref_ask(void)
+{
+    char w[64] = "";
+    word_at_cursor(w, sizeof(w));
+    if (!prompt_edit("C reference for: ", w, sizeof(w)) || !w[0]) return;
+    show_cref(w);
+}
+
 static void show_keys(void)
 {
     static const char *const t[] = {
@@ -1268,6 +1398,7 @@ static void show_keys(void)
         "  ^K cut line    ^U paste line   ^F find (again = next)",
         "  ^G go to line  ^N line numbers ^L redraw / fit window",
         "  ^R save, compile with tcc and run (C files)",
+        "  Ctrl+F1 C help on the word    Shift+F1 C help by name",
         "  Shift+arrows select, mouse click/drag/wheel",
         "",
         "                    press any key"
@@ -1442,6 +1573,9 @@ int main(int argc, char **argv)
         }
         if (k == K_NONE) continue;
         if (k == K_F1) { show_keys(); full_redraw(); continue; }
+        /* ধাপ ১৯ক: C সহায়িকা */
+        if (k == (K_F1 | K_CTRLM) || k == K_CREFW) { cref_word(); full_redraw(); continue; }
+        if (k == (K_F1 | K_SHIFT) || k == K_CREFI) { cref_ask(); full_redraw(); continue; }
         if (k == K_NEWFILE) { new_other(); full_redraw(); continue; }
         if (k == CTRL('o')) { open_other(); full_redraw(); continue; }
         kb = KEYBASE(k);

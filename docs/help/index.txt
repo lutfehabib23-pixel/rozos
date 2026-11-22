@@ -33,6 +33,8 @@ Type [[help|how to use this viewer]] if you are new here.
 
 == Writing software ==
   [[c-programming]]   write, compile and run a C program, step by step
+  [[cref]]            the C reference: every function, syntax and examples
+                      (Ctrl+F1 in Code and edit, crefview, cref printf)
   [[rozlibc]]         the C library: headers and what is in them
   [[scanf]]           reading input: scanf, fscanf, sscanf
   [[self-hosting]]    rebuilding TCC with TCC, and the road ahead

@@ -38,6 +38,7 @@
 #include "rozhttp.h"
 #include "rozui.h"
 #include "rozgame.h"
+#include "rozcref.h"
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/select.h>
@@ -1686,6 +1687,59 @@ static void test_phase18b(void)
     check(ok, "luagame: the Lua game module (collisions, colours, tile map)");
 }
 
+/* ধাপ ১৯ক: C সহায়িকা (/usr/share/cref) আর cref কমান্ড */
+static void test_phase19a(void)
+{
+    const cref_entry *e, *hits[8];
+    char *t;
+    int n, ok, st;
+
+    n = cref_load(NULL);
+    check(n >= 200, "C reference loads (/usr/share/cref, 200+ pages)");
+    e = cref_find("printf");
+    ok = e && !strcmp(e->header, "stdio.h") && strstr(e->syntax, "int printf(") && strstr(e->example, "main");
+    check(ok && cref_find("vprintf") == e && cref_find("sinf") == cref_find("sin") && cref_find("for") &&
+          !cref_find("no_such_function"), "cref_find: names, @also aliases, language topics");
+    n = cref_search("square root", hits, 8);
+    ok = 0;
+    while (n-- > 0) if (!strcmp(hits[n]->name, "sqrt")) ok = 1;
+    check(ok, "cref_search finds sqrt for 'square root'");
+    t = cref_format(cref_find("strlen"), 60);
+    ok = t && strstr(t, "Syntax:") && strstr(t, "Example:") && strstr(t, "size_t strlen");
+    free(t);
+    {
+        const char *h[16];
+        int nh = cref_headers(h, 16), i, has_math = 0;
+        for (i = 0; i < nh; i++) if (!strcmp(h[i], "math.h")) has_math = 1;
+        ok = ok && nh >= 7 && has_math;
+    }
+    check(ok, "cref_format page and header list");
+    {
+        char *argv[] = { "cref", "-x", "puts", NULL };
+        int fd = open("/tmp/cref-x.c", O_WRONLY | O_CREAT | O_TRUNC, 0644), saved = dup(1);
+        ok = fd >= 0;
+        if (ok) {
+            fflush(stdout);
+            dup2(fd, 1);
+            close(fd);
+            ok = run("/bin/cref", argv, &st) > 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0;
+            fflush(stdout);
+            dup2(saved, 1);
+            close(saved);
+        }
+        if (ok) {
+            char buf[256];
+            FILE *f = fopen("/tmp/cref-x.c", "r");
+            size_t got = f ? fread(buf, 1, sizeof buf - 1, f) : 0;
+            if (f) fclose(f);
+            buf[got] = 0;
+            ok = strstr(buf, "#include <stdio.h>") && strstr(buf, "puts(");
+        }
+        unlink("/tmp/cref-x.c");
+    }
+    check(ok, "cref -x puts prints the example program");
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -1709,6 +1763,7 @@ int main(int argc, char **argv)
     test_phase16b2();
     test_phase18a();
     test_phase18b();
+    test_phase19a();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

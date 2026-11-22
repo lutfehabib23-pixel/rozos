@@ -47,6 +47,9 @@
   [[tetris]]   falling blocks             [[platformer]] run and jump
   [[luagame]]  run a game written in Lua (Star catcher)
 
+== C reference ([[cref]]) ==
+  cref        pages in the terminal     crefview   the reference window
+
 == Tests and demos ==
   [[systest]]  kernel and libc tests  [[demos|hello, spin, crash]]
 

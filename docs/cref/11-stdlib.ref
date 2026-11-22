@@ -1,0 +1,953 @@
+# rozOS C reference - <stdlib.h> (phase 19a)
+
+@entry malloc
+@header stdlib.h
+@syntax void *malloc(size_t size);
+@summary Get size bytes of memory while the program runs.
+@desc
+The memory is not cleared (it holds old garbage) - use calloc for zeros.
+Convert the result to your pointer type and check for NULL. Give it back
+with free when you no longer need it. In rozOS big requests (256 KiB or
+more) come straight from mmap and go back to the system on free.
+@returns
+A pointer to the memory, or NULL if there is not enough.
+@see calloc realloc free memory
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+int main(void)
+{
+    char *copy;
+    const char *src = "copy me";
+    copy = malloc(strlen(src) + 1);        /* +1 for the '\0' */
+    if (copy == NULL) {
+        printf("out of memory\n");
+        return 1;
+    }
+    strcpy(copy, src);
+    printf("%s\n", copy);
+    free(copy);
+    return 0;
+}
+@end
+
+@entry calloc
+@header stdlib.h
+@syntax void *calloc(size_t count, size_t size);
+@summary Get memory for count items of size bytes, all set to 0.
+@desc
+Like malloc(count * size), but the memory is zeroed and the multiplication
+is checked for overflow.
+@returns
+A pointer, or NULL.
+@see malloc free
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    int i, *counts = calloc(10, sizeof *counts);
+    const char *text = "3141592653";
+    if (!counts) return 1;
+    for (i = 0; text[i]; i++) counts[text[i] - '0']++;
+    for (i = 0; i < 10; i++)
+        if (counts[i]) printf("digit %d: %d times\n", i, counts[i]);
+    free(counts);
+    return 0;
+}
+@end
+
+@entry realloc
+@also reallocarray
+@header stdlib.h
+@syntax void *realloc(void *ptr, size_t size);
+@syntax void *reallocarray(void *ptr, size_t count, size_t size);
+@summary Make a block of memory bigger or smaller (keeps the contents).
+@desc
+The block may move: use the returned pointer, not the old one. Write
+p2 = realloc(p, n); if (!p2) { ... p is still valid ... } p = p2;
+realloc(NULL, n) is malloc(n). reallocarray checks count * size for
+overflow.
+@returns
+The (possibly new) address, or NULL - then the old block is unchanged.
+@see malloc free memory
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    int *v = NULL, n = 0, cap = 0, i;
+    for (i = 1; i <= 20; i++) {           /* a growing list */
+        if (n == cap) {
+            int *bigger;
+            cap = cap ? cap * 2 : 4;
+            bigger = realloc(v, cap * sizeof *v);
+            if (!bigger) { free(v); return 1; }
+            v = bigger;
+            printf("grew to %d\n", cap);
+        }
+        v[n++] = i * i;
+    }
+    printf("v[19] = %d\n", v[19]);
+    free(v);
+    return 0;
+}
+@end
+
+@entry free
+@header stdlib.h
+@syntax void free(void *ptr);
+@summary Give back memory from malloc, calloc, realloc ...
+@desc
+After free the pointer must not be used. free(NULL) does nothing, so it
+is safe to set pointers to NULL after freeing them. Freeing the same
+block twice, or a pointer that did not come from malloc, corrupts memory.
+@see malloc memory
+@example
+#include <stdlib.h>
+#include <stdio.h>
+
+int main(void)
+{
+    double *d = malloc(100 * sizeof *d);
+    if (!d) return 1;
+    d[0] = 1.0;
+    free(d);
+    d = NULL;          /* now a second free(d) would be harmless */
+    free(d);
+    printf("freed\n");
+    return 0;
+}
+@end
+
+@entry aligned_alloc
+@also posix_memalign memalign valloc
+@header stdlib.h
+@syntax void *aligned_alloc(size_t alignment, size_t size);
+@syntax int posix_memalign(void **ptr, size_t alignment, size_t size);
+@syntax void *memalign(size_t alignment, size_t size);
+@syntax void *valloc(size_t size);
+@summary Memory whose address is a multiple of alignment (16, 64, 4096 ...).
+@desc
+Needed for things like SIMD data or page-sized buffers. alignment must be
+a power of two. valloc aligns to the page size (4096). Free with free().
+@returns
+The pointer, or NULL. posix_memalign returns 0 or an error number.
+@see malloc free
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+
+int main(void)
+{
+    void *a = aligned_alloc(64, 256), *b = NULL;
+    if (!a || posix_memalign(&b, 4096, 100) != 0) return 1;
+    printf("a %% 64 = %lu, b %% 4096 = %lu\n",
+           (unsigned long)((uintptr_t)a % 64), (unsigned long)((uintptr_t)b % 4096));
+    free(a);
+    free(b);
+    return 0;
+}
+@end
+
+@entry malloc_usable_size
+@header stdlib.h
+@syntax size_t malloc_usable_size(void *ptr);
+@summary How many bytes a malloc'ed block really has (can be more than asked).
+@see malloc
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    char *p = malloc(10);
+    if (!p) return 1;
+    printf("asked 10, usable %zu\n", malloc_usable_size(p));
+    free(p);
+    return 0;
+}
+@end
+
+@entry exit
+@also EXIT_SUCCESS EXIT_FAILURE _Exit
+@header stdlib.h
+@syntax void exit(int status);
+@syntax void _Exit(int status);
+@summary End the program from anywhere, with a status code.
+@desc
+Runs the atexit functions, flushes and closes all streams, then ends.
+status 0 (EXIT_SUCCESS) means success; anything else (EXIT_FAILURE = 1)
+means failure - the shell shows it in $?. Returning from main does the
+same. _Exit ends at once without cleanup.
+@see atexit abort quick_exit
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+static void check(int ok)
+{
+    if (!ok) {
+        fprintf(stderr, "check failed\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main(void)
+{
+    check(1 + 1 == 2);
+    printf("all checks passed\n");
+    exit(EXIT_SUCCESS);
+}
+@end
+
+@entry abort
+@header stdlib.h
+@syntax void abort(void);
+@summary Stop the program at once because something is badly wrong.
+@desc
+Raises SIGABRT. Buffers are not flushed and atexit functions do not run.
+assert() calls abort when its condition is false.
+@check compile
+@see exit assert
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    int *p = malloc(sizeof *p);
+    if (!p) {
+        fprintf(stderr, "impossible: no memory\n");
+        abort();
+    }
+    *p = 1;
+    printf("fine: %d\n", *p);
+    free(p);
+    abort();                 /* the shell shows: killed (signal 6) */
+}
+@end
+
+@entry assert
+@also assert.h NDEBUG
+@header language
+@summary assert(condition): stop with a message if something "impossible" happens.
+@desc
+#include <assert.h>. If the condition is false it prints the file, line and
+the condition, then calls abort. Compile with -DNDEBUG to remove all
+asserts. Use it for programming mistakes, not for user input errors.
+@see abort errors
+@example
+#include <stdio.h>
+#include <assert.h>
+
+static int average(const int *v, int n)
+{
+    int s = 0, i;
+    assert(v != NULL && n > 0);     /* the caller must not do this */
+    for (i = 0; i < n; i++) s += v[i];
+    return s / n;
+}
+
+int main(void)
+{
+    int v[] = { 2, 4, 9 };
+    printf("average %d\n", average(v, 3));
+    return 0;
+}
+@end
+
+@entry atexit
+@header stdlib.h
+@syntax int atexit(void (*fn)(void));
+@summary Run a function when the program ends (exit or return from main).
+@desc
+Functions run in the reverse order of registration. Up to 32 can be
+registered.
+@returns
+0, or non-zero if the table is full.
+@see exit quick_exit
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+static void goodbye(void) { printf("goodbye\n"); }
+static void save(void) { printf("saving settings\n"); }
+
+int main(void)
+{
+    atexit(goodbye);
+    atexit(save);          /* runs first */
+    printf("working\n");
+    return 0;
+}
+@end
+
+@entry quick_exit
+@also at_quick_exit
+@header stdlib.h
+@syntax void quick_exit(int status);
+@syntax int at_quick_exit(void (*fn)(void));
+@summary End quickly, running only the at_quick_exit functions.
+@desc
+Unlike exit, streams are not flushed - call fflush yourself if needed.
+@see exit atexit
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+static void fast_cleanup(void) { printf("quick cleanup\n"); fflush(stdout); }
+
+int main(void)
+{
+    at_quick_exit(fast_cleanup);
+    printf("leaving quickly\n");
+    fflush(stdout);
+    quick_exit(0);
+}
+@end
+
+@entry system
+@header stdlib.h
+@syntax int system(const char *command);
+@summary Run a shell command and wait for it.
+@desc
+Runs command with /bin/sh -c (rozsh) and waits. Output goes straight to
+the screen. Flush your own output first (fflush(stdout)) so the order is
+right. system(NULL) checks that a shell exists.
+@returns
+The command's status as from wait: WEXITSTATUS(r) is its exit code
+(<sys/wait.h>), or -1 if it could not be started.
+@see popen exit
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/wait.h>
+
+int main(void)
+{
+    int r;
+    printf("running a command...\n");
+    fflush(stdout);
+    r = system("echo hello from the shell");
+    if (r != -1 && WIFEXITED(r)) printf("it exited with %d\n", WEXITSTATUS(r));
+    return 0;
+}
+@end
+
+@entry getenv
+@also secure_getenv environ
+@header stdlib.h
+@syntax char *getenv(const char *name);
+@syntax char *secure_getenv(const char *name);
+@summary Read an environment variable (HOME, PATH, TZ ...).
+@desc
+In rozsh set one with: export NAME=value. Do not change the returned
+string. secure_getenv is the same in rozOS.
+@returns
+The value, or NULL if the variable is not set.
+@see setenv main-args
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    const char *home = getenv("HOME"), *editor = getenv("EDITOR");
+    printf("HOME = %s\n", home ? home : "(not set)");
+    printf("EDITOR = %s\n", editor ? editor : "(not set - using edit)");
+    return 0;
+}
+@end
+
+@entry setenv
+@also unsetenv putenv clearenv
+@header stdlib.h
+@syntax int setenv(const char *name, const char *value, int overwrite);
+@syntax int unsetenv(const char *name);
+@syntax int putenv(char *string);
+@syntax int clearenv(void);
+@summary Change the environment of this program (and programs it starts).
+@desc
+setenv copies name and value; overwrite = 0 keeps an existing value.
+putenv("NAME=value") uses your string itself (do not change or free it).
+clearenv removes everything.
+@returns
+0, or -1 on error.
+@see getenv system
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    setenv("GREETING", "salam", 1);
+    setenv("GREETING", "hello", 0);         /* already set: kept */
+    printf("GREETING = %s\n", getenv("GREETING"));
+    unsetenv("GREETING");
+    printf("after unsetenv: %s\n", getenv("GREETING") ? "still there" : "gone");
+    return 0;
+}
+@end
+
+@entry atoi
+@also atol atoll
+@header stdlib.h
+@syntax int atoi(const char *s);
+@syntax long atol(const char *s);
+@syntax long long atoll(const char *s);
+@summary Convert text to an integer (simple, no error checking).
+@desc
+Skips leading spaces, reads an optional sign and digits, stops at the
+first non-digit. "42abc" gives 42; "abc" gives 0 - you cannot tell it
+from "0". Use strtol when you need to check the input.
+@returns
+The number.
+@see strtol atof sscanf
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    printf("%d %d %d %ld\n", atoi("42"), atoi("  -17 apples"), atoi("abc"), atol("123456789012"));
+    return 0;
+}
+@end
+
+@entry atof
+@header stdlib.h
+@syntax double atof(const char *s);
+@summary Convert text to a double (no error checking - see strtod).
+@returns
+The number, or 0.0 if there is none.
+@see strtod atoi
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    printf("%.3f %.1f %g\n", atof("3.14159"), atof("-2.5kg"), atof("1e6"));
+    return 0;
+}
+@end
+
+@entry strtol
+@also strtoll
+@header stdlib.h
+@syntax long strtol(const char *s, char **end, int base);
+@syntax long long strtoll(const char *s, char **end, int base);
+@summary Convert text to a number - with error checking and any base.
+@desc
+base 10 for decimal, 16 for hex, 2 for binary, 0 = decide from the text
+("0x1F" hex, "017" octal). *end is set to the first character not used:
+if end == s nothing was read; if *end != '\0' there was extra text. Too
+big a value gives LONG_MAX/LONG_MIN and errno = ERANGE.
+@returns
+The number (or 0 if none).
+@see strtoul atoi strtod sscanf
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+
+static void parse(const char *s)
+{
+    char *end;
+    long v;
+    errno = 0;
+    v = strtol(s, &end, 0);
+    if (end == s) printf("'%s': not a number\n", s);
+    else if (errno == ERANGE) printf("'%s': too big\n", s);
+    else printf("'%s' -> %ld%s\n", s, v, *end ? " (with extra text)" : "");
+}
+
+int main(void)
+{
+    parse("123");
+    parse("0x1F");
+    parse("42kg");
+    parse("hello");
+    parse("99999999999999999999");
+    printf("binary 1011 = %ld\n", strtol("1011", NULL, 2));
+    return 0;
+}
+@end
+
+@entry strtoul
+@also strtoull
+@header stdlib.h
+@syntax unsigned long strtoul(const char *s, char **end, int base);
+@syntax unsigned long long strtoull(const char *s, char **end, int base);
+@summary strtol for unsigned numbers.
+@returns
+The number; ULONG_MAX and errno = ERANGE if too big.
+@see strtol
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    printf("%lu\n", strtoul("4294967295", NULL, 10));
+    printf("%llu\n", strtoull("ffffffffffffffff", NULL, 16));
+    return 0;
+}
+@end
+
+@entry strtod
+@also strtof strtold
+@header stdlib.h
+@syntax double strtod(const char *s, char **end);
+@syntax float strtof(const char *s, char **end);
+@syntax long double strtold(const char *s, char **end);
+@summary Convert text to a floating-point number, with error checking.
+@desc
+Understands "3.14", "-1e-5", "0x1.8p3" (hex), "inf", "nan". *end shows
+where the number ended (same rules as strtol).
+@returns
+The number, or 0 if none.
+@see strtol atof
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    const char *s = "12.5 7e2 -0.25";
+    char *end;
+    double v;
+    while (1) {
+        v = strtod(s, &end);
+        if (end == s) break;
+        printf("%g\n", v);
+        s = end;
+    }
+    return 0;
+}
+@end
+
+@entry abs
+@also labs llabs
+@header stdlib.h
+@syntax int abs(int x);
+@syntax long labs(long x);
+@syntax long long llabs(long long x);
+@summary Absolute value of an integer (for doubles use fabs).
+@see fabs div
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    printf("%d %d %ld\n", abs(-5), abs(5), labs(-1234567890123L));
+    return 0;
+}
+@end
+
+@entry div
+@also ldiv lldiv div_t ldiv_t
+@header stdlib.h
+@syntax div_t div(int numer, int denom);
+@syntax ldiv_t ldiv(long numer, long denom);
+@syntax lldiv_t lldiv(long long numer, long long denom);
+@summary Quotient and remainder in one call.
+@desc
+The result struct has .quot and .rem.
+@see abs operators
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    div_t r = div(100, 7);
+    ldiv_t t = ldiv(3725L, 60L);
+    printf("100 / 7 = %d remainder %d\n", r.quot, r.rem);
+    printf("3725 seconds = %ld min %ld s\n", t.quot, t.rem);
+    return 0;
+}
+@end
+
+@entry rand
+@also srand rand_r RAND_MAX
+@header stdlib.h
+@syntax int rand(void);
+@syntax void srand(unsigned seed);
+@syntax int rand_r(unsigned *seed);
+@summary Pseudo-random numbers from 0 to RAND_MAX.
+@desc
+Without srand the sequence is the same every run. srand(time(NULL)) once
+at the start gives different numbers each time. A number from 1 to 6:
+rand() % 6 + 1. Not for passwords or keys - use getrandom (<sys/random.h>).
+rand_r keeps its state in your variable (for threads).
+@returns
+A number between 0 and RAND_MAX (2147483647).
+@see random drand48 time
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+int main(void)
+{
+    int i;
+    srand((unsigned)time(NULL));
+    printf("dice: ");
+    for (i = 0; i < 10; i++) printf("%d ", rand() % 6 + 1);
+    printf("\nRAND_MAX = %d\n", RAND_MAX);
+    return 0;
+}
+@end
+
+@entry random
+@also srandom initstate setstate
+@header stdlib.h
+@syntax long random(void);
+@syntax void srandom(unsigned seed);
+@syntax char *initstate(unsigned seed, char *state, size_t size);
+@syntax char *setstate(char *state);
+@summary The BSD random-number generator (better than rand on old systems).
+@desc
+Returns 0 .. 2^31-1. initstate/setstate let you keep several independent
+generators.
+@returns
+random: the number. initstate/setstate: the previous state.
+@see rand drand48
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    int i;
+    srandom(2026);
+    for (i = 0; i < 5; i++) printf("%ld\n", random() % 100);
+    return 0;
+}
+@end
+
+@entry drand48
+@also erand48 lrand48 nrand48 mrand48 jrand48 srand48 seed48
+@header stdlib.h
+@syntax double drand48(void);
+@syntax long lrand48(void);
+@syntax long mrand48(void);
+@syntax void srand48(long seed);
+@syntax double erand48(unsigned short state[3]);
+@syntax long nrand48(unsigned short state[3]);
+@syntax long jrand48(unsigned short state[3]);
+@syntax unsigned short *seed48(unsigned short seed[3]);
+@summary 48-bit random numbers: doubles in [0, 1) and longs.
+@desc
+drand48: 0.0 <= x < 1.0. lrand48: 0 .. 2^31-1. mrand48: -2^31 .. 2^31-1.
+The e/n/j versions use your own 3-number state instead of the global one.
+@see rand random
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    int i, inside = 0, n = 100000;
+    srand48(7);
+    for (i = 0; i < n; i++) {               /* estimate pi */
+        double x = drand48(), y = drand48();
+        if (x * x + y * y < 1.0) inside++;
+    }
+    printf("pi is about %.3f\n", 4.0 * inside / n);
+    return 0;
+}
+@end
+
+@entry qsort
+@also qsort_r
+@header stdlib.h
+@syntax void qsort(void *base, size_t count, size_t size, int (*cmp)(const void *, const void *));
+@syntax void qsort_r(void *base, size_t count, size_t size, int (*cmp)(const void *, const void *, void *), void *arg);
+@summary Sort an array of anything, with your compare function.
+@desc
+cmp gets pointers to two elements and returns negative (a first), 0
+(equal) or positive (b first). Return (x > y) - (x < y) instead of x - y,
+which can overflow. qsort_r passes arg to cmp as a third argument.
+@see bsearch strcmp
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static int by_int(const void *a, const void *b)
+{
+    int x = *(const int *)a, y = *(const int *)b;
+    return (x > y) - (x < y);
+}
+
+static int by_name(const void *a, const void *b)
+{
+    return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+int main(void)
+{
+    int v[] = { 42, 7, 19, 3, 88 };
+    const char *names[] = { "Rina", "Abul", "Kamal", "Bithi" };
+    int i;
+    qsort(v, 5, sizeof v[0], by_int);
+    qsort(names, 4, sizeof names[0], by_name);
+    for (i = 0; i < 5; i++) printf("%d ", v[i]);
+    printf("\n");
+    for (i = 0; i < 4; i++) printf("%s ", names[i]);
+    printf("\n");
+    return 0;
+}
+@end
+
+@entry bsearch
+@header stdlib.h
+@syntax void *bsearch(const void *key, const void *base, size_t count, size_t size, int (*cmp)(const void *, const void *));
+@summary Find an element in a SORTED array quickly (binary search).
+@returns
+A pointer to the matching element, or NULL.
+@see qsort
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+static int cmp(const void *a, const void *b)
+{
+    int x = *(const int *)a, y = *(const int *)b;
+    return (x > y) - (x < y);
+}
+
+int main(void)
+{
+    int v[] = { 2, 3, 5, 7, 11, 13, 17, 19 }, key = 13, *hit;
+    hit = bsearch(&key, v, 8, sizeof v[0], cmp);
+    if (hit) printf("%d found at index %d\n", key, (int)(hit - v));
+    key = 4;
+    printf("4 %s\n", bsearch(&key, v, 8, sizeof v[0], cmp) ? "found" : "not found");
+    return 0;
+}
+@end
+
+@entry mkstemp
+@also mkostemp mkstemps mktemp
+@header stdlib.h
+@syntax int mkstemp(char *template);
+@syntax int mkostemp(char *template, int flags);
+@syntax int mkstemps(char *template, int suffixlen);
+@syntax char *mktemp(char *template);
+@summary Create a new temporary file safely; the name ends in XXXXXX.
+@desc
+template is a char array like "/tmp/dataXXXXXX"; the X's are replaced and
+the file is created and opened in one step (no other program can take
+the name). mkstemps allows a suffix after the X's ("fileXXXXXX.txt", 4).
+mktemp only makes the name (not safe - avoid).
+@returns
+An open file descriptor, or -1. mktemp returns the template.
+@see tmpfile mkdtemp fdopen
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+int main(void)
+{
+    char name[] = "/tmp/rozXXXXXX";
+    int fd = mkstemp(name);
+    if (fd < 0) { perror("mkstemp"); return 1; }
+    printf("created %s\n", name);
+    write(fd, "data\n", 5);
+    close(fd);
+    unlink(name);
+    return 0;
+}
+@end
+
+@entry mkdtemp
+@header stdlib.h
+@syntax char *mkdtemp(char *template);
+@summary Create a new temporary folder (name ends in XXXXXX).
+@returns
+template (with the real name), or NULL.
+@see mkstemp
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+int main(void)
+{
+    char dir[] = "/tmp/workXXXXXX";
+    if (!mkdtemp(dir)) { perror("mkdtemp"); return 1; }
+    printf("made folder %s\n", dir);
+    rmdir(dir);
+    return 0;
+}
+@end
+
+@entry realpath
+@also PATH_MAX
+@header stdlib.h
+@syntax char *realpath(const char *path, char *resolved);
+@summary The full, clean path of a file ("../x/./y" -> "/home/y").
+@desc
+resolved must hold PATH_MAX bytes, or be NULL (then the result is
+malloc'ed - free it). The file must exist.
+@returns
+The path, or NULL.
+@see getenv
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    char *p = realpath(".", NULL);
+    if (p) {
+        printf("current folder: %s\n", p);
+        free(p);
+    }
+    return 0;
+}
+@end
+
+@entry mblen
+@also mbtowc wctomb mbstowcs wcstombs MB_CUR_MAX
+@header stdlib.h
+@syntax int mblen(const char *s, size_t n);
+@syntax int mbtowc(wchar_t *wc, const char *s, size_t n);
+@syntax int wctomb(char *s, wchar_t wc);
+@syntax size_t mbstowcs(wchar_t *dst, const char *src, size_t n);
+@syntax size_t wcstombs(char *dst, const wchar_t *src, size_t n);
+@summary Convert between UTF-8 bytes and wide characters (wchar_t).
+@desc
+rozOS text is UTF-8: one character can be 1 to 4 bytes (Bengali letters
+are 3). These functions count and convert characters. More in <wchar.h>.
+@returns
+mblen/mbtowc: bytes in the character (0 for '\0', -1 if invalid).
+mbstowcs/wcstombs: characters/bytes converted, or (size_t)-1.
+@see strlen
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <wchar.h>
+
+int main(void)
+{
+    const char *s = "A\xC3\xA9\xE0\xA6\x95";    /* "A", e-acute, Bengali KA */
+    int i = 0, n, chars = 0;
+    wchar_t w[8];
+    while (s[i]) {
+        n = mblen(s + i, 4);
+        if (n <= 0) break;
+        printf("character %d: %d byte(s)\n", ++chars, n);
+        i += n;
+    }
+    n = (int)mbstowcs(w, s, 8);
+    printf("%d characters, last code U+%04X\n", n, (unsigned)w[n - 1]);
+    return 0;
+}
+@end
+
+@entry ecvt
+@also fcvt gcvt
+@header stdlib.h
+@syntax char *ecvt(double v, int ndigits, int *decpt, int *sign);
+@syntax char *fcvt(double v, int ndigits, int *decpt, int *sign);
+@syntax char *gcvt(double v, int ndigits, char *buf);
+@summary Old functions to turn a double into digits (use snprintf instead).
+@desc
+ecvt gives ndigits significant digits, fcvt ndigits after the point; the
+decimal point position goes to *decpt and the sign to *sign. gcvt is
+like snprintf(buf, ..., "%.*g", ndigits, v).
+@see snprintf
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    int dec, sign;
+    char buf[32];
+    char *d = ecvt(-3.14159, 4, &dec, &sign);
+    printf("digits %s, point after %d, negative %d\n", d, dec, sign);
+    printf("gcvt: %s\n", gcvt(2.0 / 3.0, 5, buf));
+    return 0;
+}
+@end
+
+@entry a64l
+@also l64a
+@header stdlib.h
+@syntax long a64l(const char *s);
+@syntax char *l64a(long v);
+@summary Convert a 32-bit number to and from a short base-64 text.
+@see strtol
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    const char *t = l64a(123456);
+    printf("123456 -> '%s' -> %ld\n", t, a64l(t));
+    return 0;
+}
+@end
+
+@entry getloadavg
+@header stdlib.h
+@syntax int getloadavg(double loads[], int n);
+@summary System load averages (1, 5, 15 minutes).
+@desc
+rozOS does not measure load yet: the values are always 0.0.
+@returns
+The number of values filled (up to 3).
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    double l[3];
+    int n = getloadavg(l, 3);
+    printf("%d values: %.2f %.2f %.2f\n", n, l[0], l[1], l[2]);
+    return 0;
+}
+@end
+
+@entry getsubopt
+@header stdlib.h
+@syntax int getsubopt(char **optionp, char *const *tokens, char **valuep);
+@summary Split an option like "size=10,fast,name=x" into parts.
+@desc
+Each call takes the next comma-separated item from *optionp, finds it in
+the NULL-ended tokens list and sets *valuep to the part after '='.
+@returns
+The index in tokens, or -1 if the item is not in the list.
+@see strtok
+@example
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    char opts[] = "size=10,fast,color=red";
+    char *const tokens[] = { "size", "fast", "color", NULL };
+    char *p = opts, *val;
+    while (*p) {
+        int i = getsubopt(&p, tokens, &val);
+        if (i < 0) printf("unknown option\n");
+        else printf("%s = %s\n", tokens[i], val ? val : "(yes)");
+    }
+    return 0;
+}
+@end

@@ -6,3 +6,4 @@ Shell tips: menu, ls /bin | wc -l, edit notes.txt, systest, kmon, help
 Desktop: Start menu, Terminal, Files, Code icons; textmode / desktop switch; help desktop
 Graphics (make run window): gfxdemo, paint, imgview, gcalc, setfont, help graphics
 Games: snake, breakout, tetris, platformer, luagame (Start > Games); help games, help rozgame
+C help: Ctrl+F1 in Code or edit, crefview, cref printf; help cref

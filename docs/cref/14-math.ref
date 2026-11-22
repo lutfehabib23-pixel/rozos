@@ -1,0 +1,930 @@
+# rozOS C reference - <math.h> (phase 19a)
+# Most functions come in three types: sin (double), sinf (float), sinl (long double).
+# The math library is inside libc in rozOS; -lm is accepted but not needed.
+
+@entry math-constants
+@also M_PI M_E M_SQRT2 M_PI_2 M_PI_4 M_1_PI M_2_PI M_LN2 M_LN10 M_LOG2E M_LOG10E M_SQRT1_2 HUGE_VAL INFINITY NAN
+@header math.h
+@summary Useful constants: pi, e, square root of 2, infinity, NaN.
+@desc
+  M_PI     3.14159265358979   M_PI_2  pi/2      M_PI_4  pi/4
+  M_E      2.71828182845905   M_LN2   ln 2      M_LN10  ln 10
+  M_SQRT2  1.41421356237310   M_SQRT1_2         M_1_PI  M_2_PI
+  HUGE_VAL, INFINITY   positive infinity (what 1.0/0.0 gives)
+  NAN                  "not a number" (what 0.0/0.0 gives)
+@see sin isnan sqrt
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double r = 2.0;
+    printf("pi = %.10f, e = %.10f\n", M_PI, M_E);
+    printf("circle area r=2: %.4f\n", M_PI * r * r);
+    printf("infinity: %f, nan: %f\n", INFINITY, NAN);
+    return 0;
+}
+@end
+
+@entry sin
+@also sinf sinl
+@header math.h
+@syntax double sin(double x);
+@syntax float sinf(float x);
+@syntax long double sinl(long double x);
+@summary Sine of an angle in RADIANS.
+@desc
+Degrees to radians: deg * M_PI / 180. Result between -1 and 1.
+@see cos tan asin sincos math-constants
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    int deg;
+    for (deg = 0; deg <= 90; deg += 30)
+        printf("sin(%2d deg) = %.4f\n", deg, sin(deg * M_PI / 180));
+    return 0;
+}
+@end
+
+@entry cos
+@also cosf cosl
+@header math.h
+@syntax double cos(double x);
+@syntax float cosf(float x);
+@syntax long double cosl(long double x);
+@summary Cosine of an angle in radians.
+@see sin tan acos sincos
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double a;
+    for (a = 0; a <= 2 * M_PI + 0.001; a += M_PI / 2)        /* points on a circle */
+        printf("angle %.2f: x = %6.3f, y = %6.3f\n", a, cos(a), sin(a));
+    return 0;
+}
+@end
+
+@entry tan
+@also tanf tanl
+@header math.h
+@syntax double tan(double x);
+@syntax float tanf(float x);
+@syntax long double tanl(long double x);
+@summary Tangent of an angle in radians.
+@see sin cos atan
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double angle = 30 * M_PI / 180, distance = 50;
+    printf("a tree seen at 30 degrees from 50 m is %.1f m tall\n", distance * tan(angle));
+    return 0;
+}
+@end
+
+@entry sincos
+@also sincosf sincosl
+@header math.h
+@syntax void sincos(double x, double *s, double *c);
+@syntax void sincosf(float x, float *s, float *c);
+@syntax void sincosl(long double x, long double *s, long double *c);
+@summary sin and cos of the same angle in one call.
+@see sin cos
+@example
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double s, c;
+    sincos(M_PI / 3, &s, &c);
+    printf("sin %.4f cos %.4f\n", s, c);
+    return 0;
+}
+@end
+
+@entry asin
+@also asinf asinl
+@header math.h
+@syntax double asin(double x);
+@syntax float asinf(float x);
+@syntax long double asinl(long double x);
+@summary Arc sine: the angle (radians, -pi/2..pi/2) whose sine is x.
+@returns
+The angle; NaN if x is outside -1..1.
+@see sin acos atan
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    printf("asin(0.5) = %.4f rad = %.1f deg\n", asin(0.5), asin(0.5) * 180 / M_PI);
+    return 0;
+}
+@end
+
+@entry acos
+@also acosf acosl
+@header math.h
+@syntax double acos(double x);
+@syntax float acosf(float x);
+@syntax long double acosl(long double x);
+@summary Arc cosine: the angle (0..pi) whose cosine is x.
+@returns
+The angle; NaN if x is outside -1..1.
+@see cos asin
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double ax = 1, ay = 0, bx = 1, by = 1;          /* angle between two vectors */
+    double dot = ax * bx + ay * by, la = hypot(ax, ay), lb = hypot(bx, by);
+    printf("angle = %.1f degrees\n", acos(dot / (la * lb)) * 180 / M_PI);
+    return 0;
+}
+@end
+
+@entry atan
+@also atanf atanl
+@header math.h
+@syntax double atan(double x);
+@syntax float atanf(float x);
+@syntax long double atanl(long double x);
+@summary Arc tangent: angle (-pi/2..pi/2) whose tangent is x. See atan2 for directions.
+@see atan2 tan
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    printf("atan(1) * 4 = %.10f (that is pi)\n", atan(1) * 4);
+    return 0;
+}
+@end
+
+@entry atan2
+@also atan2f atan2l
+@header math.h
+@syntax double atan2(double y, double x);
+@syntax float atan2f(float y, float x);
+@syntax long double atan2l(long double y, long double x);
+@summary The direction angle of the point (x, y), from -pi to pi.
+@desc
+Unlike atan(y/x) it knows the quarter of the circle and works when x is 0.
+Used in games to turn an object towards a target.
+@see atan hypot
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double px = 100, py = 100, tx = 50, ty = 150;
+    double ang = atan2(ty - py, tx - px);
+    printf("aim at %.1f degrees\n", ang * 180 / M_PI);
+    return 0;
+}
+@end
+
+@entry sinh
+@also cosh tanh sinhf sinhl coshf coshl tanhf tanhl
+@header math.h
+@syntax double sinh(double x);
+@syntax double cosh(double x);
+@syntax double tanh(double x);
+@summary Hyperbolic sine, cosine and tangent (also with f / l).
+@desc
+tanh squeezes any number into -1..1 (used in neural networks).
+@see asinh exp
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double x;
+    for (x = -2; x <= 2; x += 1)
+        printf("x %+.0f: sinh %7.3f cosh %6.3f tanh %6.3f\n", x, sinh(x), cosh(x), tanh(x));
+    return 0;
+}
+@end
+
+@entry asinh
+@also acosh atanh asinhf asinhl acoshf acoshl atanhf atanhl
+@header math.h
+@syntax double asinh(double x);
+@syntax double acosh(double x);
+@syntax double atanh(double x);
+@summary Inverse hyperbolic functions (also with f / l).
+@see sinh
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    printf("%.4f %.4f %.4f\n", asinh(sinh(1.5)), acosh(cosh(2.0)), atanh(tanh(0.5)));
+    return 0;
+}
+@end
+
+@entry exp
+@also expf expl
+@header math.h
+@syntax double exp(double x);
+@syntax float expf(float x);
+@syntax long double expl(long double x);
+@summary e to the power x.
+@returns
+e^x; HUGE_VAL (and errno = ERANGE) if too big.
+@see log pow exp2 expm1
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double money = 1000, rate = 0.05;      /* continuous interest for 10 years */
+    printf("exp(1) = %.6f\n", exp(1));
+    printf("after 10 years: %.2f\n", money * exp(rate * 10));
+    return 0;
+}
+@end
+
+@entry exp2
+@also exp2f exp2l
+@header math.h
+@syntax double exp2(double x);
+@syntax float exp2f(float x);
+@syntax long double exp2l(long double x);
+@summary 2 to the power x.
+@see exp log2 ldexp
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    printf("2^10 = %g, 2^0.5 = %f\n", exp2(10), exp2(0.5));
+    return 0;
+}
+@end
+
+@entry exp10
+@also exp10f exp10l pow10
+@header math.h
+@syntax double exp10(double x);
+@syntax double pow10(double x);
+@summary 10 to the power x (pow10 is an older name).
+@see exp log10 pow
+@example
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    printf("10^3 = %g, 10^-2 = %g\n", exp10(3), exp10(-2));
+    return 0;
+}
+@end
+
+@entry expm1
+@also expm1f expm1l
+@header math.h
+@syntax double expm1(double x);
+@summary exp(x) - 1, exact even when x is tiny.
+@see exp log1p
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double x = 1e-12;
+    printf("exp(x)-1 = %.6e, expm1(x) = %.6e\n", exp(x) - 1, expm1(x));
+    return 0;
+}
+@end
+
+@entry log
+@also logf logl
+@header math.h
+@syntax double log(double x);
+@syntax float logf(float x);
+@syntax long double logl(long double x);
+@summary Natural logarithm (base e).
+@returns
+ln x; -HUGE_VAL for 0; NaN for negative x.
+@see log10 log2 exp
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double grow = 2.0, rate = 0.07;          /* years to double at 7% */
+    printf("ln(e) = %g\n", log(M_E));
+    printf("doubling time: %.1f years\n", log(grow) / log(1 + rate));
+    return 0;
+}
+@end
+
+@entry log10
+@also log10f log10l
+@header math.h
+@syntax double log10(double x);
+@summary Logarithm base 10 (how many digits: floor(log10(n)) + 1).
+@see log exp10
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double n = 123456;
+    printf("log10(1000) = %g, %g has %d digits\n", log10(1000), n, (int)floor(log10(n)) + 1);
+    return 0;
+}
+@end
+
+@entry log2
+@also log2f log2l
+@header math.h
+@syntax double log2(double x);
+@summary Logarithm base 2 (how many bits, how many halvings).
+@see log exp2
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    printf("log2(1024) = %g; binary search in 1000000 items needs %d steps\n",
+           log2(1024), (int)ceil(log2(1000000)));
+    return 0;
+}
+@end
+
+@entry log1p
+@also log1pf log1pl
+@header math.h
+@syntax double log1p(double x);
+@summary log(1 + x), exact even when x is tiny.
+@see log expm1
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double x = 1e-15;
+    printf("log(1+x) = %.6e, log1p(x) = %.6e\n", log(1 + x), log1p(x));
+    return 0;
+}
+@end
+
+@entry logb
+@also logbf logbl ilogb ilogbf ilogbl significand
+@header math.h
+@syntax double logb(double x);
+@syntax int ilogb(double x);
+@syntax double significand(double x);
+@summary The binary exponent of x (and its mantissa in 1..2).
+@see frexp log2
+@example
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double x = 48.0;                       /* 48 = 1.5 * 2^5 */
+    printf("logb %g, ilogb %d, significand %g\n", logb(x), ilogb(x), significand(x));
+    return 0;
+}
+@end
+
+@entry pow
+@also powf powl
+@header math.h
+@syntax double pow(double x, double y);
+@syntax float powf(float x, float y);
+@syntax long double powl(long double x, long double y);
+@summary x to the power y.
+@desc
+For small whole powers x * x is faster. pow of a negative x with a
+fractional y gives NaN.
+@see sqrt exp cbrt
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double amount = 10000, rate = 0.08;
+    int year;
+    for (year = 1; year <= 3; year++)
+        printf("year %d: %.2f\n", year, amount * pow(1 + rate, year));
+    printf("2^0.5 = %f, 27^(1/3) = %f\n", pow(2, 0.5), pow(27, 1.0 / 3));
+    return 0;
+}
+@end
+
+@entry sqrt
+@also sqrtf sqrtl
+@header math.h
+@syntax double sqrt(double x);
+@syntax float sqrtf(float x);
+@syntax long double sqrtl(long double x);
+@summary Square root.
+@returns
+The root; NaN for negative x.
+@see pow cbrt hypot
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double a = 1, b = -3, c = 2, d = b * b - 4 * a * c;   /* x^2 - 3x + 2 = 0 */
+    if (d >= 0)
+        printf("roots: %g and %g\n", (-b + sqrt(d)) / (2 * a), (-b - sqrt(d)) / (2 * a));
+    return 0;
+}
+@end
+
+@entry cbrt
+@also cbrtf cbrtl
+@header math.h
+@syntax double cbrt(double x);
+@summary Cube root (works for negative numbers too).
+@see sqrt pow
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    printf("cbrt(27) = %g, cbrt(-8) = %g\n", cbrt(27), cbrt(-8));
+    return 0;
+}
+@end
+
+@entry hypot
+@also hypotf hypotl
+@header math.h
+@syntax double hypot(double x, double y);
+@summary sqrt(x*x + y*y) - distance, length of a vector - without overflow.
+@see sqrt atan2
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double x1 = 1, y1 = 2, x2 = 4, y2 = 6;
+    printf("distance = %g\n", hypot(x2 - x1, y2 - y1));
+    return 0;
+}
+@end
+
+@entry fabs
+@also fabsf fabsl
+@header math.h
+@syntax double fabs(double x);
+@summary Absolute value of a floating-point number.
+@see abs copysign
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double a = 0.1 + 0.2, b = 0.3;
+    printf("0.1+0.2 == 0.3 ? %s\n", a == b ? "yes" : "no");
+    printf("close enough ? %s\n", fabs(a - b) < 1e-9 ? "yes" : "no");
+    return 0;
+}
+@end
+
+@entry ceil
+@also ceilf ceill
+@header math.h
+@syntax double ceil(double x);
+@summary Round UP to a whole number (3.2 -> 4, -3.2 -> -3).
+@see floor round trunc
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    int students = 43, per_bus = 10;
+    printf("buses needed: %g\n", ceil((double)students / per_bus));
+    return 0;
+}
+@end
+
+@entry floor
+@also floorf floorl
+@header math.h
+@syntax double floor(double x);
+@summary Round DOWN to a whole number (3.8 -> 3, -3.2 -> -4).
+@see ceil round trunc
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    printf("floor(3.8) = %g, floor(-3.2) = %g\n", floor(3.8), floor(-3.2));
+    return 0;
+}
+@end
+
+@entry trunc
+@also truncf truncl
+@header math.h
+@syntax double trunc(double x);
+@summary Cut off the fraction, toward 0 (3.8 -> 3, -3.8 -> -3).
+@see floor round
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    printf("trunc(3.8) = %g, trunc(-3.8) = %g\n", trunc(3.8), trunc(-3.8));
+    return 0;
+}
+@end
+
+@entry round
+@also roundf roundl lround lroundf lroundl llround llroundf llroundl
+@header math.h
+@syntax double round(double x);
+@syntax long lround(double x);
+@syntax long long llround(double x);
+@summary Round to the nearest whole number; halves go away from 0 (2.5 -> 3).
+@desc
+lround and llround return an integer type directly.
+@see rint floor ceil trunc
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double price = 19.4567;
+    printf("round(2.5) = %g, round(-2.5) = %g, lround(7.49) = %ld\n", round(2.5), round(-2.5), lround(7.49));
+    printf("to 2 decimals: %.2f\n", round(price * 100) / 100);
+    return 0;
+}
+@end
+
+@entry rint
+@also rintf rintl lrint lrintf lrintl llrint llrintf llrintl nearbyint nearbyintf nearbyintl
+@header math.h
+@syntax double rint(double x);
+@syntax long lrint(double x);
+@syntax double nearbyint(double x);
+@summary Round using the current rounding mode (normally: halves to even, 2.5 -> 2).
+@see round fenv
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    printf("rint(2.5) = %g, rint(3.5) = %g, lrint(-1.5) = %ld, nearbyint(4.5) = %g\n",
+           rint(2.5), rint(3.5), lrint(-1.5), nearbyint(4.5));
+    return 0;
+}
+@end
+
+@entry fenv
+@also fenv.h fesetround fegetround FE_UPWARD FE_DOWNWARD FE_TONEAREST FE_TOWARDZERO
+@header language
+@summary <fenv.h>: the rounding mode and floating-point exception flags.
+@desc
+  fesetround(FE_UPWARD)  FE_DOWNWARD  FE_TOWARDZERO  FE_TONEAREST (default)
+  fegetround()            the current mode
+  feclearexcept / fetestexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW ...)
+rint, lrint and nearbyint follow the mode.
+@see rint
+@example
+#include <stdio.h>
+#include <math.h>
+#include <fenv.h>
+
+int main(void)
+{
+    fesetround(FE_UPWARD);
+    printf("upward: rint(2.1) = %g\n", rint(2.1));
+    fesetround(FE_TONEAREST);
+    printf("nearest: rint(2.1) = %g\n", rint(2.1));
+    return 0;
+}
+@end
+
+@entry fmod
+@also fmodf fmodl
+@header math.h
+@syntax double fmod(double x, double y);
+@summary Remainder of x / y for floating-point numbers (sign of x).
+@see remainder modf operators
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double angle = 725.0;
+    printf("725 degrees = %g degrees after full turns\n", fmod(angle, 360.0));
+    printf("fmod(-7, 3) = %g\n", fmod(-7, 3));
+    return 0;
+}
+@end
+
+@entry remainder
+@also remainderf remainderl drem remquo remquof remquol
+@header math.h
+@syntax double remainder(double x, double y);
+@syntax double remquo(double x, double y, int *quo);
+@syntax double drem(double x, double y);
+@summary IEEE remainder: x - n*y with n the NEAREST whole number (can be negative).
+@desc
+remquo also gives the low bits of n in *quo. drem is an old name for
+remainder.
+@see fmod
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    int q;
+    double r;
+    printf("fmod(7, 4) = %g, remainder(7, 4) = %g\n", fmod(7, 4), remainder(7, 4));
+    r = remquo(10, 3, &q);          /* call first: q is set by the call */
+    printf("remquo(10, 3) = %g, quotient %d\n", r, q);
+    return 0;
+}
+@end
+
+@entry modf
+@also modff modfl
+@header math.h
+@syntax double modf(double x, double *intpart);
+@summary Split a number into its whole part and its fraction.
+@returns
+The fraction; the whole part goes to *intpart.
+@see trunc fmod
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double whole, frac = modf(12.75, &whole);
+    printf("12.75 -> %g and %g\n", whole, frac);
+    return 0;
+}
+@end
+
+@entry frexp
+@also frexpf frexpl ldexp ldexpf ldexpl scalbn scalbnf scalbnl scalbln scalblnf scalblnl
+@header math.h
+@syntax double frexp(double x, int *exp);
+@syntax double ldexp(double x, int exp);
+@syntax double scalbn(double x, int n);
+@syntax double scalbln(double x, long n);
+@summary Split x into mantissa * 2^exp, and build it back (ldexp, scalbn).
+@desc
+frexp gives a mantissa in [0.5, 1). ldexp(m, e) = m * 2^e; scalbn is the
+same.
+@see logb exp2
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    int e;
+    double m = frexp(80.0, &e);
+    printf("80 = %g * 2^%d, back: %g, scalbn(3, 4) = %g\n", m, e, ldexp(m, e), scalbn(3, 4));
+    return 0;
+}
+@end
+
+@entry fmin
+@also fminf fminl fmax fmaxf fmaxl
+@header math.h
+@syntax double fmin(double x, double y);
+@syntax double fmax(double x, double y);
+@summary The smaller / bigger of two numbers (ignores a NaN argument).
+@see fdim
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double speed = 140, limit = 120;
+    printf("allowed speed %g, faster of 3 and 9: %g\n", fmin(speed, limit), fmax(3, 9));
+    return 0;
+}
+@end
+
+@entry fdim
+@also fdimf fdiml
+@header math.h
+@syntax double fdim(double x, double y);
+@summary x - y if positive, else 0.
+@see fmax
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    printf("over by %g, under: %g\n", fdim(130, 120), fdim(100, 120));
+    return 0;
+}
+@end
+
+@entry fma
+@also fmaf fmal
+@header math.h
+@syntax double fma(double x, double y, double z);
+@summary x * y + z with a single rounding (more accurate).
+@see pow
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    printf("fma(2, 3, 4) = %g\n", fma(2, 3, 4));
+    return 0;
+}
+@end
+
+@entry copysign
+@also copysignf copysignl
+@header math.h
+@syntax double copysign(double x, double y);
+@summary The size of x with the sign of y.
+@see fabs signbit
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    printf("%g %g\n", copysign(5, -1), copysign(-5, 2));
+    return 0;
+}
+@end
+
+@entry nextafter
+@also nextafterf nextafterl nexttoward nexttowardf nexttowardl
+@header math.h
+@syntax double nextafter(double x, double y);
+@syntax double nexttoward(double x, long double y);
+@summary The next representable number after x in the direction of y.
+@see fabs
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double x = 1.0, n = nextafter(x, 2.0);
+    printf("after 1.0 comes %.17g (gap %g)\n", n, n - x);
+    return 0;
+}
+@end
+
+@entry nan
+@also nanf nanl
+@header math.h
+@syntax double nan(const char *tag);
+@summary Make a NaN ("not a number") value.
+@see isnan math-constants
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double missing = nan("");
+    printf("value %f, is nan: %d\n", missing, isnan(missing) != 0);
+    return 0;
+}
+@end
+
+@entry isnan
+@also isinf isfinite isnormal fpclassify signbit finite FP_NAN FP_INFINITE FP_ZERO FP_SUBNORMAL FP_NORMAL
+@header math.h
+@syntax int isnan(x);   int isinf(x);   int isfinite(x);   int isnormal(x);
+@syntax int fpclassify(x);   int signbit(x);   int finite(double x);
+@summary Test what kind of value a float/double is: NaN, infinity, normal ...
+@desc
+NaN is never equal to anything, even itself, so x == NAN is always false -
+use isnan(x). fpclassify returns FP_NAN, FP_INFINITE, FP_ZERO,
+FP_SUBNORMAL or FP_NORMAL. These are macros that work for float, double
+and long double (finite is an old function).
+@see nan math-constants isgreater
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double v[] = { 1.5, 0.0 / 0.0, 1.0 / 0.0, -0.0 };
+    int i;
+    for (i = 0; i < 4; i++)
+        printf("%5g: nan %d inf %d finite %d negative %d\n",
+               v[i], isnan(v[i]) != 0, isinf(v[i]) != 0, isfinite(v[i]) != 0, signbit(v[i]) != 0);
+    return 0;
+}
+@end
+
+@entry isgreater
+@also isgreaterequal isless islessequal islessgreater isunordered
+@header math.h
+@syntax int isgreater(x, y);   int isless(x, y);   int isunordered(x, y); ...
+@summary Comparisons that are simply false (no error) when a NaN is involved.
+@see isnan
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double a = 2, b = NAN;
+    printf("isgreater(2, 1) %d, isless(2, nan) %d, isunordered(2, nan) %d\n",
+           isgreater(a, 1.0), isless(a, b), isunordered(a, b));
+    return 0;
+}
+@end
+
+@entry erf
+@also erff erfl erfc erfcf erfcl
+@header math.h
+@syntax double erf(double x);
+@syntax double erfc(double x);
+@summary The error function (statistics: normal distribution); erfc = 1 - erf.
+@see exp tgamma
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    /* chance that a normal value is within 1, 2, 3 standard deviations */
+    int k;
+    for (k = 1; k <= 3; k++)
+        printf("within %d sigma: %.2f%%\n", k, 100 * erf(k / sqrt(2.0)));
+    return 0;
+}
+@end
+
+@entry tgamma
+@also tgammaf tgammal lgamma lgammaf lgammal lgamma_r lgammaf_r lgammal_r gamma
+@header math.h
+@syntax double tgamma(double x);
+@syntax double lgamma(double x);
+@syntax double lgamma_r(double x, int *sign);
+@summary The gamma function (tgamma(n) = (n-1)!) and its logarithm.
+@desc
+lgamma gives ln|gamma(x)| for very large x (factorials of big numbers);
+lgamma_r also returns the sign. gamma is an old name for lgamma.
+@see exp erf
+@example
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    printf("tgamma(6) = %g (5!)\n", tgamma(6));
+    printf("ln(100!) = %.4f\n", lgamma(101));
+    return 0;
+}
+@end

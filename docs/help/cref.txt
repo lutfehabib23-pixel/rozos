@@ -1,0 +1,39 @@
+# cref, crefview - the C reference (phase 19a)
+Every function of the C library with its syntax, what it does, what it
+returns, and a small program that uses it - like the help of Turbo C.
+Also the C language itself: types, if/for/while, pointers, structs,
+printf and scanf codes, operators, the preprocessor ...
+
+== In Code (the editor) ==
+  Ctrl+F1     help for the word under the cursor (printf, strcpy, for ...)
+  Shift+F1    the reference with its index
+  Help menu   the same two
+== In edit (terminal editor) ==
+  Ctrl+F1     the page for the word under the cursor
+  Shift+F1    type a name
+  in the page: Up/Down/PgUp/PgDn scroll, C copies the example (then Esc
+  and Ctrl+V pastes it into your file), Esc goes back
+== The window: crefview ==
+  `crefview`          index (Start > Development > C reference)
+  `crefview strtol`   one page
+  Find: type part of a name or a word (Enter opens the first match).
+  Click a name under "See also" to follow it; Back returns.
+  Copy example   puts the program on the clipboard (Ctrl+V in Code/edit)
+  Try it         opens the example in Code - press F5 to compile and run
+== In a terminal: cref ==
+  `cref printf`        the page
+  `cref -k string`     everything that mentions "string"
+  `cref -l`            the headers;  `cref -l math.h`  all of one header
+  `cref -x qsort > q.c; tcc q.c -o q; ./q`    take an example and run it
+  `cref -s fopen`      only the syntax
+
+== What is covered ==
+Phase 19a: the C language, <stdio.h>, <stdlib.h>, <string.h>,
+<strings.h>, <ctype.h>, <math.h>, <time.h> - every function.
+Coming: POSIX (unistd, files, signals, threads, sockets ...) and the
+rozOS libraries (rozgfx, rozui, rozgame ...).
+
+The pages are text files in /usr/share/cref (source: docs/cref in the
+rozOS tree). Every example is compiled and run when rozOS is built
+(`make cref-check`), so they all work. See [[c-programming]], [[tcc]],
+[[code]], [[edit]].

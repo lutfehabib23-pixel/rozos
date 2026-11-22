@@ -1,0 +1,777 @@
+# rozOS C reference - <string.h> and <strings.h> (phase 19a)
+
+@entry strlen
+@also strnlen
+@header string.h
+@syntax size_t strlen(const char *s);
+@syntax size_t strnlen(const char *s, size_t max);
+@summary The length of a string (characters before the '\0').
+@desc
+Counts bytes, so a UTF-8 Bengali letter counts as 3. strnlen stops after
+max bytes (safe on buffers that might have no '\0').
+@returns
+The number of bytes.
+@see strings sizeof mblen
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char buf[100] = "rozOS";
+    printf("strlen %zu, sizeof %zu\n", strlen(buf), sizeof buf);
+    printf("strnlen(\"abcdef\", 3) = %zu\n", strnlen("abcdef", 3));
+    return 0;
+}
+@end
+
+@entry strcpy
+@header string.h
+@syntax char *strcpy(char *dst, const char *src);
+@summary Copy a string (including its '\0') - dst must be big enough.
+@desc
+No size check: copying a longer string than dst can hold overwrites other
+memory. When the size is not certain use snprintf(dst, sizeof dst, "%s",
+src) or strlcpy.
+@returns
+dst.
+@see strncpy strlcpy stpcpy strdup memcpy
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char name[20];
+    strcpy(name, "Dhaka");
+    printf("%s\n", name);
+    return 0;
+}
+@end
+
+@entry strncpy
+@header string.h
+@syntax char *strncpy(char *dst, const char *src, size_t n);
+@summary Copy at most n bytes - careful: may leave dst without '\0'.
+@desc
+If src is shorter than n, the rest of dst is filled with '\0'. If src is
+n or longer, NO '\0' is written - add it yourself: dst[n - 1] = '\0'.
+strlcpy is simpler.
+@returns
+dst.
+@see strlcpy strcpy
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char code[6];
+    strncpy(code, "Bangladesh", sizeof code - 1);
+    code[sizeof code - 1] = '\0';
+    printf("'%s'\n", code);
+    return 0;
+}
+@end
+
+@entry strlcpy
+@also strlcat
+@header string.h
+@syntax size_t strlcpy(char *dst, const char *src, size_t size);
+@syntax size_t strlcat(char *dst, const char *src, size_t size);
+@summary Safe copy and append: never overflow, always end with '\0'.
+@desc
+size is the full size of dst (sizeof dst). The result is the length the
+whole string would have; if it is >= size the text was cut.
+@returns
+strlen(src) for strlcpy; the length it tried to make for strlcat.
+@see strcpy strcat snprintf
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char path[16];
+    strlcpy(path, "/home/", sizeof path);
+    if (strlcat(path, "very-long-file-name.txt", sizeof path) >= sizeof path)
+        printf("cut to fit: ");
+    printf("%s\n", path);
+    return 0;
+}
+@end
+
+@entry stpcpy
+@also stpncpy
+@header string.h
+@syntax char *stpcpy(char *dst, const char *src);
+@syntax char *stpncpy(char *dst, const char *src, size_t n);
+@summary Like strcpy, but returns the END of dst (easy chaining).
+@returns
+A pointer to the '\0' written at the end of dst.
+@see strcpy strcat
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char buf[64], *p = buf;
+    p = stpcpy(p, "one");
+    p = stpcpy(p, ", two");
+    p = stpcpy(p, ", three");
+    printf("%s (%d chars)\n", buf, (int)(p - buf));
+    return 0;
+}
+@end
+
+@entry strcat
+@header string.h
+@syntax char *strcat(char *dst, const char *src);
+@summary Append src to the end of dst (dst must have room).
+@returns
+dst.
+@see strncat strlcat snprintf
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char s[40] = "Hello";
+    strcat(s, ", ");
+    strcat(s, "world");
+    printf("%s\n", s);
+    return 0;
+}
+@end
+
+@entry strncat
+@header string.h
+@syntax char *strncat(char *dst, const char *src, size_t n);
+@summary Append at most n bytes of src, then '\0'.
+@desc
+n limits what is taken from src, not the size of dst: room needed is
+strlen(dst) + n + 1.
+@returns
+dst.
+@see strcat strlcat
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char s[16] = "abc";
+    strncat(s, "defghijklmnop", 4);
+    printf("%s\n", s);
+    return 0;
+}
+@end
+
+@entry strcmp
+@header string.h
+@syntax int strcmp(const char *a, const char *b);
+@summary Compare two strings (dictionary order by byte value).
+@desc
+== on strings compares addresses, not text - always use strcmp. Capital
+letters sort before small ones ("Zoo" < "apple"); use strcasecmp to
+ignore case.
+@returns
+0 if equal, negative if a comes first, positive if b comes first.
+@see strncmp strcasecmp strcoll qsort
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char answer[] = "yes";
+    if (strcmp(answer, "yes") == 0) printf("equal\n");
+    printf("apple vs banana: %d\n", strcmp("apple", "banana") < 0 ? -1 : 1);
+    printf("Zoo vs apple: %s\n", strcmp("Zoo", "apple") < 0 ? "Zoo first" : "apple first");
+    return 0;
+}
+@end
+
+@entry strncmp
+@header string.h
+@syntax int strncmp(const char *a, const char *b, size_t n);
+@summary Compare at most the first n characters.
+@desc
+Handy for "does it start with": strncmp(s, "http://", 7) == 0.
+@returns
+Like strcmp.
+@see strcmp strncasecmp
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    const char *url = "https://rozos.org";
+    if (strncmp(url, "https://", 8) == 0) printf("secure link\n");
+    return 0;
+}
+@end
+
+@entry strcasecmp
+@also strncasecmp
+@header string.h
+@syntax int strcasecmp(const char *a, const char *b);
+@syntax int strncasecmp(const char *a, const char *b, size_t n);
+@summary Compare strings ignoring upper/lower case (ASCII letters).
+@returns
+Like strcmp.
+@see strcmp strcasestr
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    printf("%d\n", strcasecmp("ROZos", "rozOS") == 0);
+    printf("%d\n", strncasecmp("HELLO world", "hello", 5) == 0);
+    return 0;
+}
+@end
+
+@entry strcoll
+@also strxfrm
+@header string.h
+@syntax int strcoll(const char *a, const char *b);
+@syntax size_t strxfrm(char *dst, const char *src, size_t n);
+@summary Compare by the current language's sort order (locale).
+@desc
+rozOS has the "C" and "C.UTF-8" locales, where strcoll is the same as
+strcmp and strxfrm simply copies.
+@returns
+Like strcmp; strxfrm returns the length of the transformed string.
+@see strcmp
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char key[16];
+    printf("%d\n", strcoll("abc", "abd") < 0);
+    printf("%zu '%s'\n", strxfrm(key, "sort", sizeof key), key);
+    return 0;
+}
+@end
+
+@entry strchr
+@also strchrnul
+@header string.h
+@syntax char *strchr(const char *s, int c);
+@syntax char *strchrnul(const char *s, int c);
+@summary Find the first place a character appears.
+@returns
+A pointer to it, or NULL (strchrnul returns the end '\0' instead).
+@see strrchr strstr memchr strpbrk
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    const char *email = "student@rozos.org";
+    const char *at = strchr(email, '@');
+    if (at) printf("user: %.*s, domain: %s\n", (int)(at - email), email, at + 1);
+    return 0;
+}
+@end
+
+@entry strrchr
+@header string.h
+@syntax char *strrchr(const char *s, int c);
+@summary Find the LAST place a character appears.
+@returns
+A pointer to it, or NULL.
+@see strchr
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    const char *path = "/home/me/photo.png";
+    const char *slash = strrchr(path, '/'), *dot = strrchr(path, '.');
+    printf("file %s, extension %s\n", slash ? slash + 1 : path, dot ? dot + 1 : "-");
+    return 0;
+}
+@end
+
+@entry strstr
+@also strcasestr
+@header string.h
+@syntax char *strstr(const char *haystack, const char *needle);
+@syntax char *strcasestr(const char *haystack, const char *needle);
+@summary Find a piece of text inside another.
+@returns
+A pointer to where needle starts, or NULL. strcasestr ignores case.
+@see strchr memmem
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    const char *text = "the quick brown fox";
+    const char *p = strstr(text, "brown");
+    if (p) printf("found at position %d\n", (int)(p - text));
+    printf("%s\n", strcasestr(text, "QUICK") ? "case-insensitive match" : "no");
+    return 0;
+}
+@end
+
+@entry strspn
+@also strcspn
+@header string.h
+@syntax size_t strspn(const char *s, const char *accept);
+@syntax size_t strcspn(const char *s, const char *reject);
+@summary Length of the start made only of (or free of) some characters.
+@desc
+strspn counts how many first characters are in accept. strcspn counts how
+many first characters are NOT in reject - the usual trick to remove the
+newline from fgets: line[strcspn(line, "\n")] = '\0'.
+@returns
+A count.
+@see strpbrk fgets
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char line[] = "12345abc\n";
+    printf("digits at the start: %zu\n", strspn(line, "0123456789"));
+    line[strcspn(line, "\n")] = '\0';
+    printf("without newline: '%s'\n", line);
+    return 0;
+}
+@end
+
+@entry strpbrk
+@header string.h
+@syntax char *strpbrk(const char *s, const char *accept);
+@summary Find the first character that is any of the ones in accept.
+@returns
+A pointer to it, or NULL.
+@see strchr strcspn
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    const char *s = "price: 120 taka";
+    const char *d = strpbrk(s, "0123456789");
+    if (d) printf("first digit: %s\n", d);
+    return 0;
+}
+@end
+
+@entry strtok
+@also strtok_r
+@header string.h
+@syntax char *strtok(char *s, const char *delims);
+@syntax char *strtok_r(char *s, const char *delims, char **save);
+@summary Split a string into words (pieces between delimiters).
+@desc
+First call with the string, then with NULL to get the next piece. It
+CHANGES the string (puts '\0' at the delimiters) - use a copy, not a
+string constant. strtok remembers its place in a hidden variable, so it
+cannot split two strings at once; strtok_r keeps it in *save.
+@returns
+The next piece, or NULL when there are no more.
+@see strsep strspn getsubopt
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char line[] = "apple, banana;cherry  mango";
+    char *word = strtok(line, " ,;");
+    int n = 0;
+    while (word) {
+        printf("%d: %s\n", ++n, word);
+        word = strtok(NULL, " ,;");
+    }
+    return 0;
+}
+@end
+
+@entry strsep
+@header string.h
+@syntax char *strsep(char **stringp, const char *delims);
+@summary Split like strtok, but keeps empty fields (good for CSV).
+@desc
+Returns the piece before the next delimiter and moves *stringp past it.
+Two delimiters in a row give an empty string (strtok would skip it).
+@returns
+The next piece, or NULL at the end.
+@see strtok
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char row[] = "Rahim,,Dhaka,25";
+    char *p = row, *field;
+    int i = 0;
+    while ((field = strsep(&p, ",")) != NULL)
+        printf("field %d: '%s'\n", i++, field);
+    return 0;
+}
+@end
+
+@entry strdup
+@also strndup
+@header string.h
+@syntax char *strdup(const char *s);
+@syntax char *strndup(const char *s, size_t n);
+@summary Copy a string into new memory (free it later).
+@returns
+The copy, or NULL if out of memory.
+@see strcpy malloc free
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+int main(void)
+{
+    char *a = strdup("keep this");
+    char *b = strndup("abcdef", 3);
+    if (!a || !b) return 1;
+    printf("%s / %s\n", a, b);
+    free(a);
+    free(b);
+    return 0;
+}
+@end
+
+@entry strerror
+@also strerror_r
+@header string.h
+@syntax char *strerror(int errnum);
+@syntax int strerror_r(int errnum, char *buf, size_t size);
+@summary The text for an error number ("no such file or directory").
+@returns
+The message.
+@see perror errors
+@example
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+
+int main(void)
+{
+    printf("ENOENT: %s\n", strerror(ENOENT));
+    printf("EACCES: %s\n", strerror(EACCES));
+    printf("ENOMEM: %s\n", strerror(ENOMEM));
+    return 0;
+}
+@end
+
+@entry strsignal
+@header string.h
+@syntax char *strsignal(int sig);
+@summary The name of a signal ("Segmentation fault" ...).
+@see strerror
+@example
+#include <stdio.h>
+#include <string.h>
+#include <signal.h>
+
+int main(void)
+{
+    printf("%d: %s\n", SIGINT, strsignal(SIGINT));
+    printf("%d: %s\n", SIGSEGV, strsignal(SIGSEGV));
+    return 0;
+}
+@end
+
+@entry strverscmp
+@header string.h
+@syntax int strverscmp(const char *a, const char *b);
+@summary Compare like version numbers: "file2" < "file10".
+@returns
+Like strcmp, but number parts compare by value.
+@see strcmp qsort
+@example
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    printf("strcmp:     file10 %s file2\n", strcmp("file10", "file2") < 0 ? "<" : ">");
+    printf("strverscmp: file10 %s file2\n", strverscmp("file10", "file2") < 0 ? "<" : ">");
+    return 0;
+}
+@end
+
+@entry memcpy
+@header string.h
+@syntax void *memcpy(void *dst, const void *src, size_t n);
+@summary Copy n bytes (the areas must not overlap - else use memmove).
+@returns
+dst.
+@see memmove strcpy memset
+@example
+#include <stdio.h>
+#include <string.h>
+
+struct pt { int x, y; };
+
+int main(void)
+{
+    int a[5] = { 1, 2, 3, 4, 5 }, b[5];
+    struct pt p = { 3, 4 }, q;
+    memcpy(b, a, sizeof a);
+    memcpy(&q, &p, sizeof p);
+    printf("b[4] = %d, q = (%d, %d)\n", b[4], q.x, q.y);
+    return 0;
+}
+@end
+
+@entry memmove
+@header string.h
+@syntax void *memmove(void *dst, const void *src, size_t n);
+@summary Copy n bytes even if the areas overlap.
+@returns
+dst.
+@see memcpy
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char s[] = "abcdef";
+    memmove(s + 2, s, 4);          /* shift right inside the same array */
+    printf("%s\n", s);             /* ababcd */
+    return 0;
+}
+@end
+
+@entry memset
+@header string.h
+@syntax void *memset(void *s, int c, size_t n);
+@summary Fill n bytes with the byte c (usually 0).
+@desc
+memset(&x, 0, sizeof x) clears a struct or array. It sets BYTES: filling
+an int array with 1 gives 0x01010101, not 1.
+@returns
+s.
+@see calloc bzero explicit_bzero
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char line[11];
+    int v[4];
+    memset(line, '-', 10);
+    line[10] = '\0';
+    memset(v, 0, sizeof v);
+    printf("%s %d %d\n", line, v[0], v[3]);
+    return 0;
+}
+@end
+
+@entry memcmp
+@header string.h
+@syntax int memcmp(const void *a, const void *b, size_t n);
+@summary Compare n bytes of memory.
+@returns
+0 if equal, otherwise negative or positive (like strcmp).
+@see strcmp memcpy
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    unsigned char png[4] = { 0x89, 'P', 'N', 'G' };
+    unsigned char head[4] = { 0x89, 'P', 'N', 'G' };
+    printf("%s\n", memcmp(head, png, 4) == 0 ? "a PNG file" : "not PNG");
+    return 0;
+}
+@end
+
+@entry memchr
+@also memrchr
+@header string.h
+@syntax void *memchr(const void *s, int c, size_t n);
+@syntax void *memrchr(const void *s, int c, size_t n);
+@summary Find a byte in the first n bytes (memrchr: the last one).
+@returns
+A pointer to it, or NULL.
+@see strchr memmem
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char data[] = "key=value";
+    char *eq = memchr(data, '=', sizeof data);
+    if (eq) printf("value: %s\n", eq + 1);
+    return 0;
+}
+@end
+
+@entry memmem
+@header string.h
+@syntax void *memmem(const void *hay, size_t haylen, const void *needle, size_t needlelen);
+@summary Find a byte sequence inside memory (strstr for binary data).
+@returns
+A pointer to the start of the match, or NULL.
+@see strstr memchr
+@example
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    unsigned char buf[] = { 1, 2, 0, 0xCA, 0xFE, 7 };
+    unsigned char sig[] = { 0xCA, 0xFE };
+    unsigned char *p = memmem(buf, sizeof buf, sig, sizeof sig);
+    printf("found at %d\n", p ? (int)(p - buf) : -1);
+    return 0;
+}
+@end
+
+@entry memccpy
+@header string.h
+@syntax void *memccpy(void *dst, const void *src, int c, size_t n);
+@summary Copy until the byte c has been copied (or n bytes).
+@returns
+A pointer just after c in dst, or NULL if c was not found in n bytes.
+@see memcpy
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char dst[32] = "";
+    const char *src = "first line\nsecond line\n";
+    char *end = memccpy(dst, src, '\n', sizeof dst - 1);
+    if (end) *end = '\0';
+    printf("copied: %s", dst);
+    return 0;
+}
+@end
+
+@entry mempcpy
+@header string.h
+@syntax void *mempcpy(void *dst, const void *src, size_t n);
+@summary memcpy that returns the end of the copied part.
+@returns
+dst + n.
+@see memcpy stpcpy
+@example
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char buf[16], *p = buf;
+    p = mempcpy(p, "ab", 2);
+    p = mempcpy(p, "cd", 2);
+    *p = '\0';
+    printf("%s\n", buf);
+    return 0;
+}
+@end
+
+@entry explicit_bzero
+@header string.h
+@syntax void explicit_bzero(void *s, size_t n);
+@summary Zero memory in a way the compiler will not optimise away (passwords).
+@see memset bzero
+@example
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char password[32] = "secret123";
+    /* ... use the password ... */
+    explicit_bzero(password, sizeof password);
+    printf("first byte now %d\n", password[0]);
+    return 0;
+}
+@end
+
+@entry bzero
+@also bcopy bcmp
+@header strings.h
+@syntax void bzero(void *s, size_t n);
+@syntax void bcopy(const void *src, void *dst, size_t n);
+@syntax int bcmp(const void *a, const void *b, size_t n);
+@summary Old BSD names for memset(s,0,n), memmove and memcmp.
+@desc
+Note the argument order of bcopy: source first. New code should use the
+mem... functions.
+@see memset memmove memcmp
+@example
+#include <stdio.h>
+#include <strings.h>
+
+int main(void)
+{
+    char a[8] = "abc", b[8];
+    bzero(b, sizeof b);
+    bcopy(a, b, 4);
+    printf("%s, equal: %d\n", b, bcmp(a, b, 4) == 0);
+    return 0;
+}
+@end
+
+@entry ffs
+@also ffsl ffsll
+@header strings.h
+@syntax int ffs(int x);
+@syntax int ffsl(long x);
+@syntax int ffsll(long long x);
+@summary Position of the lowest 1 bit (counting from 1), 0 if none.
+@example
+#include <stdio.h>
+#include <strings.h>
+
+int main(void)
+{
+    printf("ffs(1) = %d, ffs(8) = %d, ffs(12) = %d, ffs(0) = %d\n", ffs(1), ffs(8), ffs(12), ffs(0));
+    return 0;
+}
+@end
+
+@entry index
+@also rindex
+@header strings.h
+@syntax char *index(const char *s, int c);
+@syntax char *rindex(const char *s, int c);
+@summary Old names for strchr and strrchr.
+@see strchr strrchr
+@example
+#include <stdio.h>
+#include <strings.h>
+
+int main(void)
+{
+    const char *s = "a.b.c";
+    printf("%s %s\n", index(s, '.'), rindex(s, '.'));
+    return 0;
+}
+@end
