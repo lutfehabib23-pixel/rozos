@@ -565,7 +565,8 @@ static int compile(void)
     if (strrchr(dir, '/')) *strrchr(dir, '/') = '\0';
     if (!dir[0]) strcpy(dir, "/");
     out_clear();
-    snprintf(buf, sizeof(buf), "tcc -o %s %s -lrozui -lrozgfx", base_name(exe), base_name(path));
+    /* ধাপ ১৮ক: -lrozgame -lm — গেমও Build হয় (না লাগলে কিছু যোগ হয় না) */
+    snprintf(buf, sizeof(buf), "tcc -o %s %s -lrozui -lrozgame -lrozgfx -lm", base_name(exe), base_name(path));
     out_add(buf);
     show_output = 1;
     if (pipe(pfd) < 0) { out_add("cannot start the compiler (pipe)"); return -1; }
@@ -576,7 +577,7 @@ static int compile(void)
         close(pfd[0]);
         close(pfd[1]);
         chdir(dir);
-        execlp("tcc", "tcc", "-o", base_name(exe), base_name(path), "-lrozui", "-lrozgfx", (char *)NULL);
+        execlp("tcc", "tcc", "-o", base_name(exe), base_name(path), "-lrozui", "-lrozgame", "-lrozgfx", "-lm", (char *)NULL);
         printf("cannot run tcc: %s\n", strerror(errno));
         _exit(127);
     }

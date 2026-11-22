@@ -225,47 +225,7 @@ void globfree(glob_t *g)
     g->gl_pathc = 0;
 }
 
-/* ---------- sigaction ---------- */
-
-int sigemptyset(sigset_t *set) { *set = 0; return 0; }
-int sigfillset(sigset_t *set) { *set = ~0ul; return 0; }
-
-int sigaddset(sigset_t *set, int sig)
-{
-    if (sig <= 0 || sig >= 64) { errno = EINVAL; return -1; }
-    *set |= 1ul << sig;
-    return 0;
-}
-
-int sigdelset(sigset_t *set, int sig)
-{
-    if (sig <= 0 || sig >= 64) { errno = EINVAL; return -1; }
-    *set &= ~(1ul << sig);
-    return 0;
-}
-
-int sigismember(const sigset_t *set, int sig)
-{
-    if (sig <= 0 || sig >= 64) { errno = EINVAL; return -1; }
-    return (*set >> sig) & 1;
-}
-
-int sigaction(int sig, const struct sigaction *act, struct sigaction *old)
-{
-    sighandler_t prev;
-    if (act) {
-        prev = signal(sig, act->sa_handler);
-    } else {
-        prev = signal(sig, SIG_DFL);           /* পড়া: বসিয়ে আবার ফিরিয়ে দেওয়া */
-        if (prev != SIG_ERR) signal(sig, prev);
-    }
-    if (prev == SIG_ERR) return -1;
-    if (old) {
-        memset(old, 0, sizeof(*old));
-        old->sa_handler = prev;
-    }
-    return 0;
-}
+/* ---------- sigaction ও sigset ধাপ ১৬খ-১ থেকে libc/src/signal.c-তে ---------- */
 
 /* ---------- system ---------- */
 
@@ -435,4 +395,24 @@ int execlp(const char *file, const char *arg0, ...)
     r = exec_list(file, arg0, ap, 1);
     va_end(ap);
     return r;
+}
+
+/* ---------- ধাপ ১৬ক: execle — আর্গুমেন্ট, শেষে NULL, তারপর envp ---------- */
+
+int execle(const char *path, const char *arg0, ...)
+{
+    va_list ap;
+    char *argv[64], **envp;
+    int n = 0;
+    va_start(ap, arg0);
+    argv[n++] = (char *)arg0;
+    while (n < 63) {
+        char *a = va_arg(ap, char *);
+        argv[n++] = a;
+        if (!a) break;
+    }
+    argv[63] = NULL;
+    envp = va_arg(ap, char **);
+    va_end(ap);
+    return execve(path, argv, envp);
 }

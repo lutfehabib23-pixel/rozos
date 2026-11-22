@@ -1,0 +1,14 @@
+# snake - the snake game (phase 18a)
+  `snake`  `snake -f` (show fps)  `snake -p` (no menu)
+
+Steer the snake to the red apples. Each apple gives 10 points, makes
+the snake longer and a little faster. Hitting a wall or your own body
+ends the game.
+
+  arrows or W A S D   steer (two quick turns are remembered)
+  P                   pause      Esc   back to the menu
+  Enter / Space       play again after "Game over"
+
+The game pauses by itself when its window goes to the back.
+Best score: /home/.rozgame/snake.score.
+Source: /usr/src/games/snake.c - see [[games]] and [[rozgame]].

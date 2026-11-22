@@ -1,0 +1,76 @@
+# posix - what the C library offers (phase 16a)
+Phase 16a fills in most of POSIX 2008 and C99, so that ordinary C
+programs and libraries (zlib, Lua, small Unix tools) build with `tcc`
+inside rozOS with few or no changes. Everything is in /usr/lib/libc.a;
+`-lm` is accepted (libm.a is empty - math is in libc). See [[rozlibc]].
+
+== New headers ==
+  `wchar.h` `wctype.h`    wide characters: wchar_t is a Unicode code point,
+                          multibyte text is always UTF-8 (mbrtowc, wcslen,
+                          wcwidth: Bengali signs 0 columns, CJK 2, fgetwc,
+                          wprintf ...)
+  `locale.h` `langinfo.h` setlocale accepts "C", "POSIX", "" and any
+                          "*.UTF-8" name; numbers always use '.'
+  `iconv.h`               UTF-8, ASCII, LATIN1, CP1252, UTF-16/32 (LE/BE,
+                          BOM), WCHAR_T; add //IGNORE or //TRANSLIT
+  `regex.h`               regcomp/regexec: BRE and ERE, [[:class:]],
+                          {m,n}, \1, REG_ICASE, REG_NEWLINE, \< \> \b \w
+  `getopt.h`              getopt_long, getopt_long_only (--name=value,
+                          abbreviations, options after file names)
+  `pwd.h` `grp.h`         getpwnam/getpwuid from /etc/passwd (root)
+  `syslog.h`              syslog() appends to /var/log/messages
+  `sys/select.h`          select(), pselect(), fd_set (new syscall)
+  `sys/uio.h`             readv, writev, preadv, pwritev
+  `fenv.h`                rounding mode and FP exception flags
+  `err.h`                 err, errx, warn, warnx
+  `search.h`              tsearch/tfind/tdelete/twalk (AVL), hsearch,
+                          lsearch
+  `dlfcn.h`               dlopen always fails with a clear dlerror():
+                          rozOS has no shared libraries yet
+  `sys/resource.h` `sys/times.h` `sys/file.h` `sys/param.h` `utime.h`
+  `endian.h` `byteswap.h` `features.h` `sys/cdefs.h` `paths.h`
+  `alloca.h` `libintl.h` (gettext returns the text unchanged)
+
+== Bigger changes ==
+  printf    %f %e %g are exact at any precision (also long double),
+            %a %A, positional %2$s, %lc %ls, %m, asprintf, vasprintf
+  scanf     %Lf (long double), %ms (allocates), %ls %lc, hex floats
+  stdio     fmemopen, open_memstream, fopencookie, tmpfile, getdelim,
+            fseeko/ftello, *_unlocked
+  time      time zones: TZ=Asia/Dhaka, TZ="<+06>-6", TZ=EST5EDT,M3.2.0,
+            M11.1.0 (DST); without TZ the first line of /etc/TZ, else UTC.
+            Known names: UTC, Asia/Dhaka, Asia/Kolkata, Europe/London,
+            America/New_York ... (a small list - rozOS has no tzdata).
+            strftime has every C99/POSIX conversion, plus strptime,
+            timegm, localtime_r, asctime, clock_getres
+  math      float (sinf) and long double (sinl) forms of everything,
+            expm1 log1p cbrt fma remainder remquo nextafter rint lrint
+            ilogb scalbn asinh erf erfc tgamma lgamma, fpclassify,
+            isnormal, isgreater ...; pow follows C99 for inf, 0, -1, NaN
+  stdlib    qsort is introsort (always n log n), qsort_r,
+            posix_memalign/aligned_alloc, mkstemp/mkdtemp, random,
+            drand48 family, div/ldiv, mblen/mbtowc/wcstombs
+  string    strlcpy strlcat strsep memmem memrchr strcasestr strsignal
+            strverscmp strchrnul stpncpy mempcpy explicit_bzero
+  unistd    pread pwrite fsync sysconf pathconf getpagesize execle
+            execvpe getlogin ttyname getpass ...
+  fcntl     fcntl(): F_DUPFD, F_GETFL, record locks (always granted)
+  setjmp    _setjmp, sigsetjmp, siglongjmp
+
+== Make your clock local ==
+  `echo Asia/Dhaka > /etc/TZ`     date then shows Bangladesh time
+  `export TZ=Asia/Kolkata`        only for this shell and its programs
+  `date -u`                       UTC, whatever the zone
+
+== Not yet ==
+  (signal handlers arrived in 16b-1, threads in 16b-2 - see [[signals]],
+  [[threads]])
+  shared libraries (.so, dlopen)          - later
+  symbolic links, chown, several users    - rozOS has one user (root)
+  POSIX regex works on bytes: '.' matches one byte of a UTF-8 letter.
+
+== Porting tips ==
+  Lua and zlib now come with rozOS ([[lua]], [[zlib]]); their sources are
+  in /usr/src/lua and /usr/src/zlib to rebuild or study.
+  Programs that need fork+pipe, sockets or poll work too ([[pipes]],
+  [[sockets]]).

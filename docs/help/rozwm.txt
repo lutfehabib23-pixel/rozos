@@ -14,4 +14,7 @@ Programs use it through [[rozgfx]] - no extra code. A program that asks
 "Save changes?" after [X] calls gfx_keep_open() (rozui does it), so it
 is not stopped after 3 seconds. The message format
 is in /usr/include/rozwm_proto.h. Source: /usr/src/gfx/rozwm.c.
+Phase 18a: rozwm also reads /dev/keyev (every key press and release)
+and sends it to the window in front as WM_RAWKEY - games use it
+([[rozgame]]); other programs never see it.
 See [[desktop]].

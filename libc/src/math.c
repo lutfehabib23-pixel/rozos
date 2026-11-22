@@ -142,21 +142,11 @@ double log2(double x)
 double log(double x)   { return x <= 0 ? (x == 0 ? -HUGE_VAL : NAN) : (double)yl2x(0.69314718055994530941723212145818L, x); }
 double log10(double x) { return x <= 0 ? (x == 0 ? -HUGE_VAL : NAN) : (double)yl2x(0.30102999566398119521373889472449L, x); }
 
+/* ধাপ ১৬ক: বিশেষ ক্ষেত্র (inf, ±0, −1, NaN, ঋণাত্মক ভিত্তি) C99 মেনে libm.c-র powl-এ;
+ * সাধারণ ক্ষেত্রের হিসাব আগের মতোই 2^(y·log2 x), ছোট পূর্ণসংখ্যা ঘাত সরাসরি গুণ */
 double pow(double x, double y)
 {
-    double iy;
-    int neg = 0;
-    if (y == 0) return 1.0;
-    if (x == 0) return y > 0 ? 0.0 : HUGE_VAL;
-    if (x < 0) {
-        if (modf(y, &iy) != 0.0) return NAN;          /* ঋণাত্মকের ভগ্নাংশ ঘাত */
-        neg = fmod(iy, 2.0) != 0.0;
-        x = -x;
-    }
-    {
-        double r = (double)exp2l_(yl2x((ld)y, (ld)x));
-        return neg ? -r : r;
-    }
+    return (double)powl((ld)x, (ld)y);
 }
 
 static ld x87_1(const char *op, ld x)

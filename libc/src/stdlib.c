@@ -40,8 +40,11 @@ char *__progname = (char *)"";
 char *program_invocation_name = (char *)"";
 char *program_invocation_short_name = (char *)"";
 
+void __roz_tls_init(void);
+
 void __libc_start(int argc, char **argv, char **envp)
 {
+    __roz_tls_init();                    /* ধাপ ১৬খ-২: মূল থ্রেডের TLS (FS base) — errno, pthread_self */
     environ = envp;
     if (argc > 0 && argv[0]) {
         char *p = argv[0], *q;
@@ -60,10 +63,20 @@ void _Exit(int code)
     _exit(code);
 }
 
+/* ধাপ ১৬খ-১: POSIX-এর মতো — SIGABRT খুলে পাঠানো; handler ফিরে এলে ডিফল্টে বসিয়ে আবার */
 void abort(void)
 {
+    sigset_t s;
+    struct sigaction sa;
     __stdio_flush_all();
-    kill(getpid(), SIGABRT);
+    sigemptyset(&s);
+    sigaddset(&s, SIGABRT);
+    sigprocmask(SIG_UNBLOCK, &s, NULL);
+    raise(SIGABRT);
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = SIG_DFL;
+    sigaction(SIGABRT, &sa, NULL);
+    raise(SIGABRT);
     _exit(127);
 }
 
@@ -227,17 +240,118 @@ static void swap_bytes(char *a, char *b, size_t n)
     while (n--) { char t = *a; *a++ = *b; *b++ = t; }
 }
 
-void qsort(void *base, size_t n, size_t size, int (*cmp)(const void *, const void *))
+/* ধাপ ১৬ক: qsort = introsort (আগে shell sort ছিল — খারাপ ক্ষেত্রে O(n²)-এর কাছাকাছি):
+ * median-of-3 quicksort, ছোট অংশে insertion sort, গভীরতা বেশি হলে heapsort — সবসময়
+ * O(n log n)। তুলনা-ফাংশন দুই ধরনের (qsort আর qsort_r), তাই একটা ছোট মোড়ক। */
+struct qcmp {
+    int (*c2)(const void *, const void *);
+    int (*c3)(const void *, const void *, void *);
+    void *arg;
+};
+
+static int qc(const struct qcmp *q, const void *a, const void *b)
 {
-    char *b = (char *)base;
-    size_t gap, i, j;
-    for (gap = n / 2; gap > 0; gap /= 2) {
-        for (i = gap; i < n; i++) {
-            for (j = i; j >= gap && cmp(b + (j - gap) * size, b + j * size) > 0; j -= gap) {
-                swap_bytes(b + (j - gap) * size, b + j * size, size);
-            }
+    return q->c2 ? q->c2(a, b) : q->c3(a, b, q->arg);
+}
+
+static void q_insertion(char *b, size_t n, size_t size, const struct qcmp *q)
+{
+    size_t i, j;
+    for (i = 1; i < n; i++)
+        for (j = i; j > 0 && qc(q, b + (j - 1) * size, b + j * size) > 0; j--)
+            swap_bytes(b + (j - 1) * size, b + j * size, size);
+}
+
+static void q_sift(char *b, size_t start, size_t n, size_t size, const struct qcmp *q)
+{
+    size_t root = start;
+    for (;;) {
+        size_t child = 2 * root + 1, sw = root;
+        if (child >= n) return;
+        if (qc(q, b + sw * size, b + child * size) < 0) sw = child;
+        if (child + 1 < n && qc(q, b + sw * size, b + (child + 1) * size) < 0) sw = child + 1;
+        if (sw == root) return;
+        swap_bytes(b + root * size, b + sw * size, size);
+        root = sw;
+    }
+}
+
+static void q_heapsort(char *b, size_t n, size_t size, const struct qcmp *q)
+{
+    size_t i;
+    if (n < 2) return;
+    for (i = n / 2; i-- > 0;) q_sift(b, i, n, size, q);
+    for (i = n - 1; i > 0; i--) {
+        swap_bytes(b, b + i * size, size);
+        q_sift(b, 0, i, size, q);
+    }
+}
+
+static void q_intro(char *b, size_t n, size_t size, const struct qcmp *q, int depth)
+{
+    while (n > 16) {
+        size_t mid = n / 2, i, j;
+        char *pv;
+        if (depth-- == 0) {
+            q_heapsort(b, n, size, q);
+            return;
+        }
+        /* median-of-3 → প্রথম ঘরে pivot */
+        if (qc(q, b + mid * size, b) < 0) swap_bytes(b + mid * size, b, size);
+        if (qc(q, b + (n - 1) * size, b) < 0) swap_bytes(b + (n - 1) * size, b, size);
+        if (qc(q, b + (n - 1) * size, b + mid * size) < 0) swap_bytes(b + (n - 1) * size, b + mid * size, size);
+        swap_bytes(b, b + mid * size, size);
+        pv = b;
+        i = 1;
+        j = n - 1;
+        for (;;) {
+            while (i <= j && qc(q, b + i * size, pv) < 0) i++;
+            while (j >= i && qc(q, b + j * size, pv) > 0) j--;
+            if (i >= j) break;
+            swap_bytes(b + i * size, b + j * size, size);
+            i++;
+            j--;
+        }
+        swap_bytes(b, b + j * size, size);
+        /* ছোট দিকে recursion, বড় দিকে লুপ (stack কম লাগে) */
+        if (j < n - j - 1) {
+            q_intro(b, j, size, q, depth);
+            b += (j + 1) * size;
+            n -= j + 1;
+        } else {
+            q_intro(b + (j + 1) * size, n - j - 1, size, q, depth);
+            n = j;
         }
     }
+    q_insertion(b, n, size, q);
+}
+
+static void q_sort(void *base, size_t n, size_t size, const struct qcmp *q)
+{
+    int depth = 0;
+    size_t t = n;
+    if (n < 2 || size == 0) return;
+    while (t) { depth++; t >>= 1; }
+    q_intro((char *)base, n, size, q, depth * 2);
+}
+
+void qsort(void *base, size_t n, size_t size, int (*cmp)(const void *, const void *))
+{
+    struct qcmp q;
+    q.c2 = cmp;
+    q.c3 = NULL;
+    q.arg = NULL;
+    q_sort(base, n, size, &q);
+}
+
+void qsort_r(void *base, size_t n, size_t size,
+             int (*cmp)(const void *, const void *, void *), void *arg)
+{
+    struct qcmp q;
+    q.c2 = NULL;
+    q.c3 = cmp;
+    q.arg = arg;
+    q_sort(base, n, size, &q);
 }
 
 void *bsearch(const void *key, const void *base, size_t n, size_t size,
@@ -263,9 +377,15 @@ int execv(const char *path, char *const argv[])
 
 int execvp(const char *file, char *const argv[])
 {
+    return execvpe(file, argv, environ);
+}
+
+/* ধাপ ১৬ক: execvpe (GNU) — execvp-এর পুরনো ভেতরটা, নিজের envp দিয়ে */
+int execvpe(const char *file, char *const argv[], char *const envp[])
+{
     const char *path, *p;
     char buf[PATH_MAX];
-    if (strchr(file, '/')) return execve(file, argv, environ);
+    if (strchr(file, '/')) return execve(file, argv, envp);
     path = getenv("PATH");
     if (!path) path = "/bin";
     for (p = path; ; ) {
@@ -275,7 +395,7 @@ int execvp(const char *file, char *const argv[])
             memcpy(buf, p, n);
             buf[n] = '/';
             strcpy(buf + n + 1, file);
-            execve(buf, argv, environ);
+            execve(buf, argv, envp);
             if (errno != ENOENT) return -1;
         }
         if (!colon) break;
@@ -285,40 +405,4 @@ int execvp(const char *file, char *const argv[])
     return -1;
 }
 
-/* ---------- getopt ---------- */
-
-char *optarg;
-int optind = 1, opterr = 1, optopt;
-
-int getopt(int argc, char *const argv[], const char *opts)
-{
-    static int pos = 1;
-    const char *o;
-    char c;
-    if (optind >= argc || argv[optind][0] != '-' || argv[optind][1] == '\0') return -1;
-    if (!strcmp(argv[optind], "--")) { optind++; return -1; }
-    c = argv[optind][pos];
-    o = strchr(opts, c);
-    if (!o || c == ':') {
-        optopt = c;
-        if (opterr) fprintf(stderr, "%s: unknown option -%c\n", argv[0], c);
-        if (!argv[optind][++pos]) { optind++; pos = 1; }
-        return '?';
-    }
-    if (o[1] == ':') {
-        if (argv[optind][pos + 1]) {
-            optarg = &argv[optind][pos + 1];
-        } else if (optind + 1 < argc) {
-            optarg = argv[++optind];
-        } else {
-            optopt = c;
-            if (opterr) fprintf(stderr, "%s: option -%c needs a value\n", argv[0], c);
-            optind++; pos = 1;
-            return '?';
-        }
-        optind++; pos = 1;
-    } else if (!argv[optind][++pos]) {
-        optind++; pos = 1;
-    }
-    return c;
-}
+/* ---------- getopt ধাপ ১৬ক থেকে libc/src/getopt.c-তে (getopt_long সহ) ---------- */

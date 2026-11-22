@@ -6,7 +6,7 @@
 
 rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphical desktop. It includes a C compiler, a text editor, `make`, a TCP/IP stack with HTTPS, and a package manager, so you can write, compile and even rebuild the rozOS kernel **from inside rozOS itself**.
 
-> Status: hobby / educational OS, under active development (current: **0.15.1-phase15b**).
+> Status: hobby / educational OS, under active development (current: **0.18.0-phase18a**).
 > It runs in QEMU. Real hardware has not been tested yet.
 
 ---
@@ -16,22 +16,23 @@ rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphica
 | Area | What exists today |
 |---|---|
 | **Boot** | Limine, BIOS + UEFI, ISO and GPT disk image, boot menu with several kernels (`kinstall`) |
-| **Kernel** | x86_64 long mode, GDT/IDT, PIC/PIT, PMM + VMM (4-level paging), kernel heap, preemptive multitasking, `fork`/`exec`/`wait`, Linux-like syscall ABI |
-| **Processes** | process groups and sessions, signals (`kill`, SIG_IGN), Ctrl+C to the foreground job |
+| **Kernel** | x86_64 long mode, GDT/IDT, PIC/PIT, PMM + VMM (4-level paging), kernel heap, preemptive multitasking, threads (`clone`, `futex`, TLS), `fork`/`exec`/`wait`, Linux-like syscall ABI |
+| **Processes** | process groups and sessions, Ctrl+C to the foreground job, real signal handlers (`sigaction`, SA_SIGINFO, SA_RESTART, masks, `sigsuspend`, `sigaltstack`, `alarm`/`setitimer`, SIGCHLD, SIGWINCH, catching SIGSEGV/SIGFPE) |
 | **Filesystems** | VFS, ext2 (read/write root), FAT32 (boot partition), devfs, tmpfs, initrd; `rename()`, `mount`/`umount` |
 | **IPC** | pipes, `poll`, shared memory (`shm_open` + `mmap MAP_SHARED`), PTYs, Unix domain sockets |
 | **Drivers** | PCI, ACPI, PS/2 keyboard and mouse, serial, VGA/framebuffer console with PSF2 fonts, AHCI (SATA) and NVMe disks, USB (xHCI: pen drives, keyboards, mice, hot-plug), e1000/e1000e network |
 | **Network** | lwIP TCP/IP, DHCP, DNS, BSD sockets, BearSSL TLS (HTTPS) |
-| **libc** | own C library, *rozlibc* (stdio, stdlib, string, math, time, sockets, termios, …) |
+| **libc** | own C library, *rozlibc*: most of POSIX 2008 + C99, pthread — exact printf, wchar/UTF-8, locale, iconv, regex, getopt_long, time zones, full libm, select/readv; Lua and zlib build unchanged with the in-OS tcc |
 | **Kernel modules** | `insmod`/`lsmod`/`rmmod`: ELF relocatable `.ko` files (gcc or the in-OS tcc), exported-symbol table, example `/lib/modules/hello.ko` |
-| **Toolchain in the OS** | TinyCC (`tcc`), `make` (pdpmake), Code (graphical) and `edit` (terminal, F10 menu) editors |
+| **Toolchain in the OS** | TinyCC (`tcc`), `make` (pdpmake), Code (graphical) and `edit` (terminal, F10 menu) editors, Lua 5.4 (`lua`, `liblua.a`), zlib (`gzip`/`gunzip`, `libz.a`) |
 | **Packages** | `rozpkg`, which downloads C libraries over HTTPS and links them |
 | **Graphics** | `/dev/fb0`, *librozgfx* (shapes, TrueType text via stb_truetype, BMP/PNG/JPEG via stb_image) |
+| **Games** | *librozgame*: fixed-step game loop, real key press/release (`/dev/keyev`), fast image drawing (row-classified sprites, memcpy for opaque rows), sprite sheets and animation, scaling (fit / integer / native, optional bilinear), high-quality photo resize, collisions, TrueType text, menus, best scores; **Snake** and **Breakout** with source in `/usr/src/games` |
 | **Widgets** | *librozui*: immediate-mode buttons, check boxes, text boxes, lists, scroll bars, menu bars with shortcuts, message boxes, input and file dialogs; icons can be replaced by pictures |
 | **Desktop** | **rozwm** compositing window manager: flicker-free damage-based drawing, movable/resizable windows with minimise/maximise/close, Start menu, taskbar, clock; **rozterm** terminal windows (VT100, scrollback, copy and paste, blinking cursor); dark 3D theme (Ebony, Obsidian, Onyx, Jet Black) |
 | **Desktop apps** | **Code** (graphical C editor: menus, syntax colours, compile and run with tcc, clickable errors), **Files** (file manager), calculator, paint, image viewer |
 | **Shell** | `rozsh`: pipes, redirection, `&&`/`||`, job control, history; about 50 programs in `/bin` |
-| **Docs** | 93 built-in help pages (`help`, `help desktop`, `help syscalls`, …) |
+| **Docs** | 104 built-in help pages (`help`, `help desktop`, `help syscalls`, …) |
 
 ---
 
@@ -53,6 +54,8 @@ cd rozOS
 ./toolchain/get-tcc.sh         # TinyCC   (C compiler inside rozOS)
 ./toolchain/get-pdpmake.sh     # pdpmake  (make inside rozOS)
 ./toolchain/get-bearssl.sh     # BearSSL  (HTTPS)
+./toolchain/get-lua.sh         # Lua 5.4  (/bin/lua, liblua)
+./toolchain/get-zlib.sh        # zlib     (gzip, gunzip, libz)
 make check-tools               # every line should say "ok"
 ```
 
@@ -79,7 +82,8 @@ KVM is off by default (see *Known issues*). Turn it on with `make run KVM=1`. Me
 ### Inside rozOS
 ```
 help            index of all help pages
-systest         self-test (87 tests should pass)
+systest         self-test (186 checks should pass)
+snake, breakout games (Start > Games); help rozgame to write your own
 lsusb           USB devices; pen drives appear on /mnt/usb
 code hello.c    graphical editor (F5 runs);  edit hello.c in a terminal
 files           file manager
@@ -101,12 +105,12 @@ kernel/        the kernel
   net/           lwIP port, BSD sockets, Unix sockets
   syscall/       system calls (Linux x86_64 numbers where possible)
 libc/          rozlibc: headers + sources + crt0
-userland/      init, shell, coreutils, editor, net tools, gfx apps, rozwm, rozterm, libraries
+userland/      init, shell, coreutils, editor, net tools, gfx apps, games, rozwm, rozterm, libraries
 sysroot/       files copied as-is to the root disk (/etc, /usr/share, apps, fonts)
 modules/       example kernel modules (built into /lib/modules/*.ko)
 docs/help/     the built-in help pages (plain text, [[links]])
 ports/         build glue for TinyCC, pdpmake, BearSSL, packages
-toolchain/     host scripts: disk image, boot menu, fetchers, font converter
+toolchain/     host scripts: disk image, boot menu, fetchers, font converter, game art
 config.mk      build settings (CROSS, KVM, QEMU flags, memory)
 ```
 
@@ -119,8 +123,8 @@ Contributions of all sizes are welcome: bug reports, help pages, drivers, ported
 **Good places to start**
 - **Desktop:** more apps (settings, text viewer, games), drag and drop in Files, Bengali text shaping, icon pictures (`/usr/share/icons`).
 - **Drivers:** USB hubs, more network cards, interrupt-driven xHCI/NVMe/AHCI, NTFS/exFAT reading.
-- **Kernel:** user signal handlers + `SIGWINCH`, SMP, more exported symbols for modules.
-- **libc:** more POSIX coverage, eventually musl compatibility.
+- **Kernel:** SMP (use all CPU cores), job control (Ctrl+Z, `fg`/`bg`), more exported symbols for modules.
+- **libc:** shared libraries, per-thread signal masks, eventually musl compatibility.
 - **Toolchain:** binutils + GCC (C++) running inside rozOS.
 - **Bug:** under KVM, the in-OS kernel build hit a #GP at `iretq` (error 0x18). It is now caught and logged - help find the root cause.
 - **Hardware testing:** boot the ISO on a real PC and report what happens.

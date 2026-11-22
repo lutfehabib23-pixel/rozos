@@ -14,7 +14,7 @@
 #include <stddef.h>
 #include <rozos/vfs.h>
 
-#define DEVFS_MAX_DEVICES 32
+#define DEVFS_MAX_DEVICES 48   /* ধাপ ১৮ক: 32 → 48 (keyev ইত্যাদি) */
 
 typedef int64_t (*devfs_read_fn)(void *ctx, uint64_t offset, void *buf, size_t len);
 typedef int64_t (*devfs_write_fn)(void *ctx, uint64_t offset, const void *buf, size_t len);

@@ -89,6 +89,14 @@
 #define SYS_rozos_mounts    507     /* ধাপ ১৫ক: (buf, len) "source path fstype\n" সারি */
 #define SYS_ftruncate       77      /* ধাপ ১৩ */
 #define SYS_rozos_netconfig 502     /* ধাপ ৯: হাতে IP বসানো / আবার DHCP */
+/* ধাপ ১৬ক: libc সামঞ্জস্য */
+#define SYS_pread64         17
+#define SYS_pwrite64        18
+#define SYS_readv           19
+#define SYS_select          23
+#define SYS_fcntl           72
+#define SYS_fsync           74
+#define SYS_fdatasync       75
 
 #define SYSCALL_MAX         512
 

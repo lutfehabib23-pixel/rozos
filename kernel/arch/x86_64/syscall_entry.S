@@ -73,6 +73,11 @@ syscall_entry:
     popq    %rax
     addq    $16, %rsp           /* vector + error code */
 
+    /* ধাপ ১৬খ-১: rt_sigreturn সব রেজিস্টার (rcx, r11 সহ) হুবহু ফেরায় — sysret সেগুলো
+     * নষ্ট করত, তাই তখন iretq (sched.c-র cpu_local.force_iret = %gs:24) */
+    cmpq    $0, %gs:24
+    jne     2f
+
     /* এখন স্ট্যাকে: rip, cs, rflags, rsp, ss */
     movq    (%rsp), %rcx
     shrq    $47, %rcx           /* canonical ইউজার ঠিকানা: উপরের 17 বিট শূন্য */
@@ -84,6 +89,10 @@ syscall_entry:
     sysretq
 1:
     movq    -40(%rsp), %rcx     /* shrq-এ নষ্ট হওয়া rcx: ফ্রেমে rip-এর 5 ঘর নিচে ছিল */
+    jmp     3f
+2:
+    movq    $0, %gs:24
+3:
     SWAPGS
     .global syscall_iretq
 syscall_iretq:                  /* ধাপ ১৫ক: idt.c-র bad_iret এই ঠিকানা চেনে */

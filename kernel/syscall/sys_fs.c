@@ -87,12 +87,11 @@ static int user_path(uint64_t upath, char *out)
     return proc_abs_path(tmp, out, VFS_PATH_MAX);
 }
 
-static int64_t sys_read(struct interrupt_frame *f, uint64_t fd, uint64_t ubuf, uint64_t len,
-                        uint64_t a4, uint64_t a5, uint64_t a6)
+/* ধাপ ১৬ক: read-এর ভেতরটা আলাদা (readv আর pread64-ও এটা ব্যবহার করে) */
+static int64_t do_read(int fd, uint64_t ubuf, uint64_t len)
 {
     uint8_t *kbuf;
     int64_t total = 0;
-    (void)f; (void)a4; (void)a5; (void)a6;
 
     if (len == 0) {
         return 0;
@@ -106,7 +105,7 @@ static int64_t sys_read(struct interrupt_frame *f, uint64_t fd, uint64_t ubuf, u
     }
     while (len > 0) {
         size_t n = len < IO_CHUNK ? (size_t)len : IO_CHUNK;
-        int64_t r = vfs_read((int)fd, kbuf, n);
+        int64_t r = vfs_read(fd, kbuf, n);
         if (r < 0) {
             if (total == 0) total = r;
             break;
@@ -126,6 +125,13 @@ static int64_t sys_read(struct interrupt_frame *f, uint64_t fd, uint64_t ubuf, u
     }
     kfree(kbuf);
     return total;
+}
+
+static int64_t sys_read(struct interrupt_frame *f, uint64_t fd, uint64_t ubuf, uint64_t len,
+                        uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    (void)f; (void)a4; (void)a5; (void)a6;
+    return do_read((int)fd, ubuf, len);
 }
 
 static int64_t do_write(int fd, uint64_t ubuf, uint64_t len)
@@ -200,6 +206,137 @@ static int64_t sys_writev(struct interrupt_frame *f, uint64_t fd, uint64_t uiov,
         }
     }
     return total;
+}
+
+/* ধাপ ১৬ক: readv — প্রতিটা iovec-এ পালা করে পড়া, ছোট পড়া হলে থামা */
+static int64_t sys_readv(struct interrupt_frame *f, uint64_t fd, uint64_t uiov, uint64_t cnt,
+                         uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    struct linux_iovec iov;
+    int64_t total = 0;
+    uint64_t i;
+    (void)f; (void)a4; (void)a5; (void)a6;
+
+    if (cnt > 1024) {
+        return -EINVAL;
+    }
+    for (i = 0; i < cnt; i++) {
+        int64_t r;
+        if (copy_from_user(&iov, (const void *)(uintptr_t)(uiov + i * sizeof(iov)), sizeof(iov)) < 0) {
+            return total ? total : -EFAULT;
+        }
+        r = do_read((int)fd, iov.base, iov.len);
+        if (r < 0) {
+            return total ? total : r;
+        }
+        total += r;
+        if ((uint64_t)r < iov.len) {
+            break;
+        }
+    }
+    return total;
+}
+
+/* ধাপ ১৬ক: pread64/pwrite64 — অবস্থান সরিয়ে পড়া/লেখা, তারপর আগের অবস্থানে ফেরা
+ * (ফাইলের offset বদলায় না; এক প্রসেসে থ্রেড নেই বলে এখন এটাই যথেষ্ট) */
+static int64_t do_pio(int fd, uint64_t ubuf, uint64_t len, int64_t off, int writing)
+{
+    int64_t cur, r;
+    if (off < 0) {
+        return -EINVAL;
+    }
+    cur = vfs_seek(fd, 0, 1 /* SEEK_CUR */);
+    if (cur < 0) {
+        return cur == -EINVAL ? -ESPIPE : cur;
+    }
+    r = vfs_seek(fd, off, 0 /* SEEK_SET */);
+    if (r < 0) {
+        return r;
+    }
+    r = writing ? do_write(fd, ubuf, len) : do_read(fd, ubuf, len);
+    vfs_seek(fd, cur, 0);
+    return r;
+}
+
+static int64_t sys_pread64(struct interrupt_frame *f, uint64_t fd, uint64_t ubuf, uint64_t len,
+                           uint64_t off, uint64_t a5, uint64_t a6)
+{
+    (void)f; (void)a5; (void)a6;
+    return do_pio((int)fd, ubuf, len, (int64_t)off, 0);
+}
+
+static int64_t sys_pwrite64(struct interrupt_frame *f, uint64_t fd, uint64_t ubuf, uint64_t len,
+                            uint64_t off, uint64_t a5, uint64_t a6)
+{
+    (void)f; (void)a5; (void)a6;
+    return do_pio((int)fd, ubuf, len, (int64_t)off, 1);
+}
+
+/* ধাপ ১৬ক: fcntl — F_DUPFD, F_GETFD/SETFD, F_GETFL/SETFL, আর রেকর্ড-লক (F_GETLK/
+ * SETLK/SETLKW: rozOS-এ একজনই লেখে বলে লক সবসময় পাওয়া যায় — sqlite ইত্যাদির জন্য) */
+#define K_F_DUPFD   0
+#define K_F_GETFD   1
+#define K_F_SETFD   2
+#define K_F_GETFL   3
+#define K_F_SETFL   4
+#define K_F_GETLK   5
+#define K_F_SETLK   6
+#define K_F_SETLKW  7
+#define K_F_DUPFD_CLOEXEC 1030
+
+static int64_t sys_fcntl(struct interrupt_frame *f, uint64_t fd, uint64_t cmd, uint64_t arg,
+                         uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    int fl = vfs_fd_flags((int)fd);
+    (void)f; (void)a4; (void)a5; (void)a6;
+    if (fl < 0) {
+        return fl;
+    }
+    switch ((int)cmd) {
+    case K_F_DUPFD:
+    case K_F_DUPFD_CLOEXEC: {
+        /* arg-এর সমান বা বড় সবচেয়ে ছোট খালি fd: dup করে করে খোঁজা, মাঝেরগুলো বন্ধ */
+        int tmp[64], nt = 0, nfd, i;
+        if ((int64_t)arg < 0) return -EINVAL;
+        for (;;) {
+            nfd = vfs_dup((int)fd);
+            if (nfd < 0 || nfd >= (int)arg || nt == 64) break;
+            tmp[nt++] = nfd;
+        }
+        for (i = 0; i < nt; i++) vfs_close(tmp[i]);
+        if (nfd >= 0 && nfd < (int)arg) {
+            vfs_close(nfd);
+            return -EMFILE;
+        }
+        return nfd;
+    }
+    case K_F_GETFD:
+        return 0;
+    case K_F_SETFD:
+        return 0;                                   /* FD_CLOEXEC এখনো উপেক্ষা */
+    case K_F_GETFL:
+        return fl;
+    case K_F_SETFL:
+        return 0;                                   /* O_NONBLOCK/O_APPEND বদল উপেক্ষা */
+    case K_F_GETLK: {
+        int16_t unlck = 2;                          /* F_UNLCK: কেউ লক ধরে নেই */
+        return arg ? copy_to_user((void *)(uintptr_t)arg, &unlck, sizeof(unlck)) : -EFAULT;
+    }
+    case K_F_SETLK:
+    case K_F_SETLKW:
+        return 0;
+    default:
+        return -EINVAL;
+    }
+}
+
+/* ধাপ ১৬ক: fsync/fdatasync — লেখা সরাসরি block layer-এ যায়, তাই শুধু fd যাচাই */
+static int64_t sys_fsync(struct interrupt_frame *f, uint64_t fd, uint64_t a2, uint64_t a3,
+                         uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    int fl = vfs_fd_flags((int)fd);
+    (void)f; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+    return fl < 0 ? fl : 0;
 }
 
 static int64_t sys_open(struct interrupt_frame *f, uint64_t upath, uint64_t flags, uint64_t mode,
@@ -422,23 +559,13 @@ struct k_pollfd {
 
 /* poll(fds, nfds, timeout_ms): timeout < 0 = চিরকাল, 0 = শুধু দেখা।
  * অপেক্ষা sched_relax() দিয়ে (devfs/pipe-এর মতো), প্রতিবার সব fd আবার দেখা। */
-static int64_t sys_poll(struct interrupt_frame *f, uint64_t ufds, uint64_t nfds, uint64_t timeout,
-                        uint64_t a4, uint64_t a5, uint64_t a6)
+/* ধাপ ১৬ক: poll-এর অপেক্ষার অংশ আলাদা (select-ও ব্যবহার করে) — ফেরত তৈরি fd-এর
+ * সংখ্যা বা -EINTR; k[i].revents ভরে দেয় */
+static int poll_wait(struct k_pollfd *k, size_t nfds, int64_t tmo)
 {
-    struct k_pollfd *k;
-    int64_t tmo = (int64_t)(int32_t)timeout;
     uint64_t end = 0;
     int ready;
-    size_t i, bytes;
-    (void)f; (void)a4; (void)a5; (void)a6;
-    if (nfds > POLL_MAX_FDS) return -EINVAL;
-    bytes = nfds * sizeof(*k);
-    k = (struct k_pollfd *)kmalloc(bytes ? bytes : 1);
-    if (!k) return -ENOMEM;
-    if (bytes && copy_from_user(k, (const void *)(uintptr_t)ufds, bytes) < 0) {
-        kfree(k);
-        return -EFAULT;
-    }
+    size_t i;
     if (tmo > 0) end = timer_uptime_ms() + (uint64_t)tmo;
     for (;;) {
         ready = 0;
@@ -455,10 +582,33 @@ static int64_t sys_poll(struct interrupt_frame *f, uint64_t ufds, uint64_t nfds,
         cpu_cli();
         if (sched_should_abort()) {
             cpu_sti();
-            kfree(k);
             return -EINTR;
         }
         sched_relax();                                  /* IF = 1 করে ফেরে */
+    }
+    return ready;
+}
+
+static int64_t sys_poll(struct interrupt_frame *f, uint64_t ufds, uint64_t nfds, uint64_t timeout,
+                        uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    struct k_pollfd *k;
+    int64_t tmo = (int64_t)(int32_t)timeout;
+    int ready;
+    size_t bytes;
+    (void)f; (void)a4; (void)a5; (void)a6;
+    if (nfds > POLL_MAX_FDS) return -EINVAL;
+    bytes = nfds * sizeof(*k);
+    k = (struct k_pollfd *)kmalloc(bytes ? bytes : 1);
+    if (!k) return -ENOMEM;
+    if (bytes && copy_from_user(k, (const void *)(uintptr_t)ufds, bytes) < 0) {
+        kfree(k);
+        return -EFAULT;
+    }
+    ready = poll_wait(k, nfds, tmo);
+    if (ready < 0) {
+        kfree(k);
+        return ready;
     }
     if (bytes && copy_to_user((void *)(uintptr_t)ufds, k, bytes) < 0) {
         kfree(k);
@@ -466,6 +616,87 @@ static int64_t sys_poll(struct interrupt_frame *f, uint64_t ufds, uint64_t nfds,
     }
     kfree(k);
     return ready;
+}
+
+/* ধাপ ১৬ক: select(nfds, read, write, except, timeval) — fd_set (1024 বিট) থেকে
+ * pollfd-এর তালিকা বানিয়ে poll_wait; ফেরার সময় শুধু তৈরি fd-গুলোর বিট থাকে */
+#define K_FD_SETSIZE 1024
+#define K_POLLIN   0x001
+#define K_POLLPRI  0x002
+#define K_POLLOUT  0x004
+
+static int64_t sys_select(struct interrupt_frame *f, uint64_t nfds, uint64_t urd, uint64_t uwr,
+                          uint64_t uex, uint64_t utv, uint64_t a6)
+{
+    uint64_t rd[K_FD_SETSIZE / 64], wr[K_FD_SETSIZE / 64], ex[K_FD_SETSIZE / 64];
+    struct k_pollfd *k;
+    int64_t tmo = -1;
+    size_t setbytes, n = 0, i;
+    int ready, count = 0;
+    (void)f; (void)a6;
+    if ((int64_t)nfds < 0 || nfds > K_FD_SETSIZE) return -EINVAL;
+    setbytes = ((nfds + 63) / 64) * 8;
+    memset(rd, 0, sizeof(rd));
+    memset(wr, 0, sizeof(wr));
+    memset(ex, 0, sizeof(ex));
+    if ((urd && copy_from_user(rd, (const void *)(uintptr_t)urd, setbytes) < 0) ||
+        (uwr && copy_from_user(wr, (const void *)(uintptr_t)uwr, setbytes) < 0) ||
+        (uex && copy_from_user(ex, (const void *)(uintptr_t)uex, setbytes) < 0)) {
+        return -EFAULT;
+    }
+    if (utv) {
+        int64_t tv[2];
+        if (copy_from_user(tv, (const void *)(uintptr_t)utv, sizeof(tv)) < 0) return -EFAULT;
+        if (tv[0] < 0 || tv[1] < 0) return -EINVAL;
+        tmo = tv[0] * 1000 + tv[1] / 1000;
+        if (tmo == 0 && tv[1] > 0) tmo = 1;
+    }
+    k = (struct k_pollfd *)kmalloc(nfds ? nfds * sizeof(*k) : sizeof(*k));
+    if (!k) return -ENOMEM;
+    for (i = 0; i < nfds; i++) {
+        int ev = 0;
+        uint64_t bit = 1ULL << (i % 64);
+        if (rd[i / 64] & bit) ev |= K_POLLIN;
+        if (wr[i / 64] & bit) ev |= K_POLLOUT;
+        if (ex[i / 64] & bit) ev |= K_POLLPRI;
+        if (!ev) continue;
+        k[n].fd = (int32_t)i;
+        k[n].events = (int16_t)ev;
+        k[n].revents = 0;
+        n++;
+    }
+    ready = poll_wait(k, n, tmo);
+    if (ready < 0) {
+        kfree(k);
+        return ready;
+    }
+    memset(rd, 0, setbytes);
+    memset(wr, 0, setbytes);
+    memset(ex, 0, setbytes);
+    for (i = 0; i < n; i++) {
+        int fd = k[i].fd, re = k[i].revents;
+        uint64_t bit = 1ULL << (fd % 64);
+        if (re & VFS_POLLNVAL) {
+            kfree(k);
+            return -EBADF;
+        }
+        if ((k[i].events & K_POLLIN) && (re & (K_POLLIN | VFS_POLLHUP | VFS_POLLERR))) {
+            rd[fd / 64] |= bit; count++;
+        }
+        if ((k[i].events & K_POLLOUT) && (re & (K_POLLOUT | VFS_POLLERR))) {
+            wr[fd / 64] |= bit; count++;
+        }
+        if ((k[i].events & K_POLLPRI) && (re & K_POLLPRI)) {
+            ex[fd / 64] |= bit; count++;
+        }
+    }
+    kfree(k);
+    if ((urd && copy_to_user((void *)(uintptr_t)urd, rd, setbytes) < 0) ||
+        (uwr && copy_to_user((void *)(uintptr_t)uwr, wr, setbytes) < 0) ||
+        (uex && copy_to_user((void *)(uintptr_t)uex, ex, setbytes) < 0)) {
+        return -EFAULT;
+    }
+    return count;
 }
 
 static int fill_linux_stat(const struct vfs_stat *st, uint64_t ust)
@@ -727,9 +958,14 @@ static int64_t sys_ioctl(struct interrupt_frame *f, uint64_t fd, uint64_t req, u
         if (ws[0] > 500 || ws[1] > 500) {
             return -EINVAL;
         }
-        console_rows = ws[0];                    /* 0 = আবার স্ক্রিনের মাপ */
-        console_cols = ws[1];
-        console_manual = ws[0] != 0;
+        {
+            int changed = console_rows != ws[0] || console_cols != ws[1];
+            console_rows = ws[0];                /* 0 = আবার স্ক্রিনের মাপ */
+            console_cols = ws[1];
+            console_manual = ws[0] != 0;
+            /* ধাপ ১৬খ-১: সামনের কাজকে SIGWINCH */
+            if (changed && console_ttyctl()->fg_pgid > 0) proc_kill_group(console_ttyctl()->fg_pgid, SIGWINCH);
+        }
         return 0;
     }
     if (req == TIOCROZSETFONT) {
@@ -820,4 +1056,11 @@ void sys_fs_register(void)
     syscall_register(SYS_umount2, sys_umount2, "umount2");
     syscall_register(SYS_rozos_mounts, sys_mounts, "mounts");
     syscall_register(SYS_rozos_usblist, sys_usblist, "usblist");      /* ধাপ ১৫খ */
+    syscall_register(SYS_readv, sys_readv, "readv");                  /* ধাপ ১৬ক */
+    syscall_register(SYS_pread64, sys_pread64, "pread64");
+    syscall_register(SYS_pwrite64, sys_pwrite64, "pwrite64");
+    syscall_register(SYS_select, sys_select, "select");
+    syscall_register(SYS_fcntl, sys_fcntl, "fcntl");
+    syscall_register(SYS_fsync, sys_fsync, "fsync");
+    syscall_register(SYS_fdatasync, sys_fsync, "fdatasync");
 }

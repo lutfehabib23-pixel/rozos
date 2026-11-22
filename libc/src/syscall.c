@@ -71,7 +71,7 @@
 #define SYS_getppid         110
 #define SYS_clock_gettime   228
 
-int errno;
+/* ধাপ ১৬খ-২: `errno` চলকটা pthread.c-তে (এখানে errno = থ্রেডের নিজের, ম্যাক্রো দিয়ে) */
 
 long __syscall6(long n, long a, long b, long c, long d, long e, long f)
 {
@@ -125,7 +125,22 @@ int     mkdir(const char *p, mode_t m)           { return (int)SC3(SYS_mkdir, p,
 int     stat(const char *p, struct stat *st)     { return (int)SC3(SYS_stat, p, st, 0); }
 int     lstat(const char *p, struct stat *st)    { return stat(p, st); }
 int     fstat(int fd, struct stat *st)           { return (int)SC3(SYS_fstat, fd, st, 0); }
-pid_t   fork(void)                               { return (pid_t)SC3(SYS_fork, 0, 0, 0); }
+/* ধাপ ১৬খ-২: pthread_atfork-এর handler আর সন্তানের নতুন tid */
+void __roz_atfork(int phase);
+void __roz_after_fork_child(void);
+pid_t fork(void)
+{
+    pid_t r;
+    __roz_atfork(0);
+    r = (pid_t)SC3(SYS_fork, 0, 0, 0);
+    if (r == 0) {
+        __roz_after_fork_child();
+        __roz_atfork(2);
+    } else {
+        __roz_atfork(1);
+    }
+    return r;
+}
 pid_t   getpid(void)                             { return (pid_t)SC3(SYS_getpid, 0, 0, 0); }
 pid_t   getppid(void)                            { return (pid_t)SC3(SYS_getppid, 0, 0, 0); }
 int     kill(pid_t pid, int sig)                 { return (int)SC3(SYS_kill, pid, sig, 0); }
@@ -219,9 +234,11 @@ int execve(const char *path, char *const argv[], char *const envp[])
     return (int)SC3(SYS_execve, path, argv, envp);
 }
 
+/* ধাপ ১৬খ-২: exit_group (231) — সব থ্রেডসহ প্রসেস শেষ (SYS_exit এখন শুধু একটা থ্রেড) */
 void _exit(int code)
 {
     for (;;) {
+        __syscall3(231, code, 0, 0);
         __syscall3(SYS_exit, code, 0, 0);
     }
 }
@@ -386,27 +403,7 @@ int gethostname(char *name, size_t len)
     return 0;
 }
 
-/* ---------- signal (ধাপ ৭: handler নেই) ---------- */
-
-static sighandler_t handlers[32];
-
-sighandler_t signal(int sig, sighandler_t h)
-{
-    sighandler_t old;
-    if (sig <= 0 || sig >= 32) {
-        errno = EINVAL;
-        return SIG_ERR;
-    }
-    old = handlers[sig];
-    handlers[sig] = h;
-    /* ধাপ ১৪: কার্নেলকে জানানো — SIG_IGN মানলে signal উপেক্ষা (যেমন shell-এ Ctrl+C);
-     * নিজের handler কার্নেল এখনো চালায় না, তাই সেটা ডিফল্টের মতো */
-    {
-        unsigned long act[4] = { h == SIG_IGN ? 1UL : 0UL, 0, 0, 0 };
-        SC3(SYS_rt_sigaction, sig, act, 0);
-    }
-    return old;
-}
+/* ---------- signal() ধাপ ১৬খ-১ থেকে libc/src/signal.c-তে (আসল handler) ---------- */
 
 int raise(int sig)
 {

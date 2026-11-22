@@ -33,8 +33,8 @@ key reminder. `<` and `>` at the edges mean the line goes on there.
   `Tab`          a tab character (shown as spaces, tab stop 4)
   `Ctrl+S`       save           `Ctrl+Q`   quit (asks if not saved)
   `Ctrl+W`       save as (a new name; asks before replacing a file)
-  `Ctrl+R`       C files: save, compile with [[tcc]] (+ -lrozgfx, so
-                 graphics programs work too) and run; the program
+  `Ctrl+R`       C files: save, compile with [[tcc]] (+ -lrozgame -lrozgfx
+                 -lm, so graphics programs and games work too) and run; the program
                  runs on the normal screen, Enter brings the editor back
   `Ctrl+F`       find (the match is selected); Ctrl+F, Enter = next
   `Ctrl+G`       go to a line number

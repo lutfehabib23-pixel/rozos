@@ -655,6 +655,40 @@ static int64_t kbd_read(void *ctx, uint64_t off, void *buf, size_t len)
     return (int64_t)(n * sizeof(int32_t));
 }
 
+/* ধাপ ১৮ক: /dev/keyev — কাঁচা কী-ঘটনা int32 (rozos/keyboard.h-এর KEYEV_*): চাপা ও ছাড়া
+ * দুটোই। সাধারণ কী-বাফার (console, /dev/kbd) এতে বদলায় না। */
+static int64_t keyev_read(void *ctx, uint64_t off, void *buf, size_t len)
+{
+    int32_t *out = (int32_t *)buf;
+    size_t n = 0, max = len / sizeof(int32_t);
+    int ev;
+    (void)ctx; (void)off;
+
+    if (max == 0) {
+        return -EINVAL;
+    }
+    while (n == 0) {
+        cpu_cli();
+        while (n < max && keyboard_try_getraw(&ev)) {
+            out[n++] = ev;
+        }
+        cpu_sti();
+        if (n == 0) {
+            if (sched_should_abort()) {
+                return -EINTR;
+            }
+            sched_relax();
+        }
+    }
+    return (int64_t)(n * sizeof(int32_t));
+}
+
+static int keyev_poll(void *ctx, int events)
+{
+    (void)ctx; (void)events;
+    return keyboard_has_raw() ? VFS_POLLIN : 0;
+}
+
 int devfs_init(void)
 {
     /* ধাপ ৫: একবারই চলে, আর আগে নিবন্ধিত ডিভাইস (যদি থাকে) মোছে না */
@@ -676,12 +710,14 @@ int devfs_init(void)
     devfs_register("serial0", serial_dev_read, serial_dev_write, NULL);
     devfs_register("kbd", kbd_read, NULL, NULL);
     devfs_register("mouse", mouse_dev_read, NULL, NULL);    /* ধাপ ১২ */
+    devfs_register("keyev", keyev_read, NULL, NULL);        /* ধাপ ১৮ক */
     devfs_register("random", urandom_read, urandom_write, NULL);
     devfs_register("urandom", urandom_read, urandom_write, NULL);
     /* ধাপ ১৩: poll() */
     devfs_set_poll("console", console_poll);
     devfs_set_poll("kbd", kbd_poll);
     devfs_set_poll("mouse", mouse_dev_poll);
+    devfs_set_poll("keyev", keyev_poll);
     devfs_set_poll("serial0", serial_dev_poll);
     /* ধাপ ১৪: Ctrl+C */
     ttyctl_init(&console_tc);

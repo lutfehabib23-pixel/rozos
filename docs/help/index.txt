@@ -20,13 +20,16 @@ Type [[help|how to use this viewer]] if you are new here.
   [[modules]]         kernel modules: insmod, lsmod, rmmod, write your own
   [[mount]]           disks: mount, umount, NVMe, /mnt
   [[usb]]             USB pen drives, keyboards and mice (lsusb)
+  [[posix]]           what the C library offers (phase 16a): port programs
+  [[threads]]         pthread: several threads in one program
   [[menu]]            start programs from a list; [[install]] your own
   [[mouse]]           the mouse in the terminal and the QEMU window
   [[edit]]            the text editor
   [[tcc]]             the C compiler - build programs inside rozOS
+  [[lua]]             Lua 5.4 scripts; [[zlib]]: gzip, gunzip, libz
   [[make]]            build from a Makefile (pdpmake)
   [[kmon]]            the kernel monitor (debugging)
-  [[systest]]         the self-test (50 checks)
+  [[systest]]         the self-test (186 checks)
 
 == Writing software ==
   [[c-programming]]   write, compile and run a C program, step by step
@@ -47,6 +50,7 @@ Type [[help|how to use this viewer]] if you are new here.
 == Graphics (phase 13) ==
   [[graphics]]        the graphics programs, and how to write your own
   [[rozgfx]]          the graphics library (shapes, pictures, fonts, mouse)
+  [[games]]           Snake, Breakout - and [[rozgame]]: make your own games
   [[fonts]]           console fonts (setfont) and screen resolution
   [[framebuffer]]     /dev/fb0      [[shm]] shared memory   [[pipes]] pipe(), poll()
 

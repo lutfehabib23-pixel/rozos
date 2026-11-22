@@ -160,7 +160,10 @@ enum {
     GFX_EV_MOUSE_WHEEL,    /* wheel: −1 ওপরে, +1 নিচে */
     GFX_EV_CLOSE,          /* ধাপ ১৪: উইন্ডোর [X] — প্রোগ্রাম শেষ করো */
     GFX_EV_RESIZE,         /* ধাপ ১৪: নতুন মাপ x, y-তে (= gfx_width/gfx_height) */
-    GFX_EV_FOCUS           /* ধাপ ১৪: key = 1 সামনে এল, 0 পেছনে গেল */
+    GFX_EV_FOCUS,          /* ধাপ ১৪: key = 1 সামনে এল, 0 পেছনে গেল */
+    GFX_EV_KEY_DOWN,       /* ধাপ ১৮ক: কাঁচা কী চাপা (gfx_raw_keys(1) দিলে) — key = মূল কোড,
+                              repeat = 1 মানে চেপে রাখায় আবার এল */
+    GFX_EV_KEY_UP          /* ধাপ ১৮ক: কাঁচা কী ছাড়া — key = মূল কোড */
 };
 enum {
     GFX_KEY_UP = 0x100, GFX_KEY_DOWN, GFX_KEY_LEFT, GFX_KEY_RIGHT,
@@ -169,6 +172,13 @@ enum {
     GFX_KEY_F1, GFX_KEY_F2, GFX_KEY_F3, GFX_KEY_F4, GFX_KEY_F5, GFX_KEY_F6,
     GFX_KEY_F7, GFX_KEY_F8, GFX_KEY_F9, GFX_KEY_F10, GFX_KEY_F11, GFX_KEY_F12
 };
+/* ধাপ ১৮ক: শুধু GFX_EV_KEY_DOWN/UP-এ আসে (modifier আর lock কী নিজেরাই কী) */
+enum {
+    GFX_KEY_LSHIFT = 0x120, GFX_KEY_RSHIFT, GFX_KEY_LCTRL, GFX_KEY_RCTRL,
+    GFX_KEY_LALT, GFX_KEY_RALT, GFX_KEY_CAPSLOCK, GFX_KEY_NUMLOCK, GFX_KEY_SCROLLLOCK
+};
+#define GFX_KEY_SPACE ' '
+#define GFX_KEY_COUNT 0x140         /* সব কাঁচা কোড এর নিচে (কী-অবস্থার টেবিলের মাপ) */
 #define GFX_KEY_ESC       27
 #define GFX_KEY_ENTER     '\n'
 #define GFX_KEY_BACKSPACE '\b'
@@ -185,6 +195,7 @@ typedef struct gfx_event {
     int button;                    /* DOWN/UP: কোনটা বদলাল */
     int wheel;
     int mods;                      /* ধাপ ১৪: GFX_KEY: GFX_MOD_SHIFT/ALT/CTRL (তীর ইত্যাদির সাথে) */
+    int repeat;                    /* ধাপ ১৮ক: GFX_EV_KEY_DOWN — auto-repeat */
 } gfx_event;
 #define GFX_MOD_SHIFT 1
 #define GFX_MOD_ALT   2
@@ -194,6 +205,10 @@ typedef struct gfx_event {
 int  gfx_poll_event(gfx_event *ev, int timeout_ms);
 int  gfx_wait_event(gfx_event *ev, int timeout_ms);   /* gfx_poll_event-এর আরেক নাম */
 void gfx_mouse_pos(int *x, int *y);
+/* ধাপ ১৮ক: কাঁচা কী-ঘটনা (চাপা + ছাড়া) চালু — গেমের জন্য। টেক্সট মোডে /dev/keyev থেকে,
+ * ডেস্কটপে rozwm-এর WM_RAWKEY থেকে। সাধারণ GFX_EV_KEY আগের মতোই আসতে থাকে।
+ * ফেরত: 1 = কাঁচা ঘটনা পাওয়া যাবে, 0 = যাবে না (শুধু serial ইত্যাদি) */
+int  gfx_raw_keys(int on);
 /* মাউস-তীর আঁকা (s-এ); নিচের পিক্সেল gfx_cursor_restore-এর জন্য রেখে দেয় */
 void gfx_cursor_draw(gfx_surface *s, int x, int y);
 void gfx_cursor_restore(gfx_surface *s);

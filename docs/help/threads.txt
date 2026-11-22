@@ -1,0 +1,38 @@
+# threads - pthread (phase 16b-2)
+A program can now run several threads: they share memory and open
+files, each has its own stack, registers, FPU and errno.
+  `#include <pthread.h>`
+  `void *work(void *arg) { ... return result; }`
+  `pthread_t t; pthread_create(&t, NULL, work, arg); pthread_join(t, &result);`
+Build: `tcc -o app app.c -lpthread`  (-lpthread is optional - it is all in libc)
+
+== What is there ==
+  threads     pthread_create/join/detach/exit/self, pthread_once,
+              attributes (stack size, detached), pthread_kill,
+              pthread_cancel (takes effect at pthread_testcancel)
+  locks       pthread_mutex (normal, recursive, errorcheck, trylock,
+              timedlock), pthread_cond (wait, timedwait, signal,
+              broadcast), pthread_rwlock, pthread_spinlock,
+              pthread_barrier, semaphores (`semaphore.h`: sem_init,
+              sem_wait, sem_post ...)
+  per thread  errno, pthread_key_create + setspecific (with destructors)
+  sched.h     sched_yield, sched_getaffinity (one CPU)
+malloc, printf and the other stdio functions are safe to use from
+several threads (one lock each).
+
+== How it works ==
+The kernel's clone() makes a thread in the same process; futex() lets a
+thread sleep until another wakes it - the locks are built on that.
+exit() ends all threads; pthread_exit() only the calling one (the
+process ends with its last thread). execve() and fork() keep only the
+calling thread.
+
+== Good to know ==
+rozOS runs on one CPU core for now: threads take turns (preemptive),
+they do not run at the same moment. Programs still get simpler (a
+worker thread for slow work, one thread per connection, a game loop and
+a loader) - and later, when rozOS uses more cores, the same program
+runs faster without changes.
+The signal mask is shared by all threads of a process (pthread_sigmask
+= sigprocmask); a signal is handled by whichever thread returns first.
+kmon `ps` shows the number of threads (THR). See [[signals]], [[posix]].

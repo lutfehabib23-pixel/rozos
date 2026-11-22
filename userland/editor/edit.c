@@ -1079,7 +1079,8 @@ static void run_c(void)
     printf("\n== tcc %s ==\n", filename);
     fflush(stdout);
     /* ধাপ ১৩: -lrozgfx — গ্রাফিক্স প্রোগ্রামও চলে (না লাগলে কিছুই যোগ হয় না) */
-    snprintf(cmd, sizeof(cmd), "set -e; tcc %s -lrozgfx -o /tmp/edit-run; /tmp/edit-run", filename);
+    /* ধাপ ১৮ক: -lrozgame -lm — গেমও চলে */
+    snprintf(cmd, sizeof(cmd), "set -e; tcc %s -lrozgame -lrozgfx -lm -o /tmp/edit-run; /tmp/edit-run", filename);
     set_isig(1);                        /* চলন্ত প্রোগ্রাম Ctrl+C-তে থামে, এডিটর নয় */
     rc = system(cmd);
     set_isig(0);

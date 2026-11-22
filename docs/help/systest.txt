@@ -1,5 +1,5 @@
 # systest - self-test
-`systest` runs 87 checks and prints [ ok ] or [FAIL] for each:
+`systest` runs 186 checks and prints [ ok ] or [FAIL] for each:
   syscalls through `syscall` and `int 0x80`, bad addresses rejected,
   brk and mmap memory, the stack growing on demand, files in /tmp,
   chdir/getcwd, getdents64, fork/execve/wait, crashing children,
@@ -17,5 +17,22 @@
       insmod/lsmod/rmmod of hello.ko, exported symbols, mount list and
       umount /, NVMe mount (with make run NVME=1).
   15b) the USB list; write+read on the pen drive (make run USB=1).
+  16a) libc: select, readv/writev, pread/pwrite, fcntl, fsync, exact
+      printf (%a, positional, %ls), scanf %Lf/%ms, memstream, tmpfile,
+      mkstemp, time zones (Asia/Dhaka, DST), strptime, UTF-8 and wchar,
+      locale, iconv, regex, getopt_long, qsort, tsearch, libm (expm1,
+      erf, tgamma, pow special cases), fenv, getpwuid, syslog, dlopen
+      stub, sigsetjmp, posix_memalign ([[posix]]).
+  16b-1) signal handlers: SA_SIGINFO, sigprocmask, sigsuspend,
+      setitimer, EINTR and SA_RESTART, SIGCHLD, catching SIGSEGV and
+      SIGFPE, sigaltstack, nanosleep, sigwait, SIGWINCH ([[signals]]);
+      /bin/lua and a gzip/gunzip round trip ([[lua]], [[zlib]]).
+  16b-2) threads: create/join, 8 threads with a mutex, errno per thread,
+      cond, keys, once, semaphore, barrier, FPU per thread, detached,
+      exit/pthread_exit/execve with threads, sigwait in a thread
+      ([[threads]]).
+  18a) games: /dev/keyev, rozgame collisions, animation, key states
+      (pressed once, repeat, released), picture rows and smooth resize,
+      random/colour helpers, best score ([[rozgame]]).
 The exit code is the number of failures (0 = all good).
 Source: userland/tests/systest.c. See [[processes]], [[syscalls]].

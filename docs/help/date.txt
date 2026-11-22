@@ -1,4 +1,10 @@
 # date - current date and time
-Prints the time in UTC. The kernel reads the clock once at boot (from
-the bootloader) and counts timer ticks after that; there are no time
-zones yet.   Back to [[programs]].
+  `date`            local time, like "Sun 2026-11-22 07:31:05 +06"
+  `date -u`         in UTC
+  `date +%H:%M`     your own format (all strftime codes: %Y %m %d %H %M
+                    %S %a %A %b %B %j %Z %z %s ... - see [[posix]])
+The time zone comes from $TZ, else from the first line of /etc/TZ,
+else it is UTC. Set Bangladesh time for good:  `echo Asia/Dhaka > /etc/TZ`
+(or TZ="<+06>-6"; rules with summer time work too: EST5EDT,M3.2.0,M11.1.0).
+The kernel reads the clock once at boot (from the bootloader) and counts
+timer ticks after that.   Back to [[programs]].

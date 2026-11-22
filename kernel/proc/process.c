@@ -40,6 +40,15 @@
 static struct process *procs[PROC_MAX];
 static int next_pid = 1;
 
+/* ধাপ ১৬খ-২: থ্রেডের id pid-এর একই গোনা থেকে (Linux-এর মতো — কখনো মেলে না) */
+int proc_alloc_tid(void)
+{
+    uint64_t fl = cpu_irq_save();
+    int t = next_pid++;
+    cpu_irq_restore(fl);
+    return t;
+}
+
 /* ---------- টেবিল ---------- */
 
 static struct vfs_fdtable *fdt_of_current(void)
@@ -191,6 +200,9 @@ static int fault_in_stack(struct process *p, uint64_t addr)
 
     if (!p || !in_stack_area(addr)) {
         return 0;
+    }
+    if (vmm_query(p->space, va, NULL, NULL)) {
+        return 1;                                /* ধাপ ১৬খ-২: আরেক থ্রেড এর মধ্যেই এনেছে */
     }
     phys = pmm_alloc_zeroed_page();
     if (!phys) {
@@ -536,6 +548,8 @@ int proc_spawn(const char *path, const char *const *argv, int autoreap)
             err = -ENOMEM;
         } else {
             p->thread = t;
+            t->utid = p->pid;                    /* ধাপ ১৬খ-২ */
+            p->nthreads = 1;
         }
     }
     kfree(ap.buf);
@@ -568,6 +582,7 @@ int64_t proc_fork(struct interrupt_frame *frame)
     child->pgid = parent->pgid;              /* ধাপ ১৪ */
     child->sid = parent->sid;
     child->sigignore = parent->sigignore;
+    proc_signal_fork(child, parent);         /* ধাপ ১৬খ-১: handler, mask, বিকল্প স্ট্যাক */
     child->brk_start = parent->brk_start;
     child->brk_end = parent->brk_end;
     child->mmap_next = parent->mmap_next;
@@ -586,9 +601,145 @@ int64_t proc_fork(struct interrupt_frame *frame)
         return -ENOMEM;
     }
     t->fs_base = sched_current()->fs_base;
+    t->utid = child->pid;                        /* ধাপ ১৬খ-২: সন্তানে শুধু ডাকা থ্রেডটা */
+    child->nthreads = 1;
     child->thread = t;
     sched_start_thread(t);
     return child->pid;
+}
+
+/* ---------- ধাপ ১৬খ-২: থ্রেড ---------- */
+
+static void mark_exit(struct thread *t, void *arg)
+{
+    if (t != (struct thread *)arg) {
+        t->exit_req = 1;
+        if (t->state == THREAD_BLOCKED || t->state == THREAD_SLEEPING) {
+            t->state = THREAD_READY;             /* অপেক্ষা ভাঙুক (sched_should_abort) */
+        }
+    }
+}
+
+/* নিজে ছাড়া প্রসেসের বাকি সব থ্রেড শেষ করানো, শেষ না হওয়া পর্যন্ত অপেক্ষা */
+static void kill_other_threads(struct process *p)
+{
+    struct thread *self = sched_current();
+    while (p->nthreads > 1) {
+        sched_for_each_proc_thread(p, mark_exit, self);
+        sched_sleep_ms(1);
+    }
+}
+
+/* CLONE_* (Linux) */
+#define CLONE_VM             0x00000100
+#define CLONE_FS             0x00000200
+#define CLONE_FILES          0x00000400
+#define CLONE_SIGHAND        0x00000800
+#define CLONE_VFORK          0x00004000
+#define CLONE_THREAD         0x00010000
+#define CLONE_SYSVSEM        0x00040000
+#define CLONE_SETTLS         0x00080000
+#define CLONE_PARENT_SETTID  0x00100000
+#define CLONE_CHILD_CLEARTID 0x00200000
+#define CLONE_DETACHED       0x00400000
+#define CLONE_CHILD_SETTID   0x01000000
+#define CLONE_THREAD_NEED    (CLONE_VM | CLONE_SIGHAND | CLONE_THREAD)
+
+/* clone: CLONE_THREAD হলে একই প্রসেসে নতুন থ্রেড (নিজের স্ট্যাক ও TLS নিয়ে); CLONE_VM ছাড়া
+ * সাধারণ fork (SIGCHLD = 17 নিচের বাইটে) — অন্য মিশ্রণ এখনো নেই */
+int64_t proc_clone(struct interrupt_frame *frame, uint64_t flags, uint64_t newsp,
+                   uint64_t uptid, uint64_t uctid, uint64_t tls)
+{
+    struct process *p = proc_current();
+    struct thread *t;
+    struct interrupt_frame f;
+    int tid;
+
+    if (!p) return -EPERM;
+    if (!(flags & CLONE_VM) && !(flags & (CLONE_THREAD | CLONE_SIGHAND))) {
+        int64_t r = proc_fork(frame);            /* fork() বা vfork()-এর মতো ব্যবহার */
+        if (r > 0 && (flags & CLONE_PARENT_SETTID) && uptid) {
+            int32_t v = (int32_t)r;
+            copy_to_user((void *)(uintptr_t)uptid, &v, sizeof(v));
+        }
+        return r;
+    }
+    if ((flags & CLONE_THREAD_NEED) != CLONE_THREAD_NEED || !(flags & CLONE_FILES)) {
+        return -EINVAL;
+    }
+    if (!newsp || newsp >= VMM_USER_TOP || (tls && tls >= VMM_USER_TOP)) {
+        return -EINVAL;
+    }
+    if (p->exiting) return -EAGAIN;
+    tid = proc_alloc_tid();
+    if ((flags & CLONE_PARENT_SETTID) && uptid) {
+        int32_t v = tid;
+        if (copy_to_user((void *)(uintptr_t)uptid, &v, sizeof(v)) < 0) return -EFAULT;
+    }
+    if ((flags & CLONE_CHILD_SETTID) && uctid) {
+        int32_t v = tid;
+        if (copy_to_user((void *)(uintptr_t)uctid, &v, sizeof(v)) < 0) return -EFAULT;
+    }
+    memcpy(&f, frame, sizeof(f));
+    f.rax = 0;                                   /* নতুন থ্রেডে clone() = 0 */
+    f.rsp = newsp;
+    sched_fpu_save_current();
+    t = sched_create_user_thread(p->name, p, &f, sched_current()->fpu);
+    if (!t) return -ENOMEM;
+    t->utid = tid;
+    t->fs_base = (flags & CLONE_SETTLS) ? tls : sched_current()->fs_base;
+    t->clear_child_tid = (flags & CLONE_CHILD_CLEARTID) ? uctid : 0;
+    {
+        uint64_t fl = cpu_irq_save();
+        p->nthreads++;
+        cpu_irq_restore(fl);
+    }
+    sched_start_thread(t);
+    return tid;
+}
+
+/* শুধু চলমান থ্রেডটা শেষ (pthread_exit, বা exit_group-এ বাকিরা); শেষ থ্রেড হলে প্রসেসও */
+struct pick_arg { struct thread *self, *found; };
+
+static void pick_other(struct thread *t, void *arg)
+{
+    struct pick_arg *a = (struct pick_arg *)arg;
+    if (t != a->self && !a->found) a->found = t;
+}
+
+void proc_thread_exit(int code)
+{
+    struct thread *self = sched_current();
+    struct process *p = self->proc;
+    uint64_t fl;
+
+    if (!p) sched_thread_exit();
+    fl = cpu_irq_save();
+    if (p->nthreads <= 1 && !(p->exiting && p->exiter != self)) {
+        cpu_irq_restore(fl);
+        proc_exit(code, 0);                      /* শেষ থ্রেড: পুরো প্রসেস */
+    }
+    cpu_irq_restore(fl);
+    if (self->clear_child_tid && !p->exiting) {
+        int32_t zero = 0;
+        if (copy_to_user((void *)(uintptr_t)self->clear_child_tid, &zero, sizeof(zero)) == 0) {
+            futex_wake_addr(p, self->clear_child_tid, 1);     /* pthread_join জাগে */
+        }
+    }
+    fl = cpu_irq_save();
+    p->nthreads--;
+    if (p->thread == self) {
+        struct pick_arg a;
+        a.self = self;
+        a.found = NULL;
+        sched_for_each_proc_thread(p, pick_other, &a);
+        p->thread = a.found;                     /* signal এখন এই থ্রেড পাবে */
+    }
+    if (p->wait_thread == self) p->wait_thread = NULL;
+    self->proc = NULL;                           /* reaper যেন প্রসেসের struct না ছোঁয় */
+    if (p->exiting && p->exiter) sched_wake(p->exiter);
+    cpu_irq_restore(fl);
+    sched_thread_exit();
 }
 
 /* ---------- execve ---------- */
@@ -610,6 +761,17 @@ int64_t proc_execve(struct interrupt_frame *frame, const char *path,
     ap.buf = (char *)kmalloc(PROC_ARGS_BYTES);
     if (!ap.buf) {
         return -ENOMEM;
+    }
+    if (p->nthreads > 1) {
+        /* ধাপ ১৬খ-২: POSIX — execve-তে বাকি থ্রেড শেষ, ডাকা থ্রেডই প্রসেসের থ্রেড */
+        p->exiting = 1;
+        p->exiter = sched_current();
+        kill_other_threads(p);
+        p->exiting = 0;
+        p->exiter = NULL;
+        p->thread = sched_current();
+        sched_current()->utid = p->pid;
+        sched_current()->clear_child_tid = 0;
     }
     err = pack_from_user(&ap, uargv, 0);
     if (err == 0) err = pack_from_user(&ap, uenvp, 1);
@@ -633,6 +795,7 @@ int64_t proc_execve(struct interrupt_frame *frame, const char *path,
     strncpy(sched_current()->name, p->name, SCHED_NAME_MAX - 1);
 
     user_frame(frame, img.entry, rsp);
+    proc_signal_exec(p);                         /* ধাপ ১৬খ-১: ধরা signal ডিফল্টে ফেরে */
     sched_set_fs_base(0);
     sched_fpu_load(sched_fpu_initial_state());
     return 0;
@@ -648,6 +811,19 @@ void proc_exit(int code, int sig)
     if (!p) {
         sched_thread_exit();
     }
+    /* ধাপ ১৬খ-২: আরেকটা থ্রেড আগেই শেষ শুরু করেছে — এই থ্রেড শুধু নিজে শেষ */
+    {
+        uint64_t fl = cpu_irq_save();
+        if (p->exiting && p->exiter && p->exiter != sched_current()) {
+            cpu_irq_restore(fl);
+            proc_thread_exit(code);
+        }
+        p->exiting = 1;
+        p->exiter = sched_current();
+        cpu_irq_restore(fl);
+    }
+    kill_other_threads(p);                       /* বাকি থ্রেড শেষ না হলে ঠিকানা-স্থান মোছা যায় না */
+    p->thread = sched_current();
     /* সন্তানদের অনাথ করা */
     for (i = 0; i < PROC_MAX; i++) {
         struct process *c = procs[i];
@@ -673,8 +849,12 @@ void proc_exit(int code, int sig)
     p->state = PROC_ZOMBIE;
 
     parent = p->ppid ? proc_find(p->ppid) : NULL;
-    if (parent && parent->waiting && parent->thread) {
-        sched_wake(parent->thread);
+    if (parent && parent->waiting && (parent->wait_thread || parent->thread)) {
+        sched_wake(parent->wait_thread ? parent->wait_thread : parent->thread);   /* ধাপ ১৬খ-২ */
+    }
+    if (parent) {                                /* ধাপ ১৬খ-১: মা-কে SIGCHLD (ডিফল্টে উপেক্ষা) */
+        proc_send_signal(parent, SIGCHLD, p->pid, sig ? 2 /* CLD_KILLED */ : 1 /* CLD_EXITED */,
+                         sig ? sig : (code & 0xFF));
     }
     if (p->kwaiter) {
         sched_wake(p->kwaiter);
@@ -725,14 +905,16 @@ int64_t proc_wait4(int pid, int *ustatus, int options)
         if (options & WNOHANG) {
             return 0;
         }
-        if (me->killed) {
+        if (proc_signal_pending(me)) {           /* ধাপ ১৬খ-১: যেকোনো signal-এ (SA_RESTART-এ আবার) */
             return -EINTR;
         }
         {
             uint64_t flags = cpu_irq_save();
             me->waiting = 1;
+            me->wait_thread = sched_current();   /* ধাপ ১৬খ-২: কোন থ্রেড অপেক্ষায় */
             sched_block();
             me->waiting = 0;
+            me->wait_thread = NULL;
             cpu_irq_restore(flags);
         }
     }
@@ -792,11 +974,12 @@ int proc_kill(int pid, int sig)
     if (sig != SIGKILL && sig >= 1 && sig <= 64 && (p->sigignore & (1ULL << (sig - 1)))) {
         return 0;
     }
-    p->killed = sig;
-    if (p->thread) {
-        sched_wake(p->thread);                   /* ঘুম/অপেক্ষা থেকে তুলে শেষ করানো */
+    /* ধাপ ১৬খ-১: আগে সরাসরি killed (= প্রসেস শেষ) বসত; এখন অপেক্ষমাণ signal হিসেবে —
+     * handler থাকলে সেটা চলে, নইলে ডিফল্ট (শেষ বা উপেক্ষা), ঘুম থেকে তোলা আগের মতোই */
+    {
+        struct process *me = proc_current();
+        return proc_send_signal(p, sig, me ? me->pid : 0, 0 /* SI_USER */, 0);
     }
-    return 0;
 }
 
 int proc_kill_group(int pgid, int sig)
@@ -845,6 +1028,10 @@ int proc_user_fault(struct interrupt_frame *f)
     default:
         sig = SIGSEGV;
         break;
+    }
+    /* ধাপ ১৬খ-১: প্রোগ্রামের নিজের handler থাকলে (যেমন SIGSEGV ধরে siglongjmp) সেটা চলবে */
+    if (proc_signal_fault(p, sig, f->vector == EXC_PAGE_FAULT ? cpu_read_cr2() : f->rip)) {
+        return 1;
     }
     tty_set_color(TTY_COLOR_LIGHT_RED, TTY_COLOR_BLACK);
     kprintf("[proc] pid %d (%s): %s at rip 0x%llx", p->pid, p->name,

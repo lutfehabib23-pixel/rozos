@@ -34,6 +34,39 @@ struct stat {
 #define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
 #define S_ISCHR(m) (((m) & S_IFMT) == S_IFCHR)
 #define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
+/* ধাপ ১৬ক */
+#define S_IFIFO  0010000
+#define S_IFBLK  0060000
+#define S_IFLNK  0120000
+#define S_IFSOCK 0140000
+#define S_ISFIFO(m) (((m) & S_IFMT) == S_IFIFO)
+#define S_ISBLK(m)  (((m) & S_IFMT) == S_IFBLK)
+#define S_ISLNK(m)  (((m) & S_IFMT) == S_IFLNK)
+#define S_ISSOCK(m) (((m) & S_IFMT) == S_IFSOCK)
+#define S_ISUID 04000
+#define S_ISGID 02000
+#define S_ISVTX 01000
+#define S_IRWXU 0700
+#define S_IRUSR 0400
+#define S_IWUSR 0200
+#define S_IXUSR 0100
+#define S_IRWXG 0070
+#define S_IRGRP 0040
+#define S_IWGRP 0020
+#define S_IXGRP 0010
+#define S_IRWXO 0007
+#define S_IROTH 0004
+#define S_IWOTH 0002
+#define S_IXOTH 0001
+#define S_IREAD  S_IRUSR
+#define S_IWRITE S_IWUSR
+#define S_IEXEC  S_IXUSR
+int fchmod(int fd, mode_t mode);
+int mkfifo(const char *path, mode_t mode);
+int mknod(const char *path, mode_t mode, dev_t dev);
+int futimens(int fd, const struct timespec times[2]);
+int fstatat(int dirfd, const char *path, struct stat *st, int flags);
+int mkdirat(int dirfd, const char *path, mode_t mode);
 
 int stat(const char *path, struct stat *st);
 int fstat(int fd, struct stat *st);

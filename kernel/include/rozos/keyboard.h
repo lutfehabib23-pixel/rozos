@@ -24,6 +24,20 @@ enum key_special {
     KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12
 };
 
+/* ধাপ ১৮ক: কাঁচা কী-ঘটনা (/dev/keyev, গেমের জন্য) — চাপা আর ছাড়া দুটোই।
+ * কোড = Shift ছাড়া "মূল" কী (ছোট হাতের অক্ষর, '1', ' ', '\n', 27, KEY_* ...)
+ * আর নিচের modifier/lock কী — যেগুলো সাধারণ কী-বাফারে কখনো আসে না। */
+enum key_raw_special {
+    KEY_LSHIFT = 0x120, KEY_RSHIFT, KEY_LCTRL, KEY_RCTRL, KEY_LALT, KEY_RALT,
+    KEY_CAPSLOCK, KEY_NUMLOCK, KEY_SCROLLLOCK
+};
+
+/* একটা কাঁচা ঘটনা (int32): বিট 0-15 কোড, 16-18 modifier (KEYMOD_SHIFT/CTRL/ALT),
+ * বিট 29 = auto-repeat (চেপে রাখায় আবার আসা), বিট 30 = ছাড়া হয়েছে */
+#define KEYEV_CODE(e)   ((e) & 0xFFFF)
+#define KEYEV_REPEAT    0x20000000
+#define KEYEV_RELEASE   0x40000000
+
 /* modifier বিট */
 #define KEYMOD_SHIFT  0x01
 #define KEYMOD_CTRL   0x02
@@ -41,5 +55,7 @@ uint8_t  keyboard_modifiers(void);
 uint8_t  keyboard_last_scancode(void);  /* ডিবাগিং */
 const char *keyboard_key_name(int key);
 void     keyboard_inject_scancode(uint8_t sc);   /* ধাপ ১৫খ: USB কিবোর্ড থেকে */
+int      keyboard_try_getraw(int *ev);  /* ধাপ ১৮ক: কাঁচা ঘটনা থাকলে 1 (কেউ পড়লে তবেই জমে) */
+int      keyboard_has_raw(void);
 
 #endif

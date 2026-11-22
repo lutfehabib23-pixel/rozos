@@ -9,10 +9,11 @@
 == Text and development ==
   [[edit]]     the text editor           [[tcc]]     the C compiler
   [[make]]     build from a Makefile     sh         = [[rozsh]] (for scripts)
+  [[lua]]      the Lua 5.4 language      [[zlib|gzip]]   compress (gunzip: back)
   [[menu]]     start programs from a list [[install]]  add your own program
 
 == System ==
-  [[uname]]    system name and version   [[date]]    date and time (UTC)
+  [[uname]]    system name and version   [[date]]    date and time (TZ)
   [[echo]]     print text                [[clear]]   clear the screen
   [[sleep]]    wait some seconds         [[stty]]    console size
   [[kmon]]     kernel monitor            [[rozhelp]] this help viewer
@@ -41,8 +42,11 @@
   [[imgview]]  look at pictures          [[gcalc]]    calculator with buttons
   gfxevents   show keyboard/mouse events as text ([[rozgfx]])
 
+== Games ([[games]]) ==
+  [[snake]]    eat apples, grow           [[breakout]] break the bricks
+
 == Tests and demos ==
-  [[systest]]  87 kernel and libc tests  [[demos|hello, spin, crash]]
+  [[systest]]  kernel and libc tests  [[demos|hello, spin, crash]]
 
 Every program is a normal ELF file built from userland/ in the source
 tree; you can write your own with [[c-programming|tcc]].

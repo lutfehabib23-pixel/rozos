@@ -1,0 +1,32 @@
+# Games (phase 18a)
+Start menu > Games, or type the name in a terminal.
+
+  [[snake]]      eat apples, grow, don't hit the walls or yourself
+  [[breakout]]   break all the bricks with the ball and the paddle
+
+Both are written with [[rozgame]] - the game library - and their full
+source is in /usr/src/games. Change them and build your own copy:
+  `cd /usr/src/games`
+  `tcc snake.c -lrozgame -lrozgfx -lm -o /home/bin/mysnake`
+  `mysnake`
+(/home/bin is on the PATH.) Code (the editor) can build them too.
+
+== Options (both games) ==
+  -f   show the frames per second
+  -p   start playing at once (no menu)
+Breakout also has -s: smooth (bilinear) enlarging on a big screen.
+
+== Pictures ==
+The pictures are in /usr/share/games (PNG and JPG). Replace one with
+your own picture of the same size and the game uses it.
+They were drawn by a program (toolchain/mkgameart.py), not copied.
+
+== Best scores ==
+Kept in /home/.rozgame/snake.score and breakout.score - delete the
+file to start again.
+
+== Keys in games ==
+Games get the real "pressed" and "released" of each key from
+/dev/keyev, so holding an arrow moves smoothly. In a desktop window
+rozwm passes them on to the window in front. Over the serial line
+there is no "released", so a key counts as held for a moment.

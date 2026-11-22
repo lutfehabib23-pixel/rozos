@@ -584,13 +584,14 @@ static void cmd_ps(void)
     size_t i;
     uint64_t hz = timer_frequency() ? timer_frequency() : 1000;
 
-    kprintf("  PID  PPID  STATE    CPU ms  NAME\n");
+    kprintf("  PID  PPID  STATE    CPU ms  THR  NAME\n");
     for (i = 0; i < proc_count(); i++) {
         struct process *p = proc_at(i);
         const char *st = p->state == PROC_ZOMBIE ? "zombie" :
                          p->thread ? sched_state_name(p->thread->state) : "?";
-        kprintf("  %3d  %4d  %-8s %6llu  %s\n", p->pid, p->ppid, st,
-                (unsigned long long)(p->thread ? p->thread->cpu_ticks * 1000 / hz : 0), p->name);
+        kprintf("  %3d  %4d  %-8s %6llu  %3d  %s\n", p->pid, p->ppid, st,
+                (unsigned long long)(p->thread ? p->thread->cpu_ticks * 1000 / hz : 0),
+                p->state == PROC_ZOMBIE ? 0 : p->nthreads, p->name);      /* ধাপ ১৬খ-২: থ্রেড */
     }
     kprintf("  kernel threads:");
     for (i = 0; i < sched_thread_count(); i++) {

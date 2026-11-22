@@ -9,6 +9,7 @@
 #include <rozos/sched.h>
 #include <rozos/keyboard.h>
 #include <rozos/ps2.h>
+#include <rozos/timer.h>
 #include <arch/x86_64/pic.h>
 #include <arch/x86_64/io.h>
 #include <arch/x86_64/cpu.h>
@@ -75,6 +76,15 @@ static int extended;                           /* আগের বাইট 0xE0
 static int pause_skip;                         /* Pause কী-র 0xE1 সিকোয়েন্সের বাকি বাইট */
 static int lshift, rshift, lctrl, rctrl, lalt, ralt;
 
+/* ধাপ ১৮ক: কাঁচা ঘটনার আলাদা সারি (চাপা + ছাড়া) — /dev/keyev */
+#define RAW_BUFFER_SIZE 256     /* 2-এর ঘাত */
+#define RAW_IDLE_MS 1000        /* এতক্ষণ কেউ না পড়লে জমা হয় না (পুরোনো ঘটনা গেমে যায় না) */
+static volatile int raw_buffer[RAW_BUFFER_SIZE];
+static volatile uint32_t raw_head, raw_tail;
+static volatile uint64_t raw_last_active;
+static int raw_seen_reader;
+static uint32_t raw_down[0x140 / 32];   /* কোন কী এখন চাপা (repeat চেনার জন্য) */
+
 static int (*intr_hook)(void);            /* ধাপ ১৪: Ctrl+C → কনসোলের SIGINT (1 = কী ফেলে দাও) */
 
 void keyboard_set_intr_hook(int (*fn)(void))
@@ -93,6 +103,75 @@ static void push_key(int key)
     }
     key_buffer[buf_head] = key;
     buf_head = next;
+}
+
+static void push_raw(int code, int released)
+{
+    uint32_t bit, word, next;
+    int ev;
+    if (code <= 0 || code >= 0x140) {
+        return;
+    }
+    word = (uint32_t)code / 32;
+    bit = 1u << ((uint32_t)code % 32);
+    ev = code | ((int)(mods & 7) << 16);
+    if (released) {
+        raw_down[word] &= ~bit;
+        ev |= KEYEV_RELEASE;
+    } else {
+        if (raw_down[word] & bit) ev |= KEYEV_REPEAT;
+        raw_down[word] |= bit;
+    }
+    if (!raw_seen_reader || timer_uptime_ms() - raw_last_active > RAW_IDLE_MS) {
+        raw_tail = raw_head;                   /* কেউ পড়ছে না — সারি খালি রাখা */
+        return;
+    }
+    next = (raw_head + 1) & (RAW_BUFFER_SIZE - 1);
+    if (next == raw_tail) {
+        return;
+    }
+    raw_buffer[raw_head] = ev;
+    raw_head = next;
+}
+
+/* scancode (set 1) → কাঁচা কোড; extended = আগে 0xE0 ছিল */
+static int raw_code(uint8_t code, int ext)
+{
+    if (ext) {
+        switch (code) {
+        case 0x1D: return KEY_RCTRL;
+        case 0x38: return KEY_RALT;
+        case 0x1C: return '\n';
+        case 0x35: return '/';
+        case 0x47: return KEY_HOME;
+        case 0x48: return KEY_UP;
+        case 0x49: return KEY_PAGE_UP;
+        case 0x4B: return KEY_LEFT;
+        case 0x4D: return KEY_RIGHT;
+        case 0x4F: return KEY_END;
+        case 0x50: return KEY_DOWN;
+        case 0x51: return KEY_PAGE_DOWN;
+        case 0x52: return KEY_INSERT;
+        case 0x53: return KEY_DELETE;
+        default: return 0;                     /* PrintScreen-এর ভুয়া shift, Win কী ... */
+        }
+    }
+    switch (code) {
+    case 0x2A: return KEY_LSHIFT;
+    case 0x36: return KEY_RSHIFT;
+    case 0x1D: return KEY_LCTRL;
+    case 0x38: return KEY_LALT;
+    case 0x3A: return KEY_CAPSLOCK;
+    case 0x45: return KEY_NUMLOCK;
+    case 0x46: return KEY_SCROLLLOCK;
+    case 0x57: return KEY_F11;
+    case 0x58: return KEY_F12;
+    default: break;
+    }
+    if (code >= 0x3B && code <= 0x44) return KEY_F1 + (code - 0x3B);
+    if (code >= 0x47 && code <= 0x53 && !(mods & KEYMOD_NUM)) return keypad_nav[code - 0x47];
+    if (code < sizeof(map_normal)) return (unsigned char)map_normal[code];
+    return 0;
 }
 
 static void update_leds(void)
@@ -188,6 +267,8 @@ static void handle_scancode(uint8_t sc)
 
     released = (sc & 0x80) != 0;
     code = sc & 0x7F;
+
+    push_raw(raw_code(code, extended), released);   /* ধাপ ১৮ক */
 
     if (extended) {
         extended = 0;
@@ -296,6 +377,26 @@ int keyboard_try_getkey(int *key)
 int keyboard_has_key(void)
 {
     return buf_tail != buf_head;
+}
+
+/* ধাপ ১৮ক: কাঁচা ঘটনা — পড়া বা poll করাই "কেউ শুনছে" চিহ্ন */
+int keyboard_try_getraw(int *ev)
+{
+    raw_seen_reader = 1;
+    raw_last_active = timer_uptime_ms();
+    if (raw_tail == raw_head) {
+        return 0;
+    }
+    *ev = raw_buffer[raw_tail];
+    raw_tail = (raw_tail + 1) & (RAW_BUFFER_SIZE - 1);
+    return 1;
+}
+
+int keyboard_has_raw(void)
+{
+    raw_seen_reader = 1;
+    raw_last_active = timer_uptime_ms();
+    return raw_tail != raw_head;
 }
 
 int keyboard_getkey(void)

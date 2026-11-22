@@ -35,6 +35,7 @@ struct cpu_local {
     uint64_t kernel_rsp;
     uint64_t user_rsp;
     struct thread *current;
+    uint64_t force_iret;                 /* ধাপ ১৬খ-১ (%gs:24): sigreturn — sysret নয়, iretq */
 };
 
 extern void switch_context(uint64_t *save_rsp, uint64_t new_rsp);
@@ -491,23 +492,57 @@ void sched_relax(void)
     cpu_sti_hlt();
 }
 
+/* ধাপ ১৬খ-১: শুধু kill নয় — বন্ধ না করা যেকোনো অপেক্ষমাণ signal-এও অপেক্ষা ভাঙে (EINTR) */
 int sched_should_abort(void)
 {
-    return current && current->proc && current->proc->killed;
+    return current && current->proc && (current->exit_req || proc_signal_pending(current->proc));
+}
+
+/* ধাপ ১৬খ-২ */
+void sched_for_each_proc_thread(struct process *p, void (*fn)(struct thread *t, void *arg), void *arg)
+{
+    uint64_t flags = cpu_irq_save();
+    struct thread *t;
+    for (t = all_threads; t; t = t->next) {
+        if (t->proc == p && t->state != THREAD_DEAD) {
+            fn(t, arg);
+        }
+    }
+    cpu_irq_restore(flags);
+}
+
+struct thread *sched_find_utid(int utid)
+{
+    uint64_t flags = cpu_irq_save();
+    struct thread *t;
+    for (t = all_threads; t; t = t->next) {
+        if (t->proc && t->utid == utid && t->state != THREAD_DEAD) {
+            break;
+        }
+    }
+    cpu_irq_restore(flags);
+    return t;
+}
+
+void sched_force_iret(void)
+{
+    cpu0.force_iret = 1;
 }
 
 void sched_return_to_user(struct interrupt_frame *frame)
 {
-    (void)frame;
     if (!active) {
         return;
     }
     if (need_resched) {
         schedule();
     }
-    if (current->proc && current->proc->killed) {
+    if (current->proc && current->exit_req) {
         cpu_sti();
-        proc_exit(0, current->proc->killed);
+        proc_thread_exit(0);                     /* ধাপ ১৬খ-২: exit_group/execve — এই থ্রেড শেষ */
+    }
+    if (current->proc) {
+        proc_signal_deliver(frame);              /* kill হলে এখানেই শেষ (ফেরে না) */
     }
 }
 

@@ -41,6 +41,12 @@ struct thread {
     uint64_t wake_tick;
     uint64_t cpu_ticks;                  /* কত টিক CPU পেয়েছে */
     uint64_t fs_base;                    /* ইউজার TLS (arch_prctl) */
+    uint64_t sys_nr;                     /* ধাপ ১৬খ-১: শেষ syscall-এর নম্বর (SA_RESTART-এর জন্য) */
+    /* ধাপ ১৬খ-২: একই প্রসেসে কয়েকটা থ্রেড */
+    int utid;                            /* ইউজারের দেখা thread id (gettid; মূল থ্রেডে = pid) */
+    uint64_t clear_child_tid;            /* শেষ হলে এখানে 0 লিখে futex wake (pthread_join) */
+    int exit_req;                        /* exit_group/execve: ইউজারে ফেরার আগে শেষ হও */
+    int sig_waiting;                     /* sigsuspend/pause-এ: signal এলে জাগাতে হবে */
     struct process *proc;
     struct thread *next;                 /* সব থ্রেডের তালিকা */
 };
@@ -52,6 +58,11 @@ int  sched_active(void);
 int  sched_can_sleep(void);              /* শিডিউলার চালু ও চলমান থ্রেড idle নয় */
 
 struct thread *sched_current(void);
+void sched_force_iret(void);              /* ধাপ ১৬খ-১: এবারের syscall ফেরা iretq দিয়ে */
+/* ধাপ ১৬খ-২: একটা প্রসেসের সব থ্রেডে fn (IF = 0 অবস্থায়), utid দিয়ে থ্রেড খোঁজা */
+struct process;
+void sched_for_each_proc_thread(struct process *p, void (*fn)(struct thread *t, void *arg), void *arg);
+struct thread *sched_find_utid(int utid);
 struct thread *sched_create_kthread(const char *name, kthread_fn_t fn, void *arg);
 /* ইউজার থ্রেড: frame (সম্পূর্ণ interrupt_frame) কার্নেল স্ট্যাকের মাথায় কপি হয়,
  * প্রথমবার চালু হলে সেখান থেকে iretq করে ইউজার-মোডে যায়। READY অবস্থায় থাকে না —

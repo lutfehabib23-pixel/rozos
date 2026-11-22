@@ -262,13 +262,30 @@ static int64_t sys_ftruncate(struct interrupt_frame *f, uint64_t fd, uint64_t si
     return vfs_ftruncate((int)fd, size);
 }
 
+/* ধাপ ১৬খ-২: একই প্রসেসের থ্রেডরা যেন একসাথে ঠিকানা-স্থান না বদলায় (mmap_next, brk) */
+#define MM_LOCKED(name, fn)                                                                   \
+    static int64_t name(struct interrupt_frame *f, uint64_t a1, uint64_t a2, uint64_t a3,    \
+                        uint64_t a4, uint64_t a5, uint64_t a6)                               \
+    {                                                                                        \
+        struct process *p = proc_current();                                                 \
+        int64_t r;                                                                           \
+        kmutex_lock(&p->mm_lock);                                                            \
+        r = fn(f, a1, a2, a3, a4, a5, a6);                                                   \
+        kmutex_unlock(&p->mm_lock);                                                          \
+        return r;                                                                            \
+    }
+MM_LOCKED(locked_brk, sys_brk)
+MM_LOCKED(locked_mmap, sys_mmap)
+MM_LOCKED(locked_munmap, sys_munmap)
+MM_LOCKED(locked_mprotect, sys_mprotect)
+
 void sys_mm_register(void)
 {
     syscall_register(SYS_rozos_shm_open, sys_shm_open, "shm_open");     /* ধাপ ১৩ */
     syscall_register(SYS_rozos_shm_unlink, sys_shm_unlink, "shm_unlink");
     syscall_register(SYS_ftruncate, sys_ftruncate, "ftruncate");
-    syscall_register(SYS_brk, sys_brk, "brk");
-    syscall_register(SYS_mmap, sys_mmap, "mmap");
-    syscall_register(SYS_munmap, sys_munmap, "munmap");
-    syscall_register(SYS_mprotect, sys_mprotect, "mprotect");
+    syscall_register(SYS_brk, locked_brk, "brk");
+    syscall_register(SYS_mmap, locked_mmap, "mmap");
+    syscall_register(SYS_munmap, locked_munmap, "munmap");
+    syscall_register(SYS_mprotect, locked_mprotect, "mprotect");
 }

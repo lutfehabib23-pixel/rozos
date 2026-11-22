@@ -1,0 +1,15 @@
+# zlib - gzip, gunzip and libz (phase 16b-1)
+  `gzip file`        makes file.gz (the original is removed)
+  `gunzip file.gz`   back to file      `gzip -d` = gunzip
+  `gzip -9 file`     best compression  `gzip -1` fastest
+The files are normal .gz files - Linux and Windows (7-Zip) open them.
+gzip here is zlib's small "minigzip" program.
+== zlib in your C program ==
+zlib 1.3.1 (zlib licence) is installed: zlib.h, zconf.h, /usr/lib/libz.a
+  `tcc -o app app.c -lz`
+  `compress(dst, &dlen, src, slen)`, `uncompress(...)`,
+  `gzopen("f.gz", "wb")` + `gzprintf` / `gzread` ...
+Source and tests: /usr/src/zlib (example.c runs zlib's own checks:
+  `cd /usr/src/zlib; tcc -I. -o /tmp/ex *.c; /tmp/ex`  - leave out
+  minigzip.c from *.c, it has its own main).
+See [[programs]].

@@ -39,6 +39,10 @@ void syscall_dispatch(struct interrupt_frame *f)
     uint64_t nr = f->rax;
 
     calls++;
+    {
+        struct thread *t = sched_current();
+        if (t) t->sys_nr = nr;                   /* ধাপ ১৬খ-১: SA_RESTART-এ আবার চালাতে */
+    }
     if (nr < SYSCALL_MAX && table[nr]) {
         f->rax = (uint64_t)table[nr](f, f->rdi, f->rsi, f->rdx, f->r10, f->r8, f->r9);
     } else {

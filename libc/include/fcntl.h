@@ -17,6 +17,36 @@
 #define O_DIRECTORY 0x10000
 #define O_CLOEXEC   0x80000
 
+/* ধাপ ১৬ক */
+#define O_SYNC      0x101000
+#define O_DSYNC     0x1000
+#define O_NOFOLLOW  0x20000
+#define O_NDELAY    O_NONBLOCK
+#define F_DUPFD     0
+#define F_GETFD     1
+#define F_SETFD     2
+#define F_GETFL     3
+#define F_SETFL     4
+#define F_GETLK     5
+#define F_SETLK     6
+#define F_SETLKW    7
+#define F_DUPFD_CLOEXEC 1030
+#define FD_CLOEXEC  1
+#define F_RDLCK     0
+#define F_WRLCK     1
+#define F_UNLCK     2
+#define POSIX_FADV_NORMAL 0
+struct flock {
+    short l_type;
+    short l_whence;
+    off_t l_start;
+    off_t l_len;
+    pid_t l_pid;
+};
+int fcntl(int fd, int cmd, ...);
+int openat(int dirfd, const char *path, int flags, ...);
+int posix_fadvise(int fd, off_t off, off_t len, int advice);
+
 int open(const char *path, int flags, ...);
 int creat(const char *path, mode_t mode);
 

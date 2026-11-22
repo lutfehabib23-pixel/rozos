@@ -8,6 +8,7 @@
 #   make disk-check হোস্টের e2fsck দিয়ে ডিস্ক ইমেজ যাচাই (কিছু বদলায় না)
 #   make libc       rozlibc (ধাপ ৭): build/libc/libc.a + crt0.o (+ crti/crtn, ধাপ ৮)
 #   ./toolchain/get-tcc.sh   TCC সোর্স আনা (ধাপ ৮) — তারপর make userland-এ /bin/tcc
+#   ./toolchain/get-lua.sh, get-zlib.sh   ধাপ ১৬খ-১: Lua ও zlib সোর্স — /bin/lua, gzip, liblua.a, libz.a
 #   make userland   ইউজার প্রোগ্রাম (ধাপ ৬-৭): build/userland/bin/* (init, rozsh, edit, ls ...)
 #   make disk-update ডিস্কের /bin, /usr/lib, /usr/include-এ শুধু নতুন বিল্ড বসায় (বাকি ডেটা অক্ষত)
 #   make self-iso    ধাপ ১১: rozOS-এর ভেতরে বানানো kernel (ডিস্ক থেকে) দিয়ে rozos-self.iso
@@ -70,13 +71,15 @@ USER_STRIP   := $(CROSS)strip
 CC_INCLUDE   := $(shell $(CC) -print-file-name=include)
 LIBC_BUILD   := $(BUILD)/libc
 LIBC_OBJS    := $(patsubst libc/src/%.c,$(LIBC_BUILD)/%.o,$(wildcard libc/src/*.c)) \
-                $(LIBC_BUILD)/setjmp.o
+                $(LIBC_BUILD)/setjmp.o $(LIBC_BUILD)/sigrestore.o $(LIBC_BUILD)/clone.o
 LIBC_A       := $(LIBC_BUILD)/libc.a
 LIBC_M       := $(LIBC_BUILD)/libm.a      # math আসলে libc-তেই; -lm চাওয়া প্রোগ্রামের জন্য
 LIBC_CRT0    := $(LIBC_BUILD)/crt0.o
-LIBC_CRTS    := $(LIBC_BUILD)/crti.o $(LIBC_BUILD)/crtn.o $(LIBC_M)   # TCC-র লিংকের জন্য
+LIBC_PTHREAD := $(LIBC_BUILD)/libpthread.a # ধাপ ১৬খ-২: pthread-ও libc-তে; -lpthread চাওয়া প্রোগ্রামের জন্য
+LIBC_RT      := $(LIBC_BUILD)/librt.a      # ধাপ ১৬খ-২: -lrt (clock_* , timer) — আসলে libc-তে
+LIBC_CRTS    := $(LIBC_BUILD)/crti.o $(LIBC_BUILD)/crtn.o $(LIBC_M) $(LIBC_PTHREAD) $(LIBC_RT)   # TCC-র লিংকের জন্য
 USER_BUILD   := $(BUILD)/userland
-USER_DIRS    := init shell editor coreutils bin tests net gfx
+USER_DIRS    := init shell editor coreutils bin tests net gfx games
 USER_SRCS    := $(foreach d,$(USER_DIRS),$(wildcard userland/$(d)/*.c))
 USER_PROGS   := $(sort $(notdir $(basename $(USER_SRCS))))
 USER_BINS    := $(addprefix $(USER_BUILD)/bin/,$(USER_PROGS))
@@ -114,7 +117,11 @@ ROZGFX_A     := $(USER_BUILD)/lib/librozgfx.a
 ROZUI_SRCS   := userland/lib/rozui.c
 ROZUI_OBJS   := $(patsubst userland/lib/%.c,$(USER_BUILD)/lib/%.o,$(ROZUI_SRCS))
 ROZUI_A      := $(USER_BUILD)/lib/librozui.a
-USER_LIBS    := $(ROZHTTP_A) $(ROZUI_A) $(ROZGFX_A)
+# ধাপ ১৮ক: librozgame (গেম লুপ, ইনপুট, sprite, সংঘর্ষ) — rozgfx-এর ওপর
+ROZGAME_SRCS := userland/lib/rozgame.c
+ROZGAME_OBJS := $(patsubst userland/lib/%.c,$(USER_BUILD)/lib/%.o,$(ROZGAME_SRCS))
+ROZGAME_A    := $(USER_BUILD)/lib/librozgame.a
+USER_LIBS    := $(ROZHTTP_A) $(ROZUI_A) $(ROZGAME_A) $(ROZGFX_A)
 ifeq ($(HAVE_BEARSSL),1)
   USER_CFLAGS += -DROZOS_HAVE_BEARSSL -I$(BEARSSL_SRC)/inc
   USER_LIBS += $(BEARSSL_A)
@@ -127,8 +134,9 @@ CA_EXTRA     ?=
 CA_PEM       := $(BUILD)/ssl/certs.pem
 # TCC দিয়ে rozOS-এর ভেতরে https প্রোগ্রাম লেখার জন্য: /usr/lib + /usr/include-এ বসে
 # (debug তথ্য ছাড়া কপি — libbearssl.a 4.5 MB থেকে অনেক ছোট হয়)
-DEV_LIBS     := $(BUILD)/devlib/librozhttp.a $(BUILD)/devlib/librozgfx.a $(BUILD)/devlib/librozui.a $(if $(HAVE_BEARSSL),$(BUILD)/devlib/libbearssl.a)
-DEV_HEADERS  := userland/lib/rozhttp.h userland/lib/rozgfx.h userland/lib/rozui.h userland/lib/rozwm_proto.h $(if $(HAVE_BEARSSL),$(wildcard $(BEARSSL_SRC)/inc/*.h))
+DEV_LIBS     := $(BUILD)/devlib/librozhttp.a $(BUILD)/devlib/librozgfx.a $(BUILD)/devlib/librozui.a $(BUILD)/devlib/librozgame.a $(if $(HAVE_BEARSSL),$(BUILD)/devlib/libbearssl.a) \
+                $(if $(wildcard ports/lua/src/lua.h),$(BUILD)/devlib/liblua.a) $(if $(wildcard ports/zlib/src/zlib.h),$(BUILD)/devlib/libz.a)
+DEV_HEADERS  := userland/lib/rozhttp.h userland/lib/rozgfx.h userland/lib/rozui.h userland/lib/rozgame.h userland/lib/rozwm_proto.h $(if $(HAVE_BEARSSL),$(wildcard $(BEARSSL_SRC)/inc/*.h))
 
 # ধাপ ১১: kernel-এর সোর্স rozOS-এর /usr/src/rozos-এ — ভেতরে `make` (pdpmake + tcc) দিয়ে বিল্ড।
 # সেখানকার Makefile হোস্টে toolchain/gen-kernel-mk.sh বানায় (ফাইলের তালিকা এখানের সাথে মেলে)।
@@ -173,6 +181,40 @@ ifeq ($(HAVE_PDPMAKE),1)
   USER_BINS += $(USER_BUILD)/bin/make
   USER_STRIPPED += $(USER_BUILD)/stripped/make
 endif
+# ---------- Lua ও zlib (ধাপ ১৬খ-১) ----------
+# সোর্স: ./toolchain/get-lua.sh → ports/lua/src, ./toolchain/get-zlib.sh → ports/zlib/src।
+# না থাকলে /bin/lua বা libz/gzip বাদ (সতর্কবার্তা সহ)। rozOS-এ /usr/lib/liblua.a, libz.a,
+# হেডার /usr/include-এ, সোর্স /usr/src/lua আর /usr/src/zlib-এ (ভেতরে tcc দিয়ে আবার বানানো যায়)।
+LUA_SRC      := ports/lua/src
+LUA_BUILD    := $(BUILD)/lua
+HAVE_LUA     := $(if $(wildcard $(LUA_SRC)/lua.h),1,)
+LUA_LIB_SRCS := $(filter-out $(LUA_SRC)/lua.c $(LUA_SRC)/luac.c $(LUA_SRC)/onelua.c $(LUA_SRC)/ltests.c,$(wildcard $(LUA_SRC)/*.c))
+LUA_OBJS     := $(patsubst $(LUA_SRC)/%.c,$(LUA_BUILD)/%.o,$(LUA_LIB_SRCS))
+LUA_A        := $(LUA_BUILD)/liblua.a
+LUA_CFLAGS   := $(USER_CFLAGS) -DLUA_USE_POSIX -w
+LUA_HEADERS  := $(addprefix $(LUA_SRC)/,lua.h luaconf.h lualib.h lauxlib.h)
+LUA_SRC_FILES := $(wildcard $(LUA_SRC)/*.c $(LUA_SRC)/*.h)
+ZLIB_SRC     := ports/zlib/src
+ZLIB_BUILD   := $(BUILD)/zlib
+HAVE_ZLIB    := $(if $(wildcard $(ZLIB_SRC)/zlib.h),1,)
+ZLIB_NAMES   := adler32 crc32 deflate infback inffast inflate inftrees trees zutil compress uncompr \
+                gzclose gzlib gzread gzwrite
+ZLIB_OBJS    := $(addprefix $(ZLIB_BUILD)/,$(addsuffix .o,$(ZLIB_NAMES)))
+ZLIB_A       := $(ZLIB_BUILD)/libz.a
+ZLIB_ZCONF   := $(ZLIB_BUILD)/include/zconf.h      # Z_HAVE_UNISTD_H চালু করা কপি
+ZLIB_CFLAGS  := $(USER_CFLAGS) -I$(ZLIB_BUILD)/include -I$(ZLIB_SRC) -w
+ZLIB_SRC_FILES := $(wildcard $(ZLIB_SRC)/*.c $(ZLIB_SRC)/*.h) $(ZLIB_SRC)/LICENSE $(ZLIB_SRC)/test/minigzip.c \
+                $(ZLIB_SRC)/test/example.c
+ifeq ($(HAVE_LUA),1)
+  USER_PROGS += lua
+  USER_BINS += $(USER_BUILD)/bin/lua
+  USER_STRIPPED += $(USER_BUILD)/stripped/lua
+endif
+ifeq ($(HAVE_ZLIB),1)
+  USER_PROGS += gzip gunzip
+  USER_BINS += $(USER_BUILD)/bin/gzip $(USER_BUILD)/bin/gunzip
+  USER_STRIPPED += $(USER_BUILD)/stripped/gzip $(USER_BUILD)/stripped/gunzip
+endif
 # /bin/sh = rozsh-এর কপি (system(), make-এর রেসিপি `sh -c` দিয়ে চলে)
 USER_PROGS += sh
 USER_BINS += $(USER_BUILD)/bin/sh
@@ -195,6 +237,9 @@ MOD_SRCS     := $(wildcard modules/*.c)
 MOD_KOS      := $(patsubst modules/%.c,$(BUILD)/modules/%.ko,$(MOD_SRCS))
 # ধাপ ১৩: গ্রাফিক্স ডেমোর সোর্স /usr/src/gfx-এ (নিজে বদলে tcc দিয়ে চালানোর জন্য)
 GFX_SRC_FILES := $(wildcard userland/gfx/*.c)
+# ধাপ ১৮ক: গেমের সোর্স /usr/src/games-এ, ছবি /usr/share/games-এ
+GAME_SRC_FILES := $(wildcard userland/games/*.c)
+GAME_DATA_FILES := $(wildcard sysroot/usr/share/games/*)
 
 # initrd ও ডিস্কের জন্য sysroot + বিল্ড করা প্রোগ্রাম একসাথে
 ROOT_STAGE   := $(BUILD)/root-stage
@@ -287,6 +332,14 @@ $(LIBC_M): $(LIBC_BUILD)/math.o
 	@rm -f $@
 	@$(USER_AR) rcs $@ $<
 
+$(LIBC_PTHREAD): $(LIBC_BUILD)/pthread.o
+	@rm -f $@
+	@$(USER_AR) rcs $@ $<
+
+$(LIBC_RT): $(LIBC_BUILD)/time.o
+	@rm -f $@
+	@$(USER_AR) rcs $@ $<
+
 # ---------- ইউজার প্রোগ্রাম বিল্ড ----------
 $(USER_BUILD)/obj/%.o: %.c config.mk
 	@mkdir -p $(dir $@)
@@ -317,6 +370,11 @@ $(ROZUI_A): $(ROZUI_OBJS)
 	@echo "  AR      $@"
 	@rm -f $@
 	@$(USER_AR) rcs $@ $(ROZUI_OBJS)
+
+$(ROZGAME_A): $(ROZGAME_OBJS)
+	@echo "  AR      $@"
+	@rm -f $@
+	@$(USER_AR) rcs $@ $(ROZGAME_OBJS)
 
 $(ROZHTTP_A): $(ROZHTTP_OBJS)
 	@echo "  AR      $@"
@@ -351,6 +409,57 @@ $(USER_BUILD)/bin/make: $(PDPMAKE_OBJS) $(LIBC_A) $(LIBC_CRT0)
 $(USER_BUILD)/bin/sh: $(USER_BUILD)/bin/rozsh
 	@cp $< $@
 
+# ---------- Lua ও zlib (ধাপ ১৬খ-১) ----------
+$(LUA_BUILD)/%.o: $(LUA_SRC)/%.c config.mk
+	@mkdir -p $(dir $@)
+	@echo "  CC      $< (lua)"
+	@$(CC) $(LUA_CFLAGS) -c $< -o $@
+
+$(LUA_A): $(LUA_OBJS)
+	@echo "  AR      $@"
+	@rm -f $@
+	@$(USER_AR) rcs $@ $(LUA_OBJS)
+
+$(USER_BUILD)/bin/lua: $(LUA_BUILD)/lua.o $(LUA_A) $(LIBC_A) $(LIBC_CRT0)
+	@mkdir -p $(dir $@)
+	@echo "  LD      $@"
+	@$(CC) $(USER_LDFLAGS) $(LIBC_CRT0) $(LUA_BUILD)/lua.o $(LUA_A) $(LIBC_A) -lgcc -o $@
+
+$(ZLIB_ZCONF): $(ZLIB_SRC)/zconf.h
+	@mkdir -p $(dir $@)
+	@sed 's|^#ifdef HAVE_UNISTD_H    /\* may be set to #if 1 by ./configure \*/|#if 1    /* rozOS: unistd.h আছে */|' $< > $@
+
+$(ZLIB_BUILD)/%.o: $(ZLIB_SRC)/%.c $(ZLIB_ZCONF) config.mk
+	@mkdir -p $(dir $@)
+	@echo "  CC      $< (zlib)"
+	@$(CC) $(ZLIB_CFLAGS) -c $< -o $@
+
+$(ZLIB_BUILD)/minigzip.o: $(ZLIB_SRC)/test/minigzip.c $(ZLIB_ZCONF) config.mk
+	@mkdir -p $(dir $@)
+	@echo "  CC      $< (zlib)"
+	@$(CC) $(ZLIB_CFLAGS) -c $< -o $@
+
+$(ZLIB_A): $(ZLIB_OBJS)
+	@echo "  AR      $@"
+	@rm -f $@
+	@$(USER_AR) rcs $@ $(ZLIB_OBJS)
+
+$(USER_BUILD)/bin/gzip: $(ZLIB_BUILD)/minigzip.o $(ZLIB_A) $(LIBC_A) $(LIBC_CRT0)
+	@mkdir -p $(dir $@)
+	@echo "  LD      $@"
+	@$(CC) $(USER_LDFLAGS) $(LIBC_CRT0) $(ZLIB_BUILD)/minigzip.o $(ZLIB_A) $(LIBC_A) -lgcc -o $@
+
+$(USER_BUILD)/bin/gunzip: $(USER_BUILD)/bin/gzip
+	@cp $< $@
+
+$(BUILD)/devlib/liblua.a: $(LUA_A)
+	@mkdir -p $(dir $@)
+	@strip --strip-debug -o $@ $<
+
+$(BUILD)/devlib/libz.a: $(ZLIB_A)
+	@mkdir -p $(dir $@)
+	@strip --strip-debug -o $@ $<
+
 $(USER_BUILD)/bin/menu: $(USER_BUILD)/bin/rozmenu
 	@cp $< $@
 
@@ -384,9 +493,11 @@ tcc-check:
 	@test -n "$(HAVE_TCC)" || echo "  NOTE    TCC সোর্স নেই — /bin/tcc বাদ। আনতে: ./toolchain/get-tcc.sh"
 	@test -n "$(HAVE_PDPMAKE)" || echo "  NOTE    pdpmake সোর্স নেই — /bin/make বাদ। আনতে: ./toolchain/get-pdpmake.sh"
 	@test -n "$(HAVE_BEARSSL)" || echo "  NOTE    BearSSL সোর্স নেই — https ও rozpkg চলবে না। আনতে: ./toolchain/get-bearssl.sh"
+	@test -n "$(HAVE_LUA)" || echo "  NOTE    Lua সোর্স নেই — /bin/lua বাদ। আনতে: ./toolchain/get-lua.sh"
+	@test -n "$(HAVE_ZLIB)" || echo "  NOTE    zlib সোর্স নেই — libz ও gzip বাদ। আনতে: ./toolchain/get-zlib.sh"
 
 # মধ্যবর্তী .o ফাইল make যেন মুছে না ফেলে (নইলে প্রতিবার আবার বিল্ড)
-.SECONDARY: $(PDPMAKE_OBJS) $(BEARSSL_OBJS) $(ROZHTTP_OBJS) $(ROZGFX_OBJS) $(ROZUI_OBJS) $(LIBC_OBJS) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_LIB1_OBJS) $(TCC_RUNMAIN) $(TCC_BUILD)/tcc.o $(patsubst %,$(USER_BUILD)/obj/%.o,$(USER_PROGS)) $(USER_BINS)
+.SECONDARY: $(LUA_OBJS) $(LUA_BUILD)/lua.o $(ZLIB_OBJS) $(ZLIB_BUILD)/minigzip.o $(PDPMAKE_OBJS) $(BEARSSL_OBJS) $(ROZHTTP_OBJS) $(ROZGFX_OBJS) $(ROZUI_OBJS) $(ROZGAME_OBJS) $(LIBC_OBJS) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_LIB1_OBJS) $(TCC_RUNMAIN) $(TCC_BUILD)/tcc.o $(patsubst %,$(USER_BUILD)/obj/%.o,$(USER_PROGS)) $(USER_BINS)
 
 # sysroot + /bin-এর প্রোগ্রাম + rozlibc (/usr/include, /usr/lib — ধাপ ৮-এর TCC-র জন্য)
 $(BUILD)/modules/%.ko: modules/%.c kernel/include/rozos/module.h
@@ -403,13 +514,16 @@ define stage_root
 	@cp $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(1)/usr/lib/
 	@cp $(LIBC_CRT0) $(1)/usr/lib/crt1.o
 	@mkdir -p $(1)/usr/share/help && cp $(HELP_FILES) $(1)/usr/share/help/
-	@mkdir -p $(1)/etc/ssl $(1)/var/cache/rozpkg $(1)/var/lib/rozpkg/installed && cp $(CA_PEM) $(1)/etc/ssl/certs.pem
+	@mkdir -p $(1)/etc/ssl $(1)/var/cache/rozpkg $(1)/var/lib/rozpkg/installed $(1)/var/log && cp $(CA_PEM) $(1)/etc/ssl/certs.pem
 	@cp $(DEV_LIBS) $(1)/usr/lib/ && cp $(DEV_HEADERS) $(1)/usr/include/
 	@mkdir -p $(1)/usr/src/gfx && cp $(GFX_SRC_FILES) $(1)/usr/src/gfx/
+	@mkdir -p $(1)/usr/src/games $(1)/usr/share/games && cp $(GAME_SRC_FILES) $(1)/usr/src/games/
 	@mkdir -p $(1)/lib/modules $(1)/usr/src/modules && cp $(MOD_KOS) $(1)/lib/modules/ && cp $(MOD_SRCS) $(1)/usr/src/modules/
 	@mkdir -p $(1)/usr/src/rozos && cp -r kernel $(1)/usr/src/rozos/ && cp $(KSRC_MK) $(1)/usr/src/rozos/Makefile && cp $(KSRC_OBJS) $(1)/usr/src/rozos/objs.list && (cat $(BUILD_NUMBER_FILE) 2>/dev/null || echo 0) > $(1)/usr/src/rozos/.build-base
 	$(if $(HAVE_TCC),@mkdir -p $(1)/usr/lib/tcc/include && cp $(TCC_SRC)/include/*.h $(1)/usr/lib/tcc/include/ && cp $(TCC_LIB1) $(TCC_RUNMAIN) $(1)/usr/lib/tcc/)
 	$(if $(HAVE_TCC),@mkdir -p $(1)/usr/src/tcc && cp $(TCC_SRC_FILES) ports/tcc/config.h ports/tcc/build-in-rozos.sh $(1)/usr/src/tcc/ && cp -r $(TCC_SRC)/include $(TCC_SRC)/lib $(1)/usr/src/tcc/)
+	$(if $(HAVE_LUA),@cp $(LUA_HEADERS) $(1)/usr/include/ && mkdir -p $(1)/usr/src/lua && cp $(LUA_SRC_FILES) $(1)/usr/src/lua/)
+	$(if $(HAVE_ZLIB),@cp $(ZLIB_SRC)/zlib.h $(ZLIB_ZCONF) $(1)/usr/include/ && mkdir -p $(1)/usr/src/zlib && cp $(ZLIB_SRC_FILES) $(1)/usr/src/zlib/ && cp $(ZLIB_ZCONF) $(1)/usr/src/zlib/zconf.h)
 endef
 
 $(BUILD)/devlib/librozhttp.a: $(ROZHTTP_A)
@@ -421,6 +535,10 @@ $(BUILD)/devlib/librozgfx.a: $(ROZGFX_A)
 	@strip --strip-debug -o $@ $<
 
 $(BUILD)/devlib/librozui.a: $(ROZUI_A)
+	@mkdir -p $(dir $@)
+	@strip --strip-debug -o $@ $<
+
+$(BUILD)/devlib/librozgame.a: $(ROZGAME_A)
 	@mkdir -p $(dir $@)
 	@strip --strip-debug -o $@ $<
 
@@ -532,7 +650,7 @@ disk-check: $(DISK)
 # ভেতরে লেখা বাকি সব ফাইল থাকে। QEMU চলার সময় চালাবেন না।
 disk-update: $(DISK_BIN_STAMP)
 
-$(DISK_BIN_STAMP): $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(APP_FILES) $(TEMPLATE_FILES) $(FONT_FILES) $(IMAGE_FILES) $(ICON_FILES) $(GFX_SRC_FILES) $(MOD_KOS) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES) $(KERNEL) $(INITRD) | $(DISK)
+$(DISK_BIN_STAMP): $(USER_STRIPPED) $(if $(HAVE_ZLIB),$(ZLIB_ZCONF)) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(APP_FILES) $(TEMPLATE_FILES) $(FONT_FILES) $(IMAGE_FILES) $(ICON_FILES) $(GFX_SRC_FILES) $(GAME_SRC_FILES) $(GAME_DATA_FILES) $(MOD_KOS) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES) $(KERNEL) $(INITRD) | $(DISK)
 	@command -v debugfs >/dev/null || { echo "debugfs নেই — sudo apt install e2fsprogs"; exit 1; }
 	@if [ "$$(./toolchain/disk-offsets.sh $(DISK))" = old ]; then $(MAKE) --no-print-directory disk-migrate; fi
 	@./toolchain/disk-grow.sh $(DISK) $(DISK_MIB)
@@ -546,11 +664,20 @@ $(DISK_BIN_STAMP): $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EX
 	   echo "write sysroot/etc/hosts /etc/hosts"; \
 	   echo "write sysroot/etc/rozos.conf /etc/rozos.conf"; \
 	   echo "write sysroot/etc/rozpkg.conf /etc/rozpkg.conf"; \
+	   echo "write sysroot/etc/passwd /etc/passwd"; echo "write sysroot/etc/group /etc/group"; \
 	   echo "mkdir /etc/ssl"; echo "rm /etc/ssl/certs.pem"; echo "write $(CA_PEM) /etc/ssl/certs.pem"; \
 	   echo "mkdir /var"; echo "mkdir /var/cache"; echo "mkdir /var/cache/rozpkg"; \
-	   echo "mkdir /var/lib"; echo "mkdir /var/lib/rozpkg"; echo "mkdir /var/lib/rozpkg/installed"; \
+	   echo "mkdir /var/lib"; echo "mkdir /var/lib/rozpkg"; echo "mkdir /var/lib/rozpkg/installed"; echo "mkdir /var/log"; \
 	   for f in $(DEV_LIBS); do echo "rm /usr/lib/$$(basename $$f)"; echo "write $$f /usr/lib/$$(basename $$f)"; done; \
 	   for f in $(DEV_HEADERS); do echo "rm /usr/include/$$(basename $$f)"; echo "write $$f /usr/include/$$(basename $$f)"; done; \
+	   $(if $(HAVE_LUA),for f in $(LUA_HEADERS); do echo "rm /usr/include/$$(basename $$f)"; echo "write $$f /usr/include/$$(basename $$f)"; done; \
+	   echo "mkdir /usr/src"; echo "mkdir /usr/src/lua"; \
+	   for f in $(LUA_SRC_FILES); do echo "rm /usr/src/lua/$$(basename $$f)"; echo "write $$f /usr/src/lua/$$(basename $$f)"; done;) \
+	   $(if $(HAVE_ZLIB),echo "rm /usr/include/zlib.h"; echo "write $(ZLIB_SRC)/zlib.h /usr/include/zlib.h"; \
+	   echo "rm /usr/include/zconf.h"; echo "write $(ZLIB_ZCONF) /usr/include/zconf.h"; \
+	   echo "mkdir /usr/src"; echo "mkdir /usr/src/zlib"; \
+	   for f in $(ZLIB_SRC_FILES); do echo "rm /usr/src/zlib/$$(basename $$f)"; echo "write $$f /usr/src/zlib/$$(basename $$f)"; done; \
+	   echo "rm /usr/src/zlib/zconf.h"; echo "write $(ZLIB_ZCONF) /usr/src/zlib/zconf.h";) \
 	   echo "mkdir /usr/local"; echo "mkdir /usr/local/bin"; echo "mkdir /home/bin"; \
 	   echo "mkdir /usr/share"; echo "mkdir /usr/share/apps"; \
 	   for f in $(APP_FILES); do echo "rm /usr/share/apps/$$(basename $$f)"; echo "write $$f /usr/share/apps/$$(basename $$f)"; done; \
@@ -567,6 +694,9 @@ $(DISK_BIN_STAMP): $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EX
 	   for f in $(ICON_FILES); do echo "rm /usr/share/icons/$$(basename $$f)"; echo "write $$f /usr/share/icons/$$(basename $$f)"; done; \
 	   echo "mkdir /usr/src"; echo "mkdir /usr/src/gfx"; \
 	   for f in $(GFX_SRC_FILES); do echo "rm /usr/src/gfx/$$(basename $$f)"; echo "write $$f /usr/src/gfx/$$(basename $$f)"; done; \
+	   echo "mkdir /usr/src/games"; echo "mkdir /usr/share/games"; \
+	   for f in $(GAME_SRC_FILES); do echo "rm /usr/src/games/$$(basename $$f)"; echo "write $$f /usr/src/games/$$(basename $$f)"; done; \
+	   for f in $(GAME_DATA_FILES); do echo "rm /usr/share/games/$$(basename $$f)"; echo "write $$f /usr/share/games/$$(basename $$f)"; done; \
 	   echo "mkdir /usr/src"; echo "mkdir /usr/src/rozos"; \
 	   for d in $(KSRC_DIRS); do echo "mkdir /usr/src/rozos/$$d"; done; \
 	   for f in $(KSRC_FILES); do echo "rm /usr/src/rozos/$$f"; echo "write $$f /usr/src/rozos/$$f"; done; \

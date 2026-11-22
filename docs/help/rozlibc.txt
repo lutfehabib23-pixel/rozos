@@ -31,6 +31,9 @@ Headers are in /usr/include, the library in /usr/lib/libc.a.
                file (rozOS has pipes since phase 13); `sigaction()` records
                the handler like signal()
   `rozos.h`    rozOS extras: rozos_now_ms(), rozos_kmon(), raw syscalls
+  phase 16a:   much more of POSIX and C99 - see [[posix]] for the list
+               (exact printf, wchar/UTF-8, locale, iconv, regex,
+               getopt_long, time zones, full libm, select, readv ...)
 
 == Inside ==
 malloc grows the heap with brk and uses mmap for blocks >= 256 KiB.
@@ -41,3 +44,4 @@ See [[syscalls]] for how a call such as write() reaches the kernel.
 == Later ==
 musl can replace rozlibc one day: rozOS uses the Linux system call
 numbers on purpose, so musl's syscall layer would work almost as is.
+Phase 16b-1 added real signal handlers ([[signals]]), 16b-2 threads ([[threads]]).

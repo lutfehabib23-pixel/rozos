@@ -33,4 +33,21 @@ char  *strerror(int err);
 int    strcasecmp(const char *a, const char *b);
 int    strncasecmp(const char *a, const char *b, size_t n);
 
+/* ধাপ ১৬ক */
+void  *memrchr(const void *s, int c, size_t n);
+void  *memmem(const void *hay, size_t hn, const void *needle, size_t nn);
+void  *mempcpy(void *dst, const void *src, size_t n);
+void  *memccpy(void *dst, const void *src, int c, size_t n);
+char  *strchrnul(const char *s, int c);
+char  *strcasestr(const char *hay, const char *needle);
+char  *stpncpy(char *dst, const char *src, size_t n);
+char  *strsep(char **sp, const char *delim);
+size_t strlcpy(char *dst, const char *src, size_t size);
+size_t strlcat(char *dst, const char *src, size_t size);
+int    strerror_r(int err, char *buf, size_t len);
+char  *strsignal(int sig);
+size_t strxfrm(char *dst, const char *src, size_t n);
+int    strverscmp(const char *a, const char *b);
+void   explicit_bzero(void *s, size_t n);
+
 #endif

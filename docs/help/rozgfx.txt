@@ -40,6 +40,10 @@ the whole screen - the same program works both ways.
   `gfx_cursor_draw(s, x, y)` draws a mouse arrow before gfx_present
   (nothing in a window - the desktop draws the arrow).
 Run `gfxevents` to see what your keys and mouse send.
+Games (phase 18a): `gfx_raw_keys(1)` adds GFX_EV_KEY_DOWN / GFX_EV_KEY_UP
+with the real press and release (ev.key = the plain key: 'a', not 'A';
+ev.repeat = 1 for auto-repeat; also GFX_KEY_LSHIFT, _LCTRL, _LALT ...).
+GFX_EV_KEY keeps coming as before. The easy way: [[rozgame]].
 
 Examples with full source in /usr/src/gfx: [[gfxdemo]], [[paint]],
 [[imgview]], [[gcalc]]. More: [[graphics]], [[framebuffer]], [[fonts]].

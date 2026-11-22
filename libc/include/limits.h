@@ -24,5 +24,31 @@
 #define PATH_MAX   1024
 #define NAME_MAX   255
 #define PIPE_BUF   4096
+/* ধাপ ১৬ক */
+#define LONG_BIT   64
+#define WORD_BIT   32
+#define MB_LEN_MAX 4
+#define IOV_MAX    1024
+#define HOST_NAME_MAX 64
+#define LOGIN_NAME_MAX 256
+#define TTY_NAME_MAX 32
+#define LINE_MAX   2048
+#define ARG_MAX    131072
+#define OPEN_MAX   256
+#define NGROUPS_MAX 32
+#define CHILD_MAX  1024
+#define LINK_MAX   127
+#define SYMLOOP_MAX 40
+#define NZERO      20
+#define PAGESIZE   4096
+#define PAGE_SIZE  4096
+#define NL_ARGMAX  9
+#define NL_TEXTMAX 2048
+#define RE_DUP_MAX 255
+#define _POSIX_PATH_MAX 256
+#define _POSIX_NAME_MAX 14
+#define _POSIX2_RE_DUP_MAX 255
+#define CHARCLASS_NAME_MAX 14
+#define FILESIZEBITS 64
 
 #endif

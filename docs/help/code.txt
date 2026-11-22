@@ -27,7 +27,7 @@ Bengali and other UTF-8 letters are kept exactly, but shown as a dot
 (the screen font has no Bengali yet).
 
 == Compile and run ==
-Compile saves, then runs `tcc -o NAME NAME.c -lrozui -lrozgfx` in the
+Compile saves, then runs `tcc -o NAME NAME.c -lrozui -lrozgame -lrozgfx -lm` in the
 file's folder; the messages appear in the Output panel - click an
 error line to jump to it. Run (Ctrl+R / F5) compiles, then starts
 ./NAME in a new terminal window ([[rozterm]] -w: it waits for a key at

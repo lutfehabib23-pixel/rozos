@@ -73,6 +73,36 @@ char *strerror(int err)
     case EHOSTUNREACH:  return "host unreachable";
     case EALREADY:      return "operation already in progress";
     case EINPROGRESS:   return "operation in progress";
+    /* ধাপ ১৬ক */
+    case ENOTBLK: return "block device required";
+    case ETXTBSY: return "text file busy";
+    case EMLINK: return "too many links";
+    case EDEADLK: return "resource deadlock would occur";
+    case ENOLCK: return "no locks available";
+    case ELOOP: return "too many symbolic links";
+    case ENOMSG: return "no message of desired type";
+    case EIDRM: return "identifier removed";
+    case ENOSTR: return "device not a stream";
+    case ENODATA: return "no data available";
+    case ETIME: return "timer expired";
+    case ENOSR: return "out of streams resources";
+    case ENOLINK: return "link has been severed";
+    case EPROTO: return "protocol error";
+    case EBADMSG: return "bad message";
+    case EOVERFLOW: return "value too large for data type";
+    case EILSEQ: return "invalid or incomplete multibyte character";
+    case EUSERS: return "too many users";
+    case ESOCKTNOSUPPORT: return "socket type not supported";
+    case EPFNOSUPPORT: return "protocol family not supported";
+    case ENETRESET: return "connection reset by network";
+    case ESHUTDOWN: return "cannot send after shutdown";
+    case ETOOMANYREFS: return "too many references";
+    case EHOSTDOWN: return "host is down";
+    case ESTALE: return "stale file handle";
+    case EDQUOT: return "disk quota exceeded";
+    case ECANCELED: return "operation canceled";
+    case EOWNERDEAD: return "owner died";
+    case ENOTRECOVERABLE: return "state not recoverable";
     }
     snprintf(unknown, sizeof(unknown), "error %d", err);
     return unknown;
@@ -134,106 +164,7 @@ void rewinddir(DIR *d)
 
 int dirfd(DIR *d) { return d->fd; }
 
-/* ---------- সময় (UTC; rozOS-এ সময় অঞ্চল নেই) ---------- */
-
-static int is_leap(long y) { return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0; }
-static const int mdays[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-
-struct tm *gmtime_r(const time_t *t, struct tm *tm)
-{
-    long days = *t / 86400, rem = *t % 86400, y = 1970;
-    int m;
-    if (rem < 0) { rem += 86400; days--; }
-    tm->tm_hour = (int)(rem / 3600);
-    tm->tm_min = (int)(rem % 3600 / 60);
-    tm->tm_sec = (int)(rem % 60);
-    tm->tm_wday = (int)((days + 4) % 7);
-    if (tm->tm_wday < 0) tm->tm_wday += 7;
-    for (;;) {
-        long n = is_leap(y) ? 366 : 365;
-        if (days >= n) { days -= n; y++; }
-        else if (days < 0) { y--; days += is_leap(y) ? 366 : 365; }
-        else break;
-    }
-    tm->tm_year = (int)(y - 1900);
-    tm->tm_yday = (int)days;
-    for (m = 0; m < 12; m++) {
-        int n = mdays[m] + (m == 1 && is_leap(y));
-        if (days < n) break;
-        days -= n;
-    }
-    tm->tm_mon = m;
-    tm->tm_mday = (int)days + 1;
-    tm->tm_isdst = 0;
-    return tm;
-}
-
-struct tm *gmtime(const time_t *t)
-{
-    static struct tm tm;
-    return gmtime_r(t, &tm);
-}
-
-struct tm *localtime(const time_t *t) { return gmtime(t); }
-
-time_t mktime(struct tm *tm)
-{
-    long y, days = 0;
-    int m;
-    for (y = 1970; y < 1900 + tm->tm_year; y++) days += is_leap(y) ? 366 : 365;
-    for (m = 0; m < tm->tm_mon; m++) days += mdays[m] + (m == 1 && is_leap(1900 + tm->tm_year));
-    days += tm->tm_mday - 1;
-    return (time_t)days * 86400 + tm->tm_hour * 3600 + tm->tm_min * 60 + tm->tm_sec;
-}
-
-double difftime(time_t a, time_t b) { return (double)(a - b); }
-
-static const char *const wday_name[7] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
-static const char *const mon_name[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                                          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-
-/* %Y %m %d %H %M %S %a %b %j %y %e %F %T %% */
-size_t strftime(char *buf, size_t size, const char *fmt, const struct tm *tm)
-{
-    size_t n = 0;
-    char tmp[32];
-    for (; *fmt && n + 1 < size; fmt++) {
-        const char *add = tmp;
-        if (*fmt != '%') { buf[n++] = *fmt; continue; }
-        fmt++;
-        switch (*fmt) {
-        case 'Y': snprintf(tmp, sizeof(tmp), "%d", tm->tm_year + 1900); break;
-        case 'y': snprintf(tmp, sizeof(tmp), "%02d", tm->tm_year % 100); break;
-        case 'm': snprintf(tmp, sizeof(tmp), "%02d", tm->tm_mon + 1); break;
-        case 'd': snprintf(tmp, sizeof(tmp), "%02d", tm->tm_mday); break;
-        case 'e': snprintf(tmp, sizeof(tmp), "%2d", tm->tm_mday); break;
-        case 'H': snprintf(tmp, sizeof(tmp), "%02d", tm->tm_hour); break;
-        case 'M': snprintf(tmp, sizeof(tmp), "%02d", tm->tm_min); break;
-        case 'S': snprintf(tmp, sizeof(tmp), "%02d", tm->tm_sec); break;
-        case 'j': snprintf(tmp, sizeof(tmp), "%03d", tm->tm_yday + 1); break;
-        case 'a': add = wday_name[tm->tm_wday % 7]; break;
-        case 'b': add = mon_name[tm->tm_mon % 12]; break;
-        case 'F': snprintf(tmp, sizeof(tmp), "%d-%02d-%02d", tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday); break;
-        case 'T': snprintf(tmp, sizeof(tmp), "%02d:%02d:%02d", tm->tm_hour, tm->tm_min, tm->tm_sec); break;
-        case '%': add = "%"; break;
-        default: tmp[0] = '%'; tmp[1] = *fmt; tmp[2] = '\0'; break;
-        }
-        while (*add && n + 1 < size) buf[n++] = *add++;
-        if (!*fmt) break;
-    }
-    if (size) buf[n] = '\0';
-    return n;
-}
-
-char *ctime(const time_t *t)
-{
-    static char buf[32];
-    struct tm tm;
-    gmtime_r(t, &tm);
-    snprintf(buf, sizeof(buf), "%s %s %2d %02d:%02d:%02d %d\n", wday_name[tm.tm_wday],
-             mon_name[tm.tm_mon], tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_year + 1900);
-    return buf;
-}
+/* ---------- সময়ের ফাংশন ধাপ ১৬ক থেকে libc/src/time.c-তে (TZ সহ) ---------- */
 
 /* ---------- realpath: পরম পাথ, "." ".." বাদ দিয়ে (symlink নেই) ---------- */
 

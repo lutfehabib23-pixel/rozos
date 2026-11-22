@@ -20,6 +20,7 @@
 #include <rozos/vfs.h>
 #include <rozos/heap.h>
 #include <rozos/sched.h>
+#include <rozos/proc.h>
 #include <rozos/errno.h>
 #include <rozos/string.h>
 #include <arch/x86_64/cpu.h>
@@ -302,8 +303,13 @@ int pty_ioctl(struct vnode *vn, uint64_t req, uint64_t arg,
         uint16_t ws[4];
         if (copy_in(ws, (const void *)(uintptr_t)arg, sizeof(ws)) < 0) return -EFAULT;
         if (ws[0] == 0 || ws[1] == 0 || ws[0] > 500 || ws[1] > 500) return -EINVAL;
-        p->tc.rows = ws[0];
-        p->tc.cols = ws[1];
+        {
+            int changed = p->tc.rows != ws[0] || p->tc.cols != ws[1];
+            p->tc.rows = ws[0];
+            p->tc.cols = ws[1];
+            /* ধাপ ১৬খ-১: মাপ বদলালে সামনের কাজকে SIGWINCH (ডিফল্টে উপেক্ষা) */
+            if (changed && p->tc.fg_pgid > 0) proc_kill_group(p->tc.fg_pgid, SIGWINCH);
+        }
         return 0;
     }
     r = ttyctl_ioctl(&p->tc, req, arg, copy_in, copy_out);

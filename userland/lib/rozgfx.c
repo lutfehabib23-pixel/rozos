@@ -26,6 +26,7 @@ static gfx_surface *back;
 static int same_format;            /* পর্দা XRGB8888 (red 16, green 8, blue 0) — সরাসরি কপি */
 
 /* ---------- ধাপ ১৪: rozwm-এর উইন্ডো ---------- */
+static int raw_on, keyev_fd = -1;   /* ধাপ ১৮ক: কাঁচা কী-ঘটনা (/dev/keyev) */
 static int wm_fd = -1;             /* >= 0 মানে উইন্ডো-মোড */
 static uint32_t wm_win;
 static uint32_t *wm_px;
@@ -192,6 +193,10 @@ void gfx_quit(void)
         close(wm_fd);
         wm_fd = -1;
         return;
+    }
+    if (keyev_fd >= 0) {                              /* ধাপ ১৮ক */
+        close(keyev_fd);
+        keyev_fd = -1;
     }
     if (fb_mem) munmap(fb_mem, (size_t)fbi.size);
     fb_mem = NULL;
@@ -953,7 +958,7 @@ void gfx_input_keyboard_only(int on) { kbd_only = on; }
 static int mouse_x, mouse_y, mouse_buttons;
 static unsigned char kbuf[64];
 static int klen;
-static gfx_event pending[16];
+static gfx_event pending[64];       /* ধাপ ১৮ক: 16 → 64 (কাঁচা কী-ঘটনাও আসে) */
 static int npending;
 
 static void open_inputs(void)
@@ -964,6 +969,38 @@ static void open_inputs(void)
         else kbd_only = 2;                            /* সত্যিই /dev/kbd খোলা */
     }
     if (mouse_fd < 0) mouse_fd = open("/dev/mouse", O_RDONLY);
+}
+
+int gfx_raw_keys(int on)
+{
+    raw_on = on ? 1 : 0;
+    if (!raw_on) return 0;
+    if (wm_fd >= 0) return 1;                         /* rozwm WM_RAWKEY পাঠায় */
+    if (keyev_fd < 0) keyev_fd = open("/dev/keyev", O_RDONLY);
+    return keyev_fd >= 0;
+}
+
+static void push(const gfx_event *e);
+
+/* কার্নেলের int32 (বিট 0-15 কোড, 16-18 Shift/Ctrl/Alt, 29 repeat, 30 ছাড়া) → ঘটনা */
+static void raw_event(int32_t v)
+{
+    gfx_event e;
+    int m = (v >> 16) & 7;
+    memset(&e, 0, sizeof(e));
+    e.type = (v & 0x40000000) ? GFX_EV_KEY_UP : GFX_EV_KEY_DOWN;
+    e.key = v & 0xFFFF;
+    e.repeat = (v & 0x20000000) ? 1 : 0;
+    e.mods = ((m & 1) ? GFX_MOD_SHIFT : 0) | ((m & 2) ? GFX_MOD_CTRL : 0) | ((m & 4) ? GFX_MOD_ALT : 0);
+    e.x = mouse_x; e.y = mouse_y; e.buttons = mouse_buttons;
+    if (e.key) push(&e);
+}
+
+static void read_keyev(void)
+{
+    int32_t evs[32];
+    ssize_t r = read(keyev_fd, evs, sizeof(evs)), i;
+    for (i = 0; r > 0 && i < r / (ssize_t)sizeof(evs[0]); i++) raw_event(evs[i]);
 }
 
 static void push(const gfx_event *e)
@@ -1141,6 +1178,9 @@ static void wm_to_event(const struct wm_msg *m)
         e.type = GFX_EV_FOCUS;
         e.key = m->a;
         break;
+    case WM_RAWKEY:                                   /* ধাপ ১৮ক */
+        if (raw_on) raw_event(m->a);
+        return;
     default:
         return;
     }
@@ -1199,6 +1239,7 @@ int gfx_event_fds(int *fds, int max)
     open_inputs();
     if (max > n) fds[n++] = con_fd;
     if (mouse_fd >= 0 && max > n) fds[n++] = mouse_fd;
+    if (keyev_fd >= 0 && max > n) fds[n++] = keyev_fd;   /* ধাপ ১৮ক */
     return n;
 }
 
@@ -1208,8 +1249,8 @@ int gfx_poll_event(gfx_event *ev, int timeout_ms)
     if (wm_fd >= 0) return wm_poll_event(ev, timeout_ms);
     open_inputs();
     for (;;) {
-        struct pollfd p[2];
-        int n, wait;
+        struct pollfd p[3];
+        int n, wait, np, kp = -1;
         if (npending > 0) {
             *ev = pending[0];
             npending--;
@@ -1218,6 +1259,11 @@ int gfx_poll_event(gfx_event *ev, int timeout_ms)
         }
         p[0].fd = con_fd; p[0].events = POLLIN; p[0].revents = 0;
         p[1].fd = mouse_fd; p[1].events = POLLIN; p[1].revents = 0;
+        np = mouse_fd >= 0 ? 2 : 1;
+        if (raw_on && keyev_fd >= 0) {                /* ধাপ ১৮ক */
+            kp = np++;
+            p[kp].fd = keyev_fd; p[kp].events = POLLIN; p[kp].revents = 0;
+        }
         if (timeout_ms < 0) wait = -1;
         else if (timeout_ms == 0) wait = 0;
         else {
@@ -1226,7 +1272,7 @@ int gfx_poll_event(gfx_event *ev, int timeout_ms)
         }
         /* অর্ধেক-আসা ESC sequence: বেশিক্ষণ অপেক্ষা নয় */
         if (klen > 0 && (wait < 0 || wait > 30)) wait = 30;
-        n = poll(p, mouse_fd >= 0 ? 2 : 1, wait);
+        n = poll(p, np, wait);
         if (n > 0 && (p[0].revents & POLLIN) && kbd_only == 2) {
             int32_t keys[32];
             ssize_t r = read(con_fd, keys, sizeof(keys)), i;
@@ -1244,6 +1290,7 @@ int gfx_poll_event(gfx_event *ev, int timeout_ms)
             parse_keys(1);                 /* সময় শেষ — একা ESC = Esc কী */
         }
         if (n > 0 && mouse_fd >= 0 && (p[1].revents & POLLIN)) read_mouse();
+        if (n > 0 && kp >= 0 && (p[kp].revents & POLLIN)) read_keyev();
         if (npending > 0) continue;
         if (timeout_ms == 0) return 0;
         if (timeout_ms > 0 && gfx_ticks_ms() >= end) return 0;

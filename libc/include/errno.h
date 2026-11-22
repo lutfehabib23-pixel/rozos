@@ -2,7 +2,10 @@
 #ifndef _ERRNO_H
 #define _ERRNO_H
 
-extern int errno;
+/* ধাপ ১৬খ-২: প্রতিটা থ্রেডের নিজের errno (TLS-এ); পুরনো প্রোগ্রামের জন্য `errno` নামের
+ * সাধারণ চলকও থাকে (মূল থ্রেডের মান) */
+extern int *__errno_location(void);
+#define errno (*__errno_location())
 
 #define EPERM         1
 #define ENOENT        2
@@ -61,5 +64,38 @@ extern int errno;
 #define EHOSTUNREACH  113
 #define EALREADY      114
 #define EINPROGRESS   115
+/* ধাপ ১৬ক: বাকি সাধারণ Linux মান */
+#define ENOTBLK         15
+#define ETXTBSY         26
+#define EMLINK          31
+#define EDEADLK         35
+#define ENOLCK          37
+#define ELOOP           40
+#define ENOMSG          42
+#define EIDRM           43
+#define ENOSTR          60
+#define ENODATA         61
+#define ETIME           62
+#define ENOSR           63
+#define ENOLINK         67
+#define EPROTO          71
+#define EBADMSG         74
+#define EOVERFLOW       75
+#define EILSEQ          84
+#define EUSERS          87
+#define ESOCKTNOSUPPORT 94
+#define EPFNOSUPPORT    96
+#define ENETRESET       102
+#define ESHUTDOWN       108
+#define ETOOMANYREFS    109
+#define EHOSTDOWN       112
+#define ESTALE          116
+#define EDQUOT          122
+#define ECANCELED       125
+#define EOWNERDEAD      130
+#define ENOTRECOVERABLE 131
+#define EWOULDBLOCK     EAGAIN
+#define ENOTSUP         EOPNOTSUPP
+#define EDEADLOCK       EDEADLK
 
 #endif

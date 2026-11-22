@@ -1,0 +1,96 @@
+# librozgame - make games in C (phase 18a)
+  `#include <rozgame.h>`    compile: `tcc game.c -lrozgame -lrozgfx -lm -o game`
+Built on [[rozgfx]]. Full examples: /usr/src/games ([[snake]], [[breakout]]).
+
+== The smallest game ==
+  static void update(void *ud, float dt) {        /* 60 times a second */
+      if (game_key_down(GFX_KEY_RIGHT)) x += 200 * dt;
+  }
+  static void draw(void *ud, gfx_surface *s) {
+      game_clear(GFX_BLACK);  game_fill_circle((int)x, 240, 20, GFX_RED);
+  }
+  int main(void) {
+      game_config c = game_default_config("My game");
+      game_app a = { NULL, update, draw, NULL, NULL };   /* init update draw quit ud */
+      return game_run(&c, &a);
+  }
+update() always gets the same dt (1/60 s), so the game runs at the same
+speed on a slow and a fast machine. Or write your own loop:
+  `game_open(&c); while (game_begin()) { ...draw...; game_end(); } game_close();`
+
+== The screen ==
+The game draws on a "logical" screen, 640x480 by default (c.width,
+c.height). It is shown as big as the window allows, keeping its shape
+(black bars at the sides). If the window is exactly that size, nothing
+is copied - the fastest case.
+  c.scale = GAME_SCALE_FIT (default), GAME_SCALE_INTEGER (2x, 3x - sharp
+            pixel art), GAME_SCALE_STRETCH, GAME_SCALE_NATIVE (logical =
+            the real window size: full resolution for big pictures)
+  c.smooth = 1   smooth (bilinear) enlarging - nicer photos, a bit slower
+  c.max_fps (60, -1 = no limit)   c.show_fps = 1   c.window_w/_h
+  game_screen() game_width() game_height() game_dt() game_time() game_fps()
+  game_quit()  game_focused()  game_screenshot("x.bmp")
+
+== Keys and mouse ==
+  game_key_down(k)      held now (real press/release from /dev/keyev)
+  game_key_pressed(k)   pressed this frame (once - not the auto-repeat)
+  game_key_released(k)  game_key_typed(k) (with repeat, for menus)
+  game_any_key_pressed()   game_text_input(buf, size)
+  keys: 'a' (lower case), '1', ' ', GFX_KEY_ENTER, GFX_KEY_ESC,
+  GFX_KEY_UP/DOWN/LEFT/RIGHT, GFX_KEY_F1.., GFX_KEY_LSHIFT, _LCTRL, _LALT
+  game_mouse_x() game_mouse_y() (logical), game_mouse_down/pressed/
+  released(GFX_BUTTON_LEFT), game_mouse_wheel(), game_mouse_inside()
+When the window loses focus every key counts as released.
+
+== Pictures (PNG, JPG, BMP, GIF, TGA, PPM) ==
+  game_image *img = game_image_load(game_data_path("hero.png"));
+  game_draw_image(img, x, y)        game_draw_image_alpha(img, x, y, 128)
+  game_draw_image_ex(img, sx, sy, sw, sh, x, y, GAME_FLIP_X)   a part, mirrored
+  game_draw_image_scaled(img, sx, sy, sw, sh, x, y, w, h, flags)
+  game_draw_image_rotated(img, cx, cy, angle_radians, scale)
+  game_draw_background(img)         fills the screen
+  game_image_resize(img, w, h, 1)   a new, high-quality copy (once, at start)
+  game_image_new / _sub / _colorkey / _update / _free
+Fast because each row is checked once: see-through rows are skipped,
+solid rows are copied with memcpy, only mixed rows are blended.
+Tip: shrink a big photo to the size you draw it once with
+game_image_resize(..., 1), then draw the copy every frame.
+game_data_path("x.png") looks in the current folder, then /usr/share/games.
+
+== Sprite sheets and animation ==
+  game_sheet *sh = game_sheet_load("walk.png", 32, 48);   frames 32x48
+  game_draw_frame(sh, frame, x, y, flags)   game_draw_frame_scaled(...)
+  game_anim a;  game_anim_set(&a, first, count, fps, loop);
+  game_anim_update(&a, dt);  game_draw_frame(sh, game_anim_frame(&a), x, y, 0);
+
+== Drawing and text ==
+  game_clear  game_fill_rect (alpha blends)  game_draw_rect  game_fill_circle
+  game_line  game_gradient  - or any gfx_* on game_screen()
+  game_text(x, y, "hi", c)  game_text_center(y, s, c)  game_text_shadow
+  game_printf(x, y, c, "Score %d", n)
+  game_ttf(NULL, 32, x, y, "Big", c)   game_ttf_center(NULL, size, y, s, c)
+  (NULL = DejaVuSans; game_font_load("x.ttf") for another)
+  menu: game_menu m = { items, count };  in update: game_menu_update(&m)
+        (returns the chosen index or -1), in draw: game_menu_draw(&m, y)
+
+== Collisions ==
+  game_rect r = game_make_rect(x, y, w, h);
+  game_rect_overlap(a, b)  game_rect_contains(r, x, y)  game_rect_intersect
+  game_circle_overlap(...)  game_circle_rect(cx, cy, r, rect)
+  game_rect_hit_side(a, b)   which side of a hit b (GAME_SIDE_LEFT...)
+  game_rect_push_out(&a, b)  move a out of b
+
+== Helpers ==
+  game_rand_int(lo, hi)  game_rand_float(lo, hi)  game_rand_seed(n)
+  game_clamp  game_lerp  game_approach  game_dist  game_every(&acc, 0.5, dt)
+  game_color_lerp(a, b, t)  game_hsv(h, s, v)
+  game_score_load("name") / game_score_save("name", score)  best score in
+  $HOME/.rozgame/name.score (save returns 1 for a new record)
+
+== Testing ==
+  export ROZGAME_FRAMES=300   stop after 300 frames and print the fps
+  export ROZGAME_STATS=1      print the fps when the game ends
+  export ROZGAME_SHOT=/home/s.bmp  (and ROZGAME_SHOT_AT=200) screenshot
+
+Coming in phase 18b: tile maps, camera, particles, Tetris, a platformer
+and Lua games. Sound comes with the sound driver. See [[games]].

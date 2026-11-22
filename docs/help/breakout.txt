@@ -1,0 +1,16 @@
+# breakout - the brick game (phase 18a)
+  `breakout`  `breakout -f` (fps)  `breakout -p` (no menu)  `-s` (smooth)
+
+Move the paddle under the ball and break every brick. The purple
+(and in later levels the top) bricks take two hits. Where the ball
+hits the paddle sets its angle; a moving paddle adds a little spin.
+Each level is faster and has a different pattern; you have 3 balls.
+
+  mouse, or arrows / A D   move the paddle
+  Space or click           launch the ball
+  P   pause       Esc   back to the menu
+
+The background is a 1280x960 picture, smoothly shrunk once to the
+screen size when the game starts (game_image_resize in [[rozgame]]).
+Best score: /home/.rozgame/breakout.score.
+Source: /usr/src/games/breakout.c - see [[games]].

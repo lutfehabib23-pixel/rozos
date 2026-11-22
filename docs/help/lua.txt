@@ -1,0 +1,16 @@
+# lua - the Lua 5.4 language (phase 16b-1)
+  `lua`                 interactive: type Lua, Ctrl+D (or os.exit()) to leave
+  `lua script.lua`      run a script        `lua -e "print(2^10)"`
+Lua 5.4.7 (www.lua.org, MIT licence - the text is at the end of lua.h),
+built with rozlibc: io, os (date, time, execute, getenv), string, math,
+utf8, coroutine and table work. Example:
+  `for i = 1, 3 do print(i, os.date("%H:%M:%S")) end`
+== Lua inside your C program ==
+The library and headers are installed: lua.h, lualib.h, lauxlib.h,
+/usr/lib/liblua.a.
+  `tcc -o app app.c -llua -lm`
+  `lua_State *L = luaL_newstate(); luaL_openlibs(L);`
+  `luaL_dostring(L, "print('hello from Lua')");`
+The full source is in /usr/src/lua - rebuild it inside rozOS:
+  `cd /usr/src/lua; tcc -DLUA_USE_POSIX -o /tmp/lua onelua.c -lm`
+See [[programs]], [[c-programming]].

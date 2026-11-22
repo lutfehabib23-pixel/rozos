@@ -16,6 +16,8 @@
  *                                         WM_CLOSE    [X] চাপা হয়েছে (৩ সেকেন্ডে না গেলে kill)
  *                                         WM_RESIZE   a=w b=h (বাফার একই; শুধু মাপ বদলায়)
  *                                         WM_FOCUS    a = 1 সামনে / 0 পেছনে
+ *                                         WM_RAWKEY   ধাপ ১৮ক: a = কাঁচা কী-ঘটনা (/dev/keyev-এর
+ *                                                     int32: চাপা/ছাড়া), সামনের উইন্ডোতে
  *
  * পিক্সেল-বাফার: rozwm shm_open দিয়ে বানায়, পর্দার মাপের (stride = পর্দার চওড়া), তাই
  * মাপ বদলালেও নতুন বাফার লাগে না। অ্যাপ আঁকে, তারপর WM_DAMAGE পাঠায়; rozwm নিজের
@@ -31,7 +33,8 @@ enum {
     WM_HELLO = 1, WM_CREATE, WM_DAMAGE, WM_TITLE, WM_DESTROY,
     WM_QUIT,                       /* a = 't' টেক্সট মোড, 'r' restart, 'p' poweroff (textmode প্রোগ্রাম) */
     WM_KEEP_OPEN,                  /* ধাপ ১৪খ: WM_CLOSE-এর পর জোর করে বন্ধ করা বাতিল */
-    WM_CREATED = 100, WM_KEY, WM_MOUSE, WM_CLOSE, WM_RESIZE, WM_FOCUS
+    WM_CREATED = 100, WM_KEY, WM_MOUSE, WM_CLOSE, WM_RESIZE, WM_FOCUS,
+    WM_RAWKEY                      /* ধাপ ১৮ক */
 };
 
 /* WM_CREATE flags */

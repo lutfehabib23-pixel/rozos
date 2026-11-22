@@ -14,3 +14,5 @@ ports/pdpmake/src/
 .build-number
 *.old-ext2
 *.before-grow
+ports/lua/src/
+ports/zlib/src/

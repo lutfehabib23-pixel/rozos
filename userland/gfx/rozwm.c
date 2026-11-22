@@ -1117,6 +1117,7 @@ int main(int argc, char **argv)
         perror("rozwm: /dev/fb0");
         return 1;
     }
+    gfx_raw_keys(1);          /* ধাপ ১৮ক: কাঁচা কী (চাপা/ছাড়া) → সামনের উইন্ডোতে WM_RAWKEY */
     S = gfx_screen();
     W = gfx_width();
     H = gfx_height();
@@ -1171,6 +1172,13 @@ int main(int argc, char **argv)
                 if (menu_open && ev.key == GFX_KEY_ESC) open_menu(0);
                 else if (focus >= 0 && wins[focus].used)
                     send_msg(wins[focus].cl, WM_KEY, (uint32_t)wins[focus].id, ev.key, ev.mods, 0, 0, 0, NULL);
+            } else if (ev.type == GFX_EV_KEY_DOWN || ev.type == GFX_EV_KEY_UP) {
+                /* ধাপ ১৮ক: কার্নেলের মতো করেই বাঁধা (বিট 16-18 Shift 1/Ctrl 2/Alt 4) */
+                int32_t raw = ev.key | (ev.type == GFX_EV_KEY_UP ? 0x40000000 : 0) | (ev.repeat ? 0x20000000 : 0) |
+                              (((ev.mods & GFX_MOD_SHIFT) ? 1 : 0) | ((ev.mods & GFX_MOD_CTRL) ? 2 : 0) |
+                               ((ev.mods & GFX_MOD_ALT) ? 4 : 0)) << 16;
+                if (!menu_open && focus >= 0 && wins[focus].used)
+                    send_msg(wins[focus].cl, WM_RAWKEY, (uint32_t)wins[focus].id, raw, 0, 0, 0, 0, NULL);
             } else {
                 mouse_event(&ev);
             }

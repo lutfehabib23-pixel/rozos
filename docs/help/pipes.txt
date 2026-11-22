@@ -14,7 +14,7 @@ with other writers (PIPE_BUF).
   `struct pollfd p[2] = { { 0, POLLIN, 0 }, { mfd, POLLIN, 0 } };`
   `int n = poll(p, 2, 500);`    up to 500 ms; -1 = forever, 0 = just look
   `if (p[0].revents & POLLIN) ...`   the keyboard has something
-Works on /dev/console, /dev/kbd, /dev/mouse, /dev/serial0, pipes and
+Works on /dev/console, /dev/kbd, /dev/keyev, /dev/mouse, /dev/serial0, pipes and
 sockets (POLLIN, POLLOUT, POLLHUP, POLLERR). Ordinary files are always
 ready. The graphics library uses it for its events ([[rozgfx]]).
 Kernel: kernel/fs/pipe.c, sys_poll in kernel/syscall/sys_fs.c.

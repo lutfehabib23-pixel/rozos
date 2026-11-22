@@ -1,4 +1,5 @@
-# Ctrl+C, signals and process groups (phase 14)
+# signals - Ctrl+C, handlers, alarms (phase 14, 16b-1)
+== Ctrl+C and process groups (phase 14) ==
 Every command the shell starts (or a whole pipe `a | b`) gets its own
 process group and becomes the terminal's foreground group. Ctrl+C makes
 the terminal (console, serial line or [[pty]]) send SIGINT to that
@@ -7,8 +8,33 @@ The shell ignores SIGINT itself (SIG_IGN), so at the prompt Ctrl+C just
 cancels the line. A program that wants Ctrl+C as a key (the editor:
 copy) switches it off:
   `struct termios t; tcgetattr(0, &t); t.c_lflag &= ~ISIG; tcsetattr(0, TCSANOW, &t);`
-In C: setpgid(), getpgrp(), setsid(), tcsetpgrp(), kill(-pgrp, sig)
-or killpg(), signal(SIGINT, SIG_IGN). Own handler functions are not run
-yet - a handled signal still ends the program (like SIG_DFL).
-system() ignores Ctrl+C while the command runs (POSIX). Closing a
-terminal window sends SIGHUP to its programs. See [[processes]].
+In C: setpgid(), getpgrp(), setsid(), tcsetpgrp(), kill(-pgrp, sig),
+killpg(). system() ignores Ctrl+C while the command runs (POSIX).
+Closing a terminal window sends SIGHUP to its programs.
+
+== Your own handler (phase 16b-1) ==
+  `void on_int(int sig) { got = 1; }`
+  `signal(SIGINT, on_int);`          now Ctrl+C calls on_int
+The kernel saves the program's registers and FPU on its stack, runs
+the handler, and rt_sigreturn puts everything back. sigaction() gives
+more control:
+  SA_SIGINFO    handler(int, siginfo_t *, void *): who sent it
+                (si_pid), the child's exit code (si_status), the bad
+                address (si_addr)
+  SA_RESTART    read/write/wait etc. start again after the handler
+                (signal() sets it); without it they fail with EINTR
+  SA_NODEFER, SA_RESETHAND, SA_ONSTACK (+ sigaltstack)
+sigprocmask() blocks signals (they wait, see sigpending()); sigsuspend()
+waits for one; sigwait() takes one without a handler.
+
+== Timers and other signals ==
+  alarm(2)           SIGALRM after 2 seconds
+  setitimer()        ITIMER_REAL, also repeating (for game loops)
+  SIGCHLD            a child process ended (ignored by default)
+  SIGWINCH           the terminal changed size (ignored by default)
+  SIGSEGV SIGFPE SIGILL   bad memory, divide by zero, bad instruction:
+                     a handler can siglongjmp() out; without one the
+                     program ends as before
+Stop signals (SIGTSTP, SIGSTOP) are ignored for now - no Ctrl+Z yet.
+With threads ([[threads]]) the mask is shared by the whole process.
+See [[processes]], [[posix]].

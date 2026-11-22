@@ -72,12 +72,39 @@ static int64_t sys_execve(struct interrupt_frame *f, uint64_t upath, uint64_t ua
     return proc_execve(f, path, (char *const *)(uintptr_t)uargv, (char *const *)(uintptr_t)uenvp);
 }
 
+/* ধাপ ১৬খ-২: exit (60) = শুধু এই থ্রেড (শেষ থ্রেড হলে পুরো প্রসেস — আগের মতো),
+ * exit_group (231) = সব থ্রেডসহ প্রসেস। libc-র exit() exit_group ডাকে। */
 static int64_t sys_exit(struct interrupt_frame *f, uint64_t code, uint64_t a2, uint64_t a3,
                         uint64_t a4, uint64_t a5, uint64_t a6)
 {
     (void)f; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+    proc_thread_exit((int)code);
+    return 0;
+}
+
+static int64_t sys_exit_group(struct interrupt_frame *f, uint64_t code, uint64_t a2, uint64_t a3,
+                              uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    (void)f; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
     proc_exit((int)code, 0);
     return 0;
+}
+
+/* clone(flags, newsp, parent_tid, child_tid, tls) — x86-64-এর ক্রম */
+static int64_t sys_clone(struct interrupt_frame *f, uint64_t flags, uint64_t newsp, uint64_t uptid,
+                         uint64_t uctid, uint64_t tls, uint64_t a6)
+{
+    (void)a6;
+    return proc_clone(f, flags, newsp, uptid, uctid, tls);
+}
+
+static int64_t sys_set_tid_address(struct interrupt_frame *f, uint64_t addr, uint64_t a2, uint64_t a3,
+                                   uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    struct thread *t = sched_current();
+    (void)f; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+    t->clear_child_tid = addr;
+    return t->utid ? t->utid : proc_current()->pid;
 }
 
 static int64_t sys_wait4(struct interrupt_frame *f, uint64_t pid, uint64_t ustatus, uint64_t options,
@@ -130,12 +157,21 @@ static int64_t sys_nanosleep(struct interrupt_frame *f, uint64_t ureq, uint64_t 
         return -EINVAL;
     }
     ms = (uint64_t)ts.tv_sec * 1000 + (uint64_t)(ts.tv_nsec + 999999) / 1000000;
-    sched_sleep_ms(ms);
-    if (urem) {
-        memset(&ts, 0, sizeof(ts));
-        copy_to_user((void *)(uintptr_t)urem, &ts, sizeof(ts));
+    {
+        /* ধাপ ১৬খ-১: signal-এ আগে জাগলে বাকি সময় urem-এ, ফেরত -EINTR */
+        uint64_t start = timer_uptime_ms(), done;
+        int intr;
+        sched_sleep_ms(ms);
+        done = timer_uptime_ms() - start;
+        intr = proc_signal_pending(proc_current()) && done < ms;
+        if (urem) {
+            uint64_t left = intr ? ms - done : 0;
+            ts.tv_sec = (int64_t)(left / 1000);
+            ts.tv_nsec = (int64_t)(left % 1000) * 1000000;
+            copy_to_user((void *)(uintptr_t)urem, &ts, sizeof(ts));
+        }
+        return intr ? -EINTR : 0;
     }
-    return proc_current()->killed ? -EINTR : 0;
 }
 
 /* struct utsname: ৬টা 65-বাইটের ঘর */
@@ -143,7 +179,7 @@ static int64_t sys_uname(struct interrupt_frame *f, uint64_t ubuf, uint64_t a2, 
                          uint64_t a4, uint64_t a5, uint64_t a6)
 {
     static const char *const fields[6] = {
-        "rozOS", "rozos", "0.15.1-phase15b", "phase15b", "x86_64", "(none)"
+        "rozOS", "rozos", "0.18.0-phase18a", "phase18a", "x86_64", "(none)"
     };
     char buf[6 * 65];
     int i;
@@ -361,27 +397,7 @@ static int64_t sys_getsid(struct interrupt_frame *f, uint64_t pid, uint64_t a2, 
     return p ? p->sid : -ESRCH;
 }
 
-/* rt_sigaction: কার্নেল এখনো ইউজারের handler চালায় না — শুধু SIG_IGN (1) মনে রাখে;
- * SIG_DFL বা কোনো ফাংশন = ডিফল্ট (প্রসেস শেষ)। oldact-এ আগেরটা (IGN/DFL)। */
-static int64_t sys_rt_sigaction(struct interrupt_frame *f, uint64_t sig, uint64_t uact, uint64_t uold,
-                                uint64_t size, uint64_t a5, uint64_t a6)
-{
-    struct process *p = proc_current();
-    uint64_t bit, old[4] = { 0, 0, 0, 0 };
-    (void)f; (void)size; (void)a5; (void)a6;
-    if (sig < 1 || sig > 64) return -EINVAL;
-    bit = 1ULL << (sig - 1);
-    old[0] = (p->sigignore & bit) ? 1 : 0;
-    if (uact) {
-        uint64_t act[4];
-        if (copy_from_user(act, (const void *)(uintptr_t)uact, sizeof(act)) < 0) return -EFAULT;
-        if (sig == SIGKILL) return -EINVAL;
-        if (act[0] == 1) p->sigignore |= bit;
-        else p->sigignore &= ~bit;
-    }
-    if (uold && copy_to_user((void *)(uintptr_t)uold, old, sizeof(old)) < 0) return -EFAULT;
-    return 0;
-}
+/* rt_sigaction ধাপ ১৬খ-১ থেকে kernel/proc/signal.c-তে (আসল handler, mask, sigreturn) */
 
 void sys_proc_register(void)
 {
@@ -390,7 +406,6 @@ void sys_proc_register(void)
     syscall_register(SYS_getpgrp, sys_getpgrp, "getpgrp");
     syscall_register(SYS_setsid, sys_setsid, "setsid");
     syscall_register(SYS_getsid, sys_getsid, "getsid");
-    syscall_register(SYS_rt_sigaction, sys_rt_sigaction, "rt_sigaction");
     syscall_register(SYS_reboot, sys_reboot, "reboot");
     syscall_register(SYS_getrandom, sys_getrandom, "getrandom");
     syscall_register(SYS_rozos_kmon, sys_rozos_kmon, "rozos_kmon");
@@ -399,7 +414,9 @@ void sys_proc_register(void)
     syscall_register(SYS_fork, sys_fork, "fork");
     syscall_register(SYS_execve, sys_execve, "execve");
     syscall_register(SYS_exit, sys_exit, "exit");
-    syscall_register(SYS_exit_group, sys_exit, "exit_group");
+    syscall_register(SYS_exit_group, sys_exit_group, "exit_group");
+    syscall_register(56, sys_clone, "clone");                    /* ধাপ ১৬খ-২ */
+    syscall_register(218, sys_set_tid_address, "set_tid_address");
     syscall_register(SYS_wait4, sys_wait4, "wait4");
     syscall_register(SYS_kill, sys_kill, "kill");
     syscall_register(SYS_sched_yield, sys_sched_yield, "sched_yield");
@@ -407,4 +424,6 @@ void sys_proc_register(void)
     syscall_register(SYS_uname, sys_uname, "uname");
     syscall_register(SYS_arch_prctl, sys_arch_prctl, "arch_prctl");
     syscall_register(SYS_clock_gettime, sys_clock_gettime, "clock_gettime");
+    proc_signal_init();                          /* ধাপ ১৬খ-১: rt_sigaction … sigaltstack, alarm */
+    futex_init();                                /* ধাপ ১৬খ-২ */
 }
