@@ -61,7 +61,7 @@
 #include <arch/x86_64/pit.h>
 #include <arch/x86_64/apic.h>
 
-#define ROZOS_VERSION "0.19.11-phase19k"
+#define ROZOS_VERSION "0.19.12-phase19l"
 
 #ifdef __TINYC__
 /* ধাপ ১১: TCC-র লিংকারে linker.ld নেই — শুরু = Limine-এর দেওয়া virtual base,
@@ -223,6 +223,11 @@ static void init_interrupts_and_devices(void)
     ksnprintf(msg, sizeof(msg), "PIT timer at %u Hz (IRQ0)", (unsigned)timer_frequency());
     print_ok(msg);
 
+    /* ধাপ ১৯ঠ: মাউসের সীমা সবসময় পর্দার মাপে — আগে শুধু PS/2 মাউস পেলে বসত, ফলে আসল PC-তে
+     * (PS/2 মাউস নেই, শুধু USB) USB মাউস 1024x768-এ আটকে থাকত */
+    if (fb_is_ready()) {
+        mouse_set_bounds((int32_t)fb_width(), (int32_t)fb_height());
+    }
     if (ps2_init()) {
         print_ok("PS/2 controller");
         if (keyboard_init()) {
@@ -231,9 +236,6 @@ static void init_interrupts_and_devices(void)
             print_warn("PS/2 keyboard did not respond");
         }
         if (mouse_init()) {
-            if (fb_is_ready()) {
-                mouse_set_bounds((int32_t)fb_width(), (int32_t)fb_height());
-            }
             print_ok(mouse_has_wheel() ? "PS/2 mouse with scroll wheel (IRQ12)" : "PS/2 mouse (IRQ12)");
         } else {
             print_warn("no PS/2 mouse");
