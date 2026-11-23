@@ -1,5 +1,5 @@
 # systest - self-test
-`systest` runs 220 checks and prints [ ok ] or [FAIL] for each:
+`systest` runs 222 checks and prints [ ok ] or [FAIL] for each:
   syscalls through `syscall` and `int 0x80`, bad addresses rejected,
   brk and mmap memory, the stack growing on demand, files in /tmp,
   chdir/getcwd, getdents64, fork/execve/wait, crashing children,
@@ -40,5 +40,6 @@
   19g) the undeletable flag (tmpfs and ext2), folder lock and unlock
       (wrong secret refused, files back exactly), .hidden, *at()
       functions, and sbase tools in a pipe ([[rozlock]], [[sbase]]).
+  19h) *at() with a real directory descriptor (tar into a folder).
 The exit code is the number of failures (0 = all good).
 Source: userland/tests/systest.c. See [[processes]], [[syscalls]].

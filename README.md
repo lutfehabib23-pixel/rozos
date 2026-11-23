@@ -6,7 +6,7 @@
 
 rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphical desktop. It includes a C compiler, a text editor, `make`, a TCP/IP stack with HTTPS, and a package manager, so you can write, compile and even rebuild the rozOS kernel **from inside rozOS itself**.
 
-> Status: hobby / educational OS, under active development (current: **0.19.7-phase19g**).
+> Status: hobby / educational OS, under active development (current: **0.19.8-phase19h**).
 > It runs in QEMU. Real hardware has not been tested yet.
 
 ---
@@ -18,7 +18,7 @@ rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphica
 | **Boot** | Limine, BIOS + UEFI, ISO and GPT disk image, boot menu with several kernels (`kinstall`), rozOS logo fading in on a black screen before the desktop |
 | **Kernel** | x86_64 long mode, GDT/IDT, PIC/PIT, PMM + VMM (4-level paging), kernel heap, preemptive multitasking, threads (`clone`, `futex`, TLS), `fork`/`exec`/`wait`, Linux-like syscall ABI |
 | **Processes** | process groups and sessions, Ctrl+C to the foreground job, real signal handlers (`sigaction`, SA_SIGINFO, SA_RESTART, masks, `sigsuspend`, `sigaltstack`, `alarm`/`setitimer`, SIGCHLD, SIGWINCH, catching SIGSEGV/SIGFPE) |
-| **Filesystems** | VFS, ext2 (read/write root), FAT32 (boot partition), devfs, tmpfs, initrd; `rename()`, `mount`/`umount` |
+| **Filesystems** | VFS, ext2 (read/write root), FAT32 (boot partition), devfs, tmpfs, initrd (the whole system on the ISO, a 5 MB rescue system on the disk); `rename()`, `mount`/`umount`; immutable files |
 | **IPC** | pipes, `poll`, shared memory (`shm_open` + `mmap MAP_SHARED`), PTYs, Unix domain sockets |
 | **Drivers** | PCI, ACPI, PS/2 keyboard and mouse, serial, VGA/framebuffer console with PSF2 fonts, AHCI (SATA) and NVMe disks, USB (xHCI: pen drives, keyboards, mice, hot-plug), e1000/e1000e network |
 | **Network** | lwIP TCP/IP, DHCP, DNS, BSD sockets, BearSSL TLS (HTTPS) |
@@ -34,7 +34,7 @@ rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphica
 | **Desktop apps** | **Code** (graphical C editor: menus, syntax colours, compile and run with tcc, clickable errors), **Files** (file manager with right-click menu, lock/unlock, hide/unhide), **Settings** (wallpaper, desktop icons, memory, processes, disks, network), calculator, paint, image viewer |
 | **Shell** | `rozsh`: pipes, redirection, `&&`/`||`, job control, history; about 50 own programs in `/bin` plus about 70 classic Unix tools from **sbase** (grep, sed, sort, head, tail, find, xargs, cut, tr, sha256sum ...) |
 | **C reference** | Turbo C-style help for C: the language and every function of `<stdio.h>`, `<stdlib.h>`, `<string.h>`, `<strings.h>`, `<ctype.h>`, `<math.h>`, `<time.h>`, and POSIX - `<unistd.h>`, `<fcntl.h>`, `<sys/*.h>`, `<signal.h>`, `<pthread.h>`, sockets, `<termios.h>`, `<regex.h>`, `<wchar.h>`, `<locale.h>`, `<iconv.h>` ..., and the rozOS libraries `<rozgfx.h>`, `<rozui.h>`, `<rozgame.h>`, `<rozhttp.h>`, `<rozos.h>`, `<rozlock.h>` plus guides to Lua (C API and the `game` module), zlib and SQLite (440 pages) with syntax, explanation and a runnable example; Ctrl+F1 on a word in Code or `edit`, the `crefview` window (Copy / Try it), and `cref` in a terminal; every example is compiled and run by `make cref-check` |
-| **Docs** | 112 built-in help pages (`help`, `help desktop`, `help syscalls`, …) |
+| **Docs** | 113 built-in help pages (`help`, `help desktop`, `help syscalls`, …) |
 
 ---
 

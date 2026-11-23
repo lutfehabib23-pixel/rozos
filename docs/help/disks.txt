@@ -7,7 +7,10 @@ rozOS joins several file systems into one tree (the VFS):
   /dev    devfs - devices as files
 
 Without a disk, / is a tmpfs filled from the initrd (a tar file the
-bootloader loads), so rozOS still boots, but nothing is kept.
+bootloader loads), so rozOS still boots, but nothing is kept. The ISO's
+initrd is the whole system; the disk's boot partition keeps only a small
+rescue initrd (phase 19h, about 5 MB) for when ext2 cannot be used:
+[[rescue]].
 
 == Devices in /dev ==
   console  screen + keyboard (+ serial)    null   discards writes

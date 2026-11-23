@@ -1,7 +1,8 @@
 # rozOS — টপ-লেভেল Makefile
 #
 #   make            কার্নেল বিল্ড (build/rozos.elf)
-#   make initrd     sysroot/ থেকে build/initrd.tar (USTAR)
+#   make initrd     sysroot/ থেকে build/initrd.tar (USTAR) — ISO-র পুরো সিস্টেম
+#   make rescue-initrd   build/initrd-rescue.tar — ডিস্কের boot partition-এর ছোট উদ্ধার-সিস্টেম
 #   make iso        বুটযোগ্য ISO (rozos.iso) — BIOS ও UEFI দুটোতেই চলে
 #   make disk       sysroot/ থেকে ext2 ডিস্ক ইমেজ (rozos-disk.img) — শুধু না থাকলে বানায়
 #   make disk-reset ডিস্ক ইমেজ মুছে sysroot/ থেকে নতুন করে (ভেতরের সব পরিবর্তন হারাবে!)
@@ -33,6 +34,8 @@ ISO_ROOT   := $(BUILD)/iso_root
 LIMINE_DIR := limine
 SYSROOT    := sysroot
 INITRD     := $(BUILD)/initrd.tar
+# ধাপ ১৯জ: ডিস্কের boot partition-এ ছোট rescue initrd (ISO-তে পুরোটা থাকে)
+RESCUE_INITRD := $(BUILD)/initrd-rescue.tar
 # ধাপ ১৯চ: Windows থেকে কপি করলে আসা "...:Zone.Identifier" ফাইল নিজে থেকেই মোছা (কোনো কাজের নয়,
 # আর নামের ':' make-কে আটকে দেয়); sysroot-এ নামে ফাঁকা জায়গা বা ':' থাকলে পরিষ্কার বার্তা দিয়ে থামা
 ZONE_REMOVED := $(shell n=$$(find . -name '*:Zone.Identifier' -not -path './build/*' 2>/dev/null | wc -l); \
@@ -669,6 +672,34 @@ $(INITRD): $(SYSROOT_FILES) $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRTS) $(TCC_EXTRA)
 	@tar --format=ustar --owner=0 --group=0 --numeric-owner --sort=name \
 	    -cf $@ -C $(ROOT_STAGE) .
 
+# ---------- rescue initrd (ধাপ ১৯জ) ----------
+# ডিস্ক থেকে বুটে root = ext2, তখন কার্নেল initrd ছোঁয় না — কিন্তু Limine প্রতিবার পুরোটা
+# মেমোরিতে তোলে আর তা ফেরত হয় না। তাই boot partition-এ শুধু উদ্ধারের জিনিস: টেক্সট shell,
+# ফাইল/ডিস্কের টুল, tar/find/grep/head/tail, edit, kinstall, kmon, দরকারি help পাতা।
+# /etc/rozos.conf (mode=text) আর /etc/motd ("RESCUE MODE") আসে rescue/etc থেকে।
+RESCUE_PROGS := init rozsh sh ls cat cp mv rm mkdir rmdir touch wc echo clear sleep stty uname date \
+                mount umount lsusb kinstall reboot poweroff kmon edit rozhelp chattr lsattr \
+                tar find grep head tail
+RESCUE_BINS  := $(addprefix $(USER_BUILD)/stripped/,$(filter $(RESCUE_PROGS),$(USER_PROGS)))
+RESCUE_HELP  := $(wildcard $(addprefix docs/help/,$(addsuffix .txt,rescue index help keys rozsh builtins redirect \
+                mount usb disks partitions fat kinstall boot-menu reboot edit sbase rozlock files)))
+RESCUE_STAGE := $(BUILD)/rescue-stage
+rescue-initrd: $(RESCUE_INITRD)
+
+$(RESCUE_INITRD): $(RESCUE_BINS) $(RESCUE_HELP) $(wildcard rescue/etc/*) sysroot/etc/passwd sysroot/etc/group sysroot/etc/hosts sysroot/etc/hostname
+	@mkdir -p $(dir $@)
+	@echo "  TAR     $@ (rescue: $(words $(RESCUE_BINS)) programs)"
+	@rm -rf $(RESCUE_STAGE)
+	@mkdir -p $(RESCUE_STAGE)/bin $(RESCUE_STAGE)/etc $(RESCUE_STAGE)/tmp $(RESCUE_STAGE)/dev $(RESCUE_STAGE)/home \
+	          $(RESCUE_STAGE)/mnt/disk $(RESCUE_STAGE)/mnt/usb $(RESCUE_STAGE)/usr/share/help $(RESCUE_STAGE)/var/log
+	@cp $(RESCUE_BINS) $(RESCUE_STAGE)/bin/
+	@cp sysroot/etc/passwd sysroot/etc/group sysroot/etc/hosts sysroot/etc/hostname $(RESCUE_STAGE)/etc/
+	@cp rescue/etc/* $(RESCUE_STAGE)/etc/
+	@cp $(RESCUE_HELP) $(RESCUE_STAGE)/usr/share/help/
+	@tar --format=ustar --owner=0 --group=0 --numeric-owner --sort=name \
+	    -cf $@ -C $(RESCUE_STAGE) .
+.PHONY: rescue-initrd
+
 # ---------- ডিস্ক ইমেজ (ধাপ ৫) ----------
 # ইচ্ছাকৃতভাবে sysroot/-এর ওপর নির্ভরশীল নয়: একবার বানানোর পর rozOS-এর ভেতরে লেখা
 # ফাইল যেন পরের make-এ মুছে না যায়। sysroot বদলালে `make disk-reset` চালাতে হয়।
@@ -676,7 +707,7 @@ disk: $(DISK)
 
 # প্রোগ্রামগুলো order-only: প্রোগ্রাম বদলালে পুরো ডিস্ক নতুন হয় না (disk-update দেখুন)
 # ধাপ ১১খ: GPT ডিস্ক — toolchain/mkdisk.sh (sgdisk, mkfs.fat, mtools লাগে)
-$(DISK): | $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRTS) $(TCC_EXTRA) $(CA_PEM) $(DEV_LIBS) $(KSRC_MK) $(KERNEL) $(INITRD) $(LIMINE_FILES) $(MOD_KOS)
+$(DISK): | $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRTS) $(TCC_EXTRA) $(CA_PEM) $(DEV_LIBS) $(KSRC_MK) $(KERNEL) $(RESCUE_INITRD) $(LIMINE_FILES) $(MOD_KOS)
 	@command -v mke2fs >/dev/null || { echo "mke2fs নেই — sudo apt install e2fsprogs"; exit 1; }
 	@echo "  MKDISK  $@ ($(DISK_MIB) MiB: FAT32 boot $(ESP_MIB) MiB + ext2 root, from $(SYSROOT)/ + build/userland/bin)"
 	$(call stage_root,$(DISK_STAGE))
@@ -684,10 +715,11 @@ $(DISK): | $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRTS) $(TCC_EXTRA) $(CA_PEM) $(DEV_
 	@LIMINE=$(LIMINE_DIR)/limine ./toolchain/mkdisk.sh $@ $(DISK_MIB) $(ESP_MIB) $(DISK_STAGE) $(ESP_STAGE)
 
 # boot partition-এর ফাইল: factory kernel (gcc), initrd, Limine (BIOS + UEFI), প্রথম মেনু
+# ধাপ ১৯জ: initrd.tar = ছোট rescue initrd (নাম একই, তাই limine.conf/kinstall বদলায় না)
 define stage_esp
 	@rm -rf $(1) && mkdir -p $(1)/EFI/BOOT $(1)/kernels
 	@cp $(KERNEL) $(1)/rozos-factory.elf
-	@cp $(INITRD) $(1)/initrd.tar
+	@cp $(RESCUE_INITRD) $(1)/initrd.tar
 	@cp limine-disk.conf $(1)/limine.conf
 	@cp $(LIMINE_DIR)/limine-bios.sys $(1)/
 	@cp $(LIMINE_DIR)/BOOTX64.EFI $(LIMINE_DIR)/BOOTIA32.EFI $(1)/EFI/BOOT/
@@ -697,7 +729,7 @@ endef
 
 # ধাপ ১১খ: পুরোনো ডিস্ক (partition ছাড়া পুরোটা ext2) → নতুন GPT ডিস্ক; সব ফাইল অক্ষত
 # (পুরোনোটা হুবহু sda2-তে, মাপ বাড়ানো)। পুরোনো image-এর কপি $(DISK).old-ext2-তে থাকে।
-disk-migrate: $(KERNEL) $(INITRD) $(LIMINE_FILES)
+disk-migrate: $(KERNEL) $(RESCUE_INITRD) $(LIMINE_FILES)
 	@test -f $(DISK) || { echo "$(DISK) নেই — make disk দিয়ে নতুন বানান"; exit 1; }
 	@if [ "$$(./toolchain/disk-offsets.sh $(DISK))" != old ]; then echo "  OK      $(DISK) আগেই partition-সহ (নতুন ধরনের)"; exit 0; fi; \
 	 echo "  MIGRATE $(DISK): পুরোনো ext2 → GPT (FAT32 boot + ext2 root); কপি: $(DISK).old-ext2"; \
@@ -748,7 +780,7 @@ disk-check: $(DISK)
 # ভেতরে লেখা বাকি সব ফাইল থাকে। QEMU চলার সময় চালাবেন না।
 disk-update: $(DISK_BIN_STAMP)
 
-$(DISK_BIN_STAMP): $(USER_STRIPPED) $(if $(HAVE_ZLIB),$(ZLIB_ZCONF)) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(APP_FILES) $(TEMPLATE_FILES) $(FONT_FILES) $(IMAGE_FILES) $(ICON_FILES) $(GFX_SRC_FILES) $(GAME_SRC_FILES) $(GAME_DATA_FILES) $(CREF_FILES) $(MOD_KOS) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES) $(KERNEL) $(INITRD) | $(DISK)
+$(DISK_BIN_STAMP): $(USER_STRIPPED) $(if $(HAVE_ZLIB),$(ZLIB_ZCONF)) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(APP_FILES) $(TEMPLATE_FILES) $(FONT_FILES) $(IMAGE_FILES) $(ICON_FILES) $(GFX_SRC_FILES) $(GAME_SRC_FILES) $(GAME_DATA_FILES) $(CREF_FILES) $(MOD_KOS) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES) $(KERNEL) $(RESCUE_INITRD) | $(DISK)
 	@command -v debugfs >/dev/null || { echo "debugfs নেই — sudo apt install e2fsprogs"; exit 1; }
 	@if [ "$$(./toolchain/disk-offsets.sh $(DISK))" = old ]; then $(MAKE) --no-print-directory disk-migrate; fi
 	@./toolchain/disk-grow.sh $(DISK) $(DISK_MIB)
@@ -822,10 +854,10 @@ $(DISK_BIN_STAMP): $(USER_STRIPPED) $(if $(HAVE_ZLIB),$(ZLIB_ZCONF)) $(LIBC_A) $
 	 { cat $(BUILD)/disk-update.cmd; echo "rm /usr/src/rozos/.build-base"; \
 	   echo "write $(BUILD_NUMBER_FILE) /usr/src/rozos/.build-base"; } > $(BUILD)/disk-update.cmd2; \
 	 debugfs -w -f $(BUILD)/disk-update.cmd2 "$(DISK)?offset=$$2" >/dev/null 2>&1; \
-	 echo "  UPDATE  boot partition: factory kernel (build $$(cat $(BUILD_NUMBER_FILE) 2>/dev/null)), initrd, Limine"; \
+	 echo "  UPDATE  boot partition: factory kernel (build $$(cat $(BUILD_NUMBER_FILE) 2>/dev/null)), rescue initrd ($$(( $$(stat -c %s $(RESCUE_INITRD)) / 1024 )) KiB), Limine"; \
 	 M="$(DISK)@@$$1"; \
 	 mcopy -o -i "$$M" $(KERNEL) ::/rozos-factory.elf && \
-	 mcopy -o -i "$$M" $(INITRD) ::/initrd.tar && \
+	 mcopy -o -i "$$M" $(RESCUE_INITRD) ::/initrd.tar && \
 	 mcopy -o -i "$$M" $(LIMINE_DIR)/limine-bios.sys ::/limine-bios.sys && \
 	 { ! mdir -i "$$M" ::/boot-wallpaper.jpg >/dev/null 2>&1 || mdel -i "$$M" ::/boot-wallpaper.jpg; } && \
 	 mcopy -o -i "$$M" $(LIMINE_DIR)/BOOTX64.EFI $(LIMINE_DIR)/BOOTIA32.EFI ::/EFI/BOOT/ && \

@@ -20,6 +20,10 @@
 #include <signal.h>
 #include <time.h>
 #include <rozos.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+void __rozlibc_dirfd_set(int fd, const char *path);    /* ধাপ ১৯জ (নিচে) */
 #include <sys/mount.h>
 
 #define SYS_read            0
@@ -112,7 +116,7 @@ long __syscall_ret(long r)
 
 ssize_t read(int fd, void *buf, size_t n)        { return SC3(SYS_read, fd, buf, n); }
 ssize_t write(int fd, const void *buf, size_t n) { return SC3(SYS_write, fd, buf, n); }
-int     close(int fd)                            { return (int)SC3(SYS_close, fd, 0, 0); }
+int     close(int fd)                            { __rozlibc_dirfd_set(fd, NULL); return (int)SC3(SYS_close, fd, 0, 0); }
 off_t   lseek(int fd, off_t off, int whence)     { return SC3(SYS_lseek, fd, off, whence); }
 int     dup(int fd)                              { return (int)SC3(SYS_dup, fd, 0, 0); }
 int     dup2(int a, int b)                       { return (int)SC3(SYS_dup2, a, b, 0); }
@@ -240,16 +244,46 @@ gid_t getegid(void) { return 0; }
 mode_t umask(mode_t m) { (void)m; return 022; }
 int chmod(const char *p, mode_t m) { struct stat st; (void)m; return stat(p, &st); }
 
+/* ধাপ ১৯জ: O_DIRECTORY দিয়ে খোলা ফোল্ডারের পুরো পথ মনে রাখা — openat/fstatat/unlinkat ...
+ * আসল dirfd + আপেক্ষিক পথ পেলে "পথ/নাম" বানিয়ে চলে (কার্নেলে *at syscall নেই)।
+ * sbase-এর tar, du, chmod -R এভাবে ফোল্ডারের ভেতরে ঘোরে। */
+static char *dirfd_path[64];
+
+void __rozlibc_dirfd_set(int fd, const char *path)
+{
+    if (fd < 0 || fd >= 64) return;
+    free(dirfd_path[fd]);
+    dirfd_path[fd] = NULL;
+    if (!path) return;
+    if (path[0] == '/') {
+        dirfd_path[fd] = strdup(path);
+    } else {
+        char cwd[1024];
+        size_t n;
+        if (!getcwd(cwd, sizeof(cwd))) return;
+        n = strlen(cwd) + strlen(path) + 2;
+        if ((dirfd_path[fd] = (char *)malloc(n)))
+            snprintf(dirfd_path[fd], n, "%s%s%s", cwd, strcmp(cwd, "/") ? "/" : "", path);
+    }
+}
+
+const char *__rozlibc_dirfd_get(int fd)
+{
+    return fd >= 0 && fd < 64 ? dirfd_path[fd] : NULL;
+}
+
 int open(const char *path, int flags, ...)
 {
     va_list ap;
-    int mode = 0;
+    int mode = 0, fd;
     va_start(ap, flags);
     if (flags & O_CREAT) {
         mode = va_arg(ap, int);
     }
     va_end(ap);
-    return (int)SC3(SYS_open, path, flags, mode);
+    fd = (int)SC3(SYS_open, path, flags, mode);
+    if (fd >= 0 && (flags & O_DIRECTORY)) __rozlibc_dirfd_set(fd, path);
+    return fd;
 }
 
 int creat(const char *path, mode_t mode)

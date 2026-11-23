@@ -1,0 +1,11 @@
+=====================  rozOS RESCUE MODE  =====================
+The root file system on the disk could not be used, so this small
+rescue system runs from memory (what you change here is lost at
+power off). Your files may still be on the disk - try:
+  ls /dev ; mount                sda2 = the rozOS root; a pen drive is on /mnt/usb
+  mount /dev/sda2 /mnt/disk      try the disk by hand (ls /mnt/disk/home)
+  cd /mnt/disk ; tar -cf /mnt/usb/home.tar home     save your files to a pen drive
+  kinstall -l   then   kinstall -d factory  and  reboot   (another kernel)
+  help rescue                    step by step
+Full system: boot the ISO, or on the PC: make disk-check / make disk-update
+================================================================

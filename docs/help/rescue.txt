@@ -1,0 +1,38 @@
+# Rescue mode - when the disk root cannot be used (phase 19h)
+Booting from the disk, the kernel mounts the ext2 root (sda2). If that
+fails (the disk is damaged, or the partition was changed), it uses the
+small rescue initrd from the boot partition instead: a text shell in
+memory with the tools below. A "RESCUE MODE" box says so at boot.
+Changes made here are lost at power off - save to a disk or pen drive.
+
+== Tools ==
+  shell and files   rozsh, ls, cat, cp, mv, rm, mkdir, rmdir, touch, wc, echo
+  find and look     tar, find, grep, head, tail, edit, help
+  disks and boot    mount, umount, lsusb, kinstall, reboot, poweroff, kmon
+  flags             chattr, lsattr (the undeletable flag of locked folders)
+No desktop, tcc, games or packages here - boot the ISO for the full system.
+
+== Step by step ==
+1. `ls /dev` and `mount` - which disks are there (sda1 boot, sda2 root;
+   a USB pen drive is sdb1 and is mounted on /mnt/usb by itself).
+2. `mount /dev/sda2 /mnt/disk` - if it works, `ls /mnt/disk/home`.
+3. Save your files to the pen drive - a whole folder in one file:
+     `cd /mnt/disk`
+     `tar -cf /mnt/usb/home.tar home`     (relative name: home, not /home)
+     `tar -tf /mnt/usb/home.tar`          (list what is inside)
+   Later, in the folder where it should go: `tar -xf home.tar`. Notes
+   like "utimensat: function not implemented" are harmless (rozOS cannot
+   set file times yet). Locked folders (.rozlock) are copied as they are -
+   they stay locked and need the secret later.
+4. Maybe only the kernel is bad: `kinstall -l`, `kinstall -d factory`,
+   `reboot` - or choose another entry in the boot menu ([[boot-menu]]).
+5. On the PC (WSL), with the disk image: `make disk-check` (e2fsck) checks
+   and repairs ext2; `make CROSS= disk-update` writes all system files
+   again (your /home stays); `make disk-reset` makes a new disk (the
+   last resort - /home is lost unless you saved it).
+
+== Why only a small initrd on the disk ==
+The ISO carries the whole system in its initrd (there it IS the root).
+On the disk everything lives on ext2, so the boot partition keeps only
+this rescue set (about 5 MB instead of 41): faster boot, less memory
+held, room for more kernels. See [[disks]], [[partitions]], [[kinstall]].

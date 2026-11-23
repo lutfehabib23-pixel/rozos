@@ -2038,6 +2038,33 @@ static void test_phase19g(void)
     check(ok, "sbase: sort | head, sed | grep in a pipe");
 }
 
+/* ধাপ ১৯জ: আসল dirfd দিয়ে *at() (sbase-এর tar/du ভেতরে ঘোরে এভাবে) */
+static void test_phase19h(void)
+{
+    struct stat st;
+    int fd, ok, r;
+    mkdir("/tmp/st19h", 0755);
+    mkdir("/tmp/st19h/d", 0755);
+    write_text("/tmp/st19h/d/b.txt", "bee\n");
+    fd = open("/tmp/st19h/d", O_RDONLY | O_DIRECTORY);
+    ok = fd >= 0 && fstatat(fd, "b.txt", &st, 0) == 0 && st.st_size == 4 &&
+         faccessat(fd, "b.txt", R_OK, 0) == 0 && unlinkat(fd, "b.txt", 0) == 0 && access("/tmp/st19h/d/b.txt", F_OK) != 0;
+    if (fd >= 0) close(fd);
+    check(ok, "fstatat/faccessat/unlinkat with a real directory fd");
+    write_text("/tmp/st19h/d/c.txt", "sea\n");
+    ok = access("/bin/tar", X_OK) == 0;
+    if (ok) {
+        r = system("cd /tmp/st19h && tar -cf /tmp/st19h.tar d && tar -tf /tmp/st19h.tar | grep -c c.txt > /tmp/st19h.out");
+        ok = r == 0 && text_is("/tmp/st19h.out", "1\n");
+        unlink("/tmp/st19h.out");
+        unlink("/tmp/st19h.tar");
+    }
+    check(ok, "sbase tar: a folder into an archive and back (tar -cf, tar -tf)");
+    unlink("/tmp/st19h/d/c.txt");
+    rmdir("/tmp/st19h/d");
+    rmdir("/tmp/st19h");
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -2067,6 +2094,7 @@ int main(int argc, char **argv)
     test_phase19d();
     test_phase19f();
     test_phase19g();
+    test_phase19h();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

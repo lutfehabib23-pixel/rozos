@@ -624,6 +624,22 @@ int fcntl(int fd, int cmd, ...)
     return (int)SC(SYS_fcntl, fd, cmd, arg, 0, 0);
 }
 
+/* ধাপ ১৯জ: dirfd + আপেক্ষিক পথ → পুরো পথ। O_DIRECTORY দিয়ে খোলা ফোল্ডারের পথ libc মনে
+ * রাখে (syscall.c); অজানা fd হলে EBADF */
+const char *__rozlibc_dirfd_get(int fd);
+static const char *at_path(int dirfd, const char *path, char *buf, size_t n)
+{
+    const char *d;
+    if (dirfd == AT_FDCWD || path[0] == '/') return path;
+    d = __rozlibc_dirfd_get(dirfd);
+    if (!d) { errno = EBADF; return NULL; }
+    if (!path[0]) return d;
+    if ((size_t)snprintf(buf, n, "%s%s%s", d, strcmp(d, "/") ? "/" : "", path) >= n) { errno = ENAMETOOLONG; return NULL; }
+    return buf;
+}
+#define AT_RESOLVE(dirfd, path) char at_buf_[1024]; const char *at_p_ = at_path(dirfd, path, at_buf_, sizeof(at_buf_)); \
+    if (!at_p_) return -1
+
 int openat(int dirfd, const char *path, int flags, ...)
 {
     va_list ap;
@@ -631,8 +647,10 @@ int openat(int dirfd, const char *path, int flags, ...)
     va_start(ap, flags);
     mode = va_arg(ap, int);
     va_end(ap);
-    if (dirfd != AT_FDCWD && path[0] != '/') { errno = ENOSYS; return -1; }
-    return open(path, flags, mode);
+    {
+        AT_RESOLVE(dirfd, path);
+        return open(at_p_, flags, mode);
+    }
 }
 
 int posix_fadvise(int fd, off_t off, off_t len, int advice)
@@ -643,40 +661,39 @@ int posix_fadvise(int fd, off_t off, off_t len, int advice)
 
 int fstatat(int dirfd, const char *path, struct stat *st, int flags)
 {
-    if (dirfd != AT_FDCWD && path[0] != '/') { errno = ENOSYS; return -1; }
-    return (flags & 0x100) ? lstat(path, st) : stat(path, st);
+    AT_RESOLVE(dirfd, path);
+    return (flags & 0x100) ? lstat(at_p_, st) : stat(at_p_, st);
 }
 
 int mkdirat(int dirfd, const char *path, mode_t mode)
 {
-    if (dirfd != AT_FDCWD && path[0] != '/') { errno = ENOSYS; return -1; }
-    return mkdir(path, mode);
+    AT_RESOLVE(dirfd, path);
+    return mkdir(at_p_, mode);
 }
 
-/* ধাপ ১৯ছ: বাকি *at() ফাংশন (sbase-এর cp/rm/find/test এগুলো ডাকে) */
-#define AT_OK(fd, p) ((fd) == AT_FDCWD || (p)[0] == '/')
+/* ধাপ ১৯ছ: বাকি *at() ফাংশন (sbase-এর cp/rm/find/test এগুলো ডাকে); ধাপ ১৯জ: আসল dirfd-ও */
 int unlinkat(int dirfd, const char *path, int flags)
 {
-    if (!AT_OK(dirfd, path)) { errno = ENOSYS; return -1; }
-    return (flags & AT_REMOVEDIR) ? rmdir(path) : unlink(path);
+    AT_RESOLVE(dirfd, path);
+    return (flags & AT_REMOVEDIR) ? rmdir(at_p_) : unlink(at_p_);
 }
 int faccessat(int dirfd, const char *path, int mode, int flags)
 {
+    AT_RESOLVE(dirfd, path);
     (void)flags;                                 /* এক ব্যবহারকারী: আসল আর কার্যকর id একই */
-    if (!AT_OK(dirfd, path)) { errno = ENOSYS; return -1; }
-    return access(path, mode);
+    return access(at_p_, mode);
 }
 int fchmodat(int dirfd, const char *path, mode_t mode, int flags)
 {
+    AT_RESOLVE(dirfd, path);
     (void)flags;
-    if (!AT_OK(dirfd, path)) { errno = ENOSYS; return -1; }
-    return chmod(path, mode);
+    return chmod(at_p_, mode);
 }
 int fchownat(int dirfd, const char *path, uid_t uid, gid_t gid, int flags)
 {
+    AT_RESOLVE(dirfd, path);
     (void)flags;
-    if (!AT_OK(dirfd, path)) { errno = ENOSYS; return -1; }
-    return chown(path, uid, gid);
+    return chown(at_p_, uid, gid);
 }
 int linkat(int od, const char *o, int nd, const char *n, int flags)
 {
@@ -686,8 +703,8 @@ int linkat(int od, const char *o, int nd, const char *n, int flags)
 int symlinkat(const char *t, int nd, const char *l) { (void)nd; return symlink(t, l); }
 ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t size)
 {
-    if (!AT_OK(dirfd, path)) { errno = ENOSYS; return -1; }
-    return readlink(path, buf, size);
+    AT_RESOLVE(dirfd, path);
+    return readlink(at_p_, buf, size);
 }
 
 int fchmod(int fd, mode_t mode) { (void)mode; return fcntl(fd, F_GETFD) < 0 ? -1 : 0; }
