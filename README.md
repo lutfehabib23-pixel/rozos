@@ -6,7 +6,7 @@
 
 rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphical desktop. It includes a C compiler, a text editor, `make`, a TCP/IP stack with HTTPS, and a package manager, so you can write, compile and even rebuild the rozOS kernel **from inside rozOS itself**.
 
-> Status: hobby / educational OS, under active development (current: **0.19.3-phase19c**).
+> Status: hobby / educational OS, under active development (current: **0.19.5-phase19e**).
 > It runs in QEMU. Real hardware has not been tested yet.
 
 ---

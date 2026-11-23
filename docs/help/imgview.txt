@@ -1,6 +1,19 @@
 # imgview - picture viewer
-  `imgview`              the pictures in /usr/share/images
+  `imgview`              thumbnails of the pictures in /usr/share/images
+                         (the desktop's Images icon)
+  `imgview FOLDER`       thumbnails of that folder
+  `imgview pic.jpg`      that picture big; Back shows its folder
   `imgview a.bmp b.ppm`  these files
-Left/right (or Space) = previous/next, + - zoom (or the wheel), 0 = fit,
-q quits. Reads .bmp, .ppm, .jpg, .png, .gif and .tga.
+Reads .jpg .jpeg .png .bmp .gif .tga .ppm .pgm .pnm.
+
+== Thumbnails (phase 19e) ==
+Every picture of the folder small, with its name; they appear one by one
+while they load. Click one (or choose with the arrows and press Enter)
+to see it big. Wheel / PgUp / PgDn / the scroll bar move the list;
+"Folder..." picks another folder (choose any picture in it). Esc or q quits.
+
+== A picture ==
+Left/right (or Space, the < > buttons) = previous/next picture of the
+folder, + - zoom (or the wheel), 0 = fit. Back, Esc or Backspace returns
+to the thumbnails; q quits.
 Source: /usr/src/gfx/imgview.c. See [[graphics]].

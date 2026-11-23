@@ -5,7 +5,7 @@ its own window.
 Programs (also in the [[menu]], category Graphics):
   [[gfxdemo]]   everything at once: shapes, pictures, fonts, a ball
   [[paint]]     draw with the mouse, save as BMP
-  [[imgview]]   look at .bmp and .ppm pictures
+  [[imgview]]   look at pictures (thumbnails of a folder)
   [[gcalc]]     a calculator with buttons
 q (or Esc) quits each; the text console comes back.
 

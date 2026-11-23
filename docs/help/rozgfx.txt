@@ -14,7 +14,7 @@
 == Pictures ==
   `gfx_surface *img = gfx_load_image("/usr/share/images/rozos-sunset.bmp");`
   .bmp .ppm, and (phase 14) .jpg .png .gif .tga (stb_image);
-  `gfx_save_bmp(s, "out.bmp")`
+  `gfx_save_bmp(s, "out.bmp")`  `gfx_save_png(s, "out.png")` (phase 19d)
 
 == Windows (phase 14) ==
 When the desktop runs, `gfx_init()` opens a window instead of taking

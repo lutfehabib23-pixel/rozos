@@ -1,10 +1,35 @@
 # paint - draw with the mouse
   `paint`            new picture (the first save asks for a name)
-  `paint pic.bmp`    open a picture and draw on it
-Left button draws, right button erases. Top bar: colours, brush size
-[ ] (or the wheel), fill (bucket), clear, save. Keys: 1-9 colour,
-[ ] brush, f fill, c clear, s save, S save as, o open a picture
-(.bmp .png .jpg ...), q quit. Saving asks for the folder and name the
-first time (a file dialog), always writes BMP and says if it worked.
-Look at the result with
-[[imgview]]. Source: /usr/src/gfx/paint.c. See [[graphics]].
+  `paint pic.png`    open a picture and draw on it (.png .bmp .jpg ...)
+Phase 19d: a small Windows-Paint-like program.
+
+== The window ==
+  Menu        File: New, Open, Save, Save as, Quit
+              Edit: Undo, Redo, Clear picture
+              Image: Flip horizontal / vertical, Rotate 90 right, Canvas size
+              Help: keys
+  Left bar    Pencil, Brush, Eraser, Fill (bucket), Pick colour, Line,
+              Rectangle, Ellipse, Text; under them the size (1, 3, 5, 8),
+              for Text the letter size (12-48), for shapes outline/filled
+  Bottom      20 colours: left click = colour 1, right click = colour 2
+  Status bar  mouse position, picture size, file name (* = not saved)
+
+Left button draws with colour 1, right button with colour 2 (white by
+default, so the right button erases, as before). The eraser paints
+colour 2. Pick colour: click the picture to take a colour. Text: click
+where it goes, type, Enter places it (Esc cancels).
+
+== Keys ==
+  p pencil  b brush  e eraser  f fill  i pick colour  l line
+  r rectangle  g ellipse  t text     1-9 colour 1
+  [ ] or the wheel: size        arrows: move a picture bigger than the window
+  c clear  s save  S save as  o open  q / Esc quit
+  Ctrl+Z undo (16 steps)  Ctrl+Y redo  Ctrl+N new  Ctrl+O open  Ctrl+S save
+
+== Saving ==
+The first save asks for the folder and name (a file dialog). A name
+ending in .png saves PNG (small for drawings), .bmp saves BMP; the
+default is drawing.png. Before quitting, opening or New, unsaved changes
+are offered for saving. Making the window bigger makes the paper bigger.
+Look at the result with [[imgview]]. Source: /usr/src/gfx/paint.c.
+See [[graphics]], [[rozgfx]] (gfx_save_png).

@@ -378,22 +378,24 @@ int main(void)
 @end
 
 @entry gfx_load_image
-@also gfx_image_error gfx_save_bmp gfx_load_image_stb jpeg png bmp
+@also gfx_image_error gfx_save_bmp gfx_save_png gfx_load_image_stb jpeg png bmp
 @header rozgfx.h
 @syntax gfx_surface *gfx_load_image(const char *path);
 @syntax const char *gfx_image_error(void);
 @syntax int gfx_save_bmp(const gfx_surface *s, const char *path);
+@syntax int gfx_save_png(const gfx_surface *s, const char *path);
 @syntax gfx_surface *gfx_load_image_stb(const unsigned char *data, long size);
-@summary Load a picture file (JPEG, PNG, BMP, GIF, TGA, PPM) or save one as BMP.
+@summary Load a picture file (JPEG, PNG, BMP, GIF, TGA, PPM) or save one as BMP or PNG.
 @desc
 The result is a new surface - free it with gfx_surface_free. If a picture
 cannot be decoded, gfx_image_error says why (it may be NULL when the file
 itself could not be opened - then errno tells). load_image_stb decodes a picture that is
-already in memory. save_bmp writes a 32-bit BMP (screenshots, generated
-art). Pictures in rozOS: /usr/share/images, /usr/share/icons,
+already in memory. save_bmp writes a 24-bit BMP; save_png (phase 19d)
+writes a compressed PNG - much smaller for drawings and screenshots. Both
+save the colours only, not the alpha (transparency). Pictures in rozOS: /usr/share/images, /usr/share/icons,
 /usr/share/games.
 @returns
-A surface or NULL; save_bmp 0 or -1.
+A surface or NULL; save_bmp / save_png 0 or -1.
 @see gfx_blit gfx_surface game_image_load
 @example
 #include <stdio.h>
@@ -404,7 +406,8 @@ int main(void)
     gfx_surface *s = gfx_surface_new(32, 16), *back;
     gfx_clear(s, GFX_RGB(200, 100, 50));
     gfx_save_bmp(s, "small.bmp");
-    back = gfx_load_image("small.bmp");
+    gfx_save_png(s, "small.png");
+    back = gfx_load_image("small.png");
     if (!back) { printf("load failed: %s\n", gfx_image_error()); return 1; }
     printf("loaded %d x %d, colour %08x\n", back->w, back->h, (unsigned)gfx_get_pixel(back, 3, 3));
     if (!gfx_load_image("missing.png")) printf("missing.png: %s\n", gfx_image_error() ? gfx_image_error() : "cannot open");

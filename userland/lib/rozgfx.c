@@ -790,6 +790,164 @@ int gfx_save_bmp(const gfx_surface *s, const char *path)
     return fclose(f) == 0 ? 0 : -1;
 }
 
+/* ================= PNG লেখা (ধাপ ১৯ঘ) =================
+ * 8-বিট RGB (alpha লেখা হয় না), filter 0। deflate: fixed Huffman, আর মিল খোঁজা হয় শুধু দুই
+ * জায়গায় — আগের পিক্সেল (দূরত্ব 3) আর ওপরের সারি (দূরত্ব = সারির মাপ)। আঁকা ছবিতে (একই রঙের
+ * বড় জায়গা) এতেই অনেক ছোট হয়; ফটো প্রায় আসল মাপেই থাকে। কোনো বাইরের লাইব্রেরি লাগে না। */
+
+struct png_out { uint8_t *b; size_t n, cap; uint32_t bits; int nbits; int err; };
+
+static void po_byte(struct png_out *o, uint8_t v)
+{
+    if (o->n == o->cap) {
+        size_t nc = o->cap ? o->cap * 2 : 65536;
+        uint8_t *nb = (uint8_t *)realloc(o->b, nc);
+        if (!nb) { o->err = 1; return; }
+        o->b = nb;
+        o->cap = nc;
+    }
+    o->b[o->n++] = v;
+}
+
+static void po_bits(struct png_out *o, uint32_t v, int n)        /* LSB আগে */
+{
+    o->bits |= v << o->nbits;
+    o->nbits += n;
+    while (o->nbits >= 8) {
+        po_byte(o, (uint8_t)o->bits);
+        o->bits >>= 8;
+        o->nbits -= 8;
+    }
+}
+
+static void po_huff(struct png_out *o, uint32_t code, int n)     /* Huffman কোড MSB আগে */
+{
+    uint32_t r = 0;
+    int i;
+    for (i = 0; i < n; i++) r |= ((code >> i) & 1u) << (n - 1 - i);
+    po_bits(o, r, n);
+}
+
+static void po_lit(struct png_out *o, int v)
+{
+    if (v < 144) po_huff(o, 0x30u + (uint32_t)v, 8);
+    else if (v < 256) po_huff(o, 0x190u + (uint32_t)(v - 144), 9);
+    else if (v < 280) po_huff(o, (uint32_t)(v - 256), 7);
+    else po_huff(o, 0xC0u + (uint32_t)(v - 280), 8);
+}
+
+static void po_match(struct png_out *o, int len, int dist)
+{
+    static const short lb[29] = { 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59,
+                                  67, 83, 99, 115, 131, 163, 195, 227, 258 };
+    static const unsigned char le[29] = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4,
+                                          5, 5, 5, 5, 0 };
+    static const unsigned short db[30] = { 1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385,
+                                           513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577 };
+    static const unsigned char de[30] = { 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10,
+                                          11, 11, 12, 12, 13, 13 };
+    int i = 28, j = 29;
+    while (lb[i] > len) i--;
+    po_lit(o, 257 + i);
+    if (le[i]) po_bits(o, (uint32_t)(len - lb[i]), le[i]);
+    while (db[j] > dist) j--;
+    po_huff(o, (uint32_t)j, 5);
+    if (de[j]) po_bits(o, (uint32_t)(dist - db[j]), de[j]);
+}
+
+static uint32_t png_crc(uint32_t crc, const uint8_t *p, size_t n)
+{
+    static uint32_t t[256];
+    static int ready;
+    size_t i;
+    if (!ready) {
+        uint32_t c, k;
+        int b;
+        for (k = 0; k < 256; k++) {
+            for (c = k, b = 0; b < 8; b++) c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+            t[k] = c;
+        }
+        ready = 1;
+    }
+    crc = ~crc;
+    for (i = 0; i < n; i++) crc = t[(crc ^ p[i]) & 0xFF] ^ (crc >> 8);
+    return ~crc;
+}
+
+static void be32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16); p[2] = (uint8_t)(v >> 8); p[3] = (uint8_t)v; }
+
+static int png_chunk(FILE *f, const char *type, const uint8_t *data, size_t n)
+{
+    uint8_t h[8], c[4];
+    uint32_t crc;
+    be32(h, (uint32_t)n);
+    memcpy(h + 4, type, 4);
+    crc = png_crc(0, h + 4, 4);
+    crc = png_crc(crc, data, n);
+    be32(c, crc);
+    return fwrite(h, 1, 8, f) == 8 && (n == 0 || fwrite(data, 1, n, f) == n) && fwrite(c, 1, 4, f) == 4 ? 0 : -1;
+}
+
+int gfx_save_png(const gfx_surface *s, const char *path)
+{
+    size_t rowlen = (size_t)s->w * 3 + 1, n = rowlen * (size_t)s->h, i;
+    uint8_t *raw, ihdr[13], sig[8] = { 137, 'P', 'N', 'G', 13, 10, 26, 10 };
+    struct png_out o;
+    uint32_t a = 1, b = 0;
+    FILE *f;
+    int x, y, r;
+    if (s->w <= 0 || s->h <= 0 || rowlen > 32768) { errno = EINVAL; return -1; }
+    raw = (uint8_t *)malloc(n);
+    if (!raw) return -1;
+    for (y = 0; y < s->h; y++) {
+        uint8_t *d = raw + (size_t)y * rowlen;
+        const uint32_t *px = s->px + (size_t)y * s->stride;
+        *d++ = 0;                                          /* filter: নেই */
+        for (x = 0; x < s->w; x++) {
+            *d++ = (uint8_t)GFX_R(px[x]); *d++ = (uint8_t)GFX_G(px[x]); *d++ = (uint8_t)GFX_B(px[x]);
+        }
+    }
+    memset(&o, 0, sizeof(o));
+    po_byte(&o, 0x78);                                     /* zlib হেডার */
+    po_byte(&o, 0x01);
+    po_bits(&o, 1, 1);                                     /* শেষ ব্লক */
+    po_bits(&o, 1, 2);                                     /* fixed Huffman */
+    for (i = 0; i < n;) {
+        int best = 0, bd = 0, k;
+        size_t ds[2];
+        ds[0] = 3;
+        ds[1] = rowlen;
+        for (k = 0; k < 2; k++) {
+            size_t d = ds[k];
+            int l = 0;
+            if (i < d) continue;
+            while (l < 258 && i + (size_t)l < n && raw[i + l] == raw[i + l - d]) l++;
+            if (l > best) { best = l; bd = (int)d; }
+        }
+        if (best >= 3) { po_match(&o, best, bd); i += (size_t)best; }
+        else po_lit(&o, raw[i++]);
+    }
+    po_lit(&o, 256);                                       /* ব্লকের শেষ */
+    if (o.nbits) po_bits(&o, 0, 8 - o.nbits);
+    for (i = 0; i < n; i++) {                              /* adler32 */
+        a = (a + raw[i]) % 65521u;
+        b = (b + a) % 65521u;
+    }
+    free(raw);
+    po_byte(&o, (uint8_t)(b >> 8)); po_byte(&o, (uint8_t)b); po_byte(&o, (uint8_t)(a >> 8)); po_byte(&o, (uint8_t)a);
+    if (o.err) { free(o.b); errno = ENOMEM; return -1; }
+    be32(ihdr, (uint32_t)s->w);
+    be32(ihdr + 4, (uint32_t)s->h);
+    ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;   /* 8 বিট, RGB */
+    f = fopen(path, "wb");
+    if (!f) { free(o.b); return -1; }
+    r = fwrite(sig, 1, 8, f) == 8 && png_chunk(f, "IHDR", ihdr, 13) == 0 && png_chunk(f, "IDAT", o.b, o.n) == 0 &&
+        png_chunk(f, "IEND", NULL, 0) == 0;
+    free(o.b);
+    if (fclose(f) != 0) r = 0;
+    return r ? 0 : -1;
+}
+
 /* ================= PSF ফন্ট ================= */
 
 struct gfx_font {

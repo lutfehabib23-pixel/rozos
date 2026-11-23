@@ -127,6 +127,7 @@ gfx_surface *gfx_load_image(const char *path);   /* .bmp .ppm .jpg .png .gif .tg
 const char *gfx_image_error(void);               /* ধাপ ১৪: শেষ ব্যর্থতার কারণ (JPEG/PNG ইত্যাদি) */
 gfx_surface *gfx_load_image_stb(const unsigned char *data, long size);   /* ভেতরের কাজে */
 int gfx_save_bmp(const gfx_surface *s, const char *path);   /* 0 = ঠিক আছে */
+int gfx_save_png(const gfx_surface *s, const char *path);   /* ধাপ ১৯ঘ: PNG (RGB, alpha নয়); 0 = ঠিক আছে */
 
 /* ---------- বিটম্যাপ ফন্ট (PSF) ---------- */
 typedef struct gfx_font gfx_font;

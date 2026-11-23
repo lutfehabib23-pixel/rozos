@@ -1889,6 +1889,30 @@ static void test_phase19c(void)
     }
 }
 
+/* ধাপ ১৯ঘ: gfx_save_png — লিখে আবার পড়ে প্রতিটা পিক্সেল মেলানো (Paint-এর PNG সংরক্ষণ) */
+static void test_phase19d(void)
+{
+    gfx_surface *a = gfx_surface_new(120, 80), *b;
+    int x, y, bad = 0;
+    long size = 0;
+    struct stat st;
+    if (!a) { check(0, "gfx_save_png: memory"); return; }
+    gfx_gradient_v(a, 0, 0, 120, 80, GFX_RGB(0, 0, 90), GFX_RGB(240, 130, 10));
+    gfx_fill_circle(a, 60, 40, 25, GFX_YELLOW);
+    gfx_line(a, 0, 79, 119, 0, GFX_RED);
+    for (x = 0; x < 120; x += 3) gfx_pixel(a, x, 3, GFX_RGB(x * 2, 255 - x, x));
+    if (gfx_save_png(a, "/tmp/st19d.png") == 0 && (b = gfx_load_image("/tmp/st19d.png")) != NULL) {
+        for (y = 0; y < 80; y++)
+            for (x = 0; x < 120; x++)
+                if ((gfx_get_pixel(a, x, y) & 0xFFFFFF) != (gfx_get_pixel(b, x, y) & 0xFFFFFF)) bad++;
+        if (stat("/tmp/st19d.png", &st) == 0) size = (long)st.st_size;
+        gfx_surface_free(b);
+    } else bad = -1;
+    unlink("/tmp/st19d.png");
+    gfx_surface_free(a);
+    check(bad == 0 && size > 0 && size < 120 * 80 * 3, "gfx_save_png writes a PNG that loads back exactly (and smaller than raw)");
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -1915,6 +1939,7 @@ int main(int argc, char **argv)
     test_phase19a();
     test_phase19b();
     test_phase19c();
+    test_phase19d();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }
