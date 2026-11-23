@@ -61,7 +61,7 @@
 #include <arch/x86_64/pit.h>
 #include <arch/x86_64/apic.h>
 
-#define ROZOS_VERSION "0.19.8-phase19h"
+#define ROZOS_VERSION "0.19.10-phase19j"
 
 #ifdef __TINYC__
 /* ধাপ ১১: TCC-র লিংকারে linker.ld নেই — শুরু = Limine-এর দেওয়া virtual base,
@@ -263,16 +263,22 @@ static void init_interrupts_and_devices(void)
 /* ধাপ ৩: ফিজিক্যাল ও ভার্চুয়াল মেমোরি, heap */
 static void init_memory(void)
 {
-    char msg[96];
+    char msg[128];
     struct pmm_stats ps;
 
+    /* ধাপ ১৯ঝ: memory map কাটা পড়লে আগেই জানানো (ওপরের RAM আর ডিভাইস বাদ পড়ে) */
+    if (bootinfo()->memmap_truncated) {
+        ksnprintf(msg, sizeof(msg), "memory map: %llu entries did not fit (max %u) - some RAM is ignored",
+                  (unsigned long long)bootinfo()->memmap_truncated, (unsigned)BOOTINFO_MAX_MEMMAP);
+        print_warn(msg);
+    }
     if (!pmm_init()) {
         kpanic("PMM: no usable memory for the page bitmap");
     }
     pmm_get_stats(&ps);
-    ksnprintf(msg, sizeof(msg), "PMM (bitmap): %llu MiB free, bitmap %llu KiB",
+    ksnprintf(msg, sizeof(msg), "PMM (bitmap): %llu MiB free, bitmap %llu KiB, map %llu entries",
               (unsigned long long)(ps.free_pages * PMM_PAGE_SIZE / (1024 * 1024)),
-              (unsigned long long)(ps.bitmap_bytes / 1024));
+              (unsigned long long)(ps.bitmap_bytes / 1024), (unsigned long long)bootinfo()->memmap_count);
     print_ok(msg);
 
     if (!vmm_init()) {

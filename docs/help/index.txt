@@ -7,6 +7,7 @@ Type [[help|how to use this viewer]] if you are new here.
   [[quickstart]]      your first five minutes in rozOS
   [[keys]]            every special key, in one place
   [[qemu]]            running rozOS on your PC (make run, KVM, RAM, disk size)
+  [[real-hardware]]   on a real computer: pen drive, Secure Boot, the debug entry
 
 == The shell (rozsh) ==
   [[rozsh]]           what the shell does and how a command runs

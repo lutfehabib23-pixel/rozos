@@ -1,0 +1,41 @@
+# rozOS on a real computer (phase 19i)
+rozOS runs from a USB pen drive with UEFI. Nothing is written to the
+computer's own disks (they are mounted read-only - [[disks]]).
+
+== Once: prepare the PC ==
+1. In the UEFI setup (Del on Gigabyte, F2 on many others), Boot tab:
+   CSM Support = Disabled, Secure Boot = Disabled (rozOS's boot loader,
+   Limine, is not signed by Microsoft). Windows still starts normally;
+   if BitLocker is on, keep its recovery key first.
+2. Unplug other USB disks while testing - USB disks are mounted on
+   /mnt/usb and can be written.
+
+== Make the pen drive - the easy way (no Rufus) ==
+On the PC (WSL):
+  `make CROSS= usb`
+  `cp -r build/usb/* /mnt/d/`        (D: = the pen drive, formatted FAT32)
+or copy the folder build/usb by hand (Explorer: \\wsl$\Ubuntu\home\USER\rozOS\build\usb).
+The pen drive then has EFI/BOOT/BOOTX64.EFI and boot/ (rozos.elf,
+initrd.tar, limine/limine.conf). After a change, copy only boot/rozos.elf
+and boot/initrd.tar again - no rewriting of the whole drive.
+The other way: `make CROSS= iso`, then Rufus with GPT, UEFI (non CSM) and
+"DD Image mode".
+
+== Boot ==
+F12 at power-on (Gigabyte; F11/F8/Esc on others) and choose "UEFI: <pen
+drive>". In the Limine menu, "rozOS (debug: show every boot step)" prints
+each step (text mode) - if it stops, take a photo of the screen: the last
+lines show where.
+
+== What to expect ==
+Works: the screen (UEFI framebuffer), keyboard and mouse (USB or PS/2),
+SATA and NVMe disks (read-only), USB pen drives. Not yet: network (only
+Intel e1000 is supported), sound, Wi-Fi, more than one CPU core (all run
+on one). Everything runs from memory: changes are lost at power off -
+save to the pen drive (/mnt/usb).
+If "[kernel] iretq to user failed" appears (seen on an AMD Ryzen with
+the desktop, phase 19j), take a photo of all its lines (frame, GDTR, CR0..,
+CPU) - they show the cause.
+Phase 19i fixed the first real-PC stop: big UEFI memory maps (over 256
+entries) lost the RAM above 4 GB and the framebuffer, so the screen froze
+right after "PMM". See [[boot]], [[boot-menu]], [[usb]].

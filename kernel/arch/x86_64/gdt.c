@@ -18,6 +18,9 @@
 #define GDT_ACC_EXEC      0x08
 #define GDT_ACC_RW        0x02   /* code: readable, data: writable */
 #define GDT_ACC_TSS_AVAIL 0x09   /* 64-bit TSS (available) */
+#define GDT_ACC_ACCESSED  0x01   /* ধাপ ১৯ঞ: আগেই বসানো — CPU যেন segment লোডের সময় GDT-তে
+                                  * নিজে লিখতে না যায় (Linux-ও তাই করে; AMD-তে আসল PC-তে
+                                  * iretq #GP 0x18-এর সন্দেহভাজন) */
 
 /* flags nibble (byte 6-এর উপরের 4 বিট) */
 #define GDT_FLAG_GRAN     0x8    /* limit 4 KiB এককে */
@@ -59,16 +62,16 @@ void gdt_init(void)
 
     gdt[0] = 0;
     gdt[1] = make_descriptor(0, 0xFFFFF,
-                             GDT_ACC_PRESENT | GDT_ACC_CODE_DATA | GDT_ACC_EXEC | GDT_ACC_RW,
+                             GDT_ACC_PRESENT | GDT_ACC_CODE_DATA | GDT_ACC_EXEC | GDT_ACC_RW | GDT_ACC_ACCESSED,
                              GDT_FLAG_GRAN | GDT_FLAG_LONG);
     gdt[2] = make_descriptor(0, 0xFFFFF,
-                             GDT_ACC_PRESENT | GDT_ACC_CODE_DATA | GDT_ACC_RW,
+                             GDT_ACC_PRESENT | GDT_ACC_CODE_DATA | GDT_ACC_RW | GDT_ACC_ACCESSED,
                              GDT_FLAG_GRAN | GDT_FLAG_SIZE32);
     gdt[3] = make_descriptor(0, 0xFFFFF,
-                             GDT_ACC_PRESENT | GDT_ACC_DPL3 | GDT_ACC_CODE_DATA | GDT_ACC_RW,
+                             GDT_ACC_PRESENT | GDT_ACC_DPL3 | GDT_ACC_CODE_DATA | GDT_ACC_RW | GDT_ACC_ACCESSED,
                              GDT_FLAG_GRAN | GDT_FLAG_SIZE32);
     gdt[4] = make_descriptor(0, 0xFFFFF,
-                             GDT_ACC_PRESENT | GDT_ACC_DPL3 | GDT_ACC_CODE_DATA | GDT_ACC_EXEC | GDT_ACC_RW,
+                             GDT_ACC_PRESENT | GDT_ACC_DPL3 | GDT_ACC_CODE_DATA | GDT_ACC_EXEC | GDT_ACC_RW | GDT_ACC_ACCESSED,
                              GDT_FLAG_GRAN | GDT_FLAG_LONG);
 
     memcpy(gdt_expected, gdt, sizeof(gdt_expected));

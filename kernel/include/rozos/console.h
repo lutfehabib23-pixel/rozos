@@ -64,6 +64,8 @@ uint32_t fb_cols(void);
 uint32_t fb_rows(void);
 uint64_t fb_width(void);
 uint64_t fb_height(void);
+/* ধাপ ১৯ঝ: framebuffer-এর ভার্চুয়াল ঠিকানা (Limine-এর HHDM-এ) আর মাপ (pitch × height); না থাকলে 0 */
+int fb_region(uint64_t *virt, uint64_t *bytes);
 uint16_t fb_bpp(void);
 void     fb_put_cell(uint32_t col, uint32_t row, char ch, uint8_t fg, uint8_t bg);
 void     fb_draw_cursor(uint32_t col, uint32_t row, uint8_t color);

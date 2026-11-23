@@ -10,6 +10,7 @@
 #include "gdt.h"
 #include "pic.h"
 #include "cpu.h"
+#include <rozos/timer.h>    /* ধাপ ১৯ঞ: timer_ticks */
 
 #define IDT_TYPE_INTERRUPT_GATE 0x0E   /* ঢোকার সময় IF মুছে দেয় */
 #define IDT_PRESENT             0x80
@@ -158,17 +159,49 @@ void idt_set_user_hooks(int (*fault)(struct interrupt_frame *frame),
  * প্রসেস SIGSEGV-তে শেষ — কার্নেল চলতে থাকে। */
 extern char interrupt_iretq[], syscall_iretq[];
 
+/* ধাপ ১৯ঞ: আসল PC-তে (AMD) কারণ খুঁজতে — CPU-র নাম (cpuid 0x80000002-4) */
+static void cpu_brand(char out[49])
+{
+    uint32_t r[12], i;
+    for (i = 0; i < 3; i++) {
+        uint32_t a, bx, c, d;
+        __asm__ __volatile__("cpuid" : "=a"(a), "=b"(bx), "=c"(c), "=d"(d) : "a"(0x80000002u + i), "c"(0));
+        r[i * 4] = a; r[i * 4 + 1] = bx; r[i * 4 + 2] = c; r[i * 4 + 3] = d;
+    }
+    for (i = 0; i < 48; i++) out[i] = ((const char *)r)[i] ? ((const char *)r)[i] : ' ';
+    out[48] = '\0';
+}
+
 static int bad_iret(struct interrupt_frame *f)
 {
     const uint64_t *b = (const uint64_t *)(uintptr_t)f->rsp;   /* rip, cs, rflags, rsp, ss */
     int to_user = (b[1] & 3) != 0, repaired;
+    static uint64_t last_retry_tick;
+    static unsigned retries, fails;
     if (to_user) {
         __asm__ __volatile__(".byte 0x0f, 0x01, 0xf8");   /* swapgs (TCC-র assembler-এর জন্য বাইটে) */          /* iretq-র ঠিক আগে ইউজারের GS বসানো হয়েছিল */
     }
     tty_set_color(TTY_COLOR_YELLOW, TTY_COLOR_BLACK);
-    kprintf("\n[kernel] iretq to %s failed (%s, error 0x%llx): RIP=%016llx CS=%04llx RFLAGS=%016llx RSP=%016llx SS=%04llx\n",
-            to_user ? "user" : "kernel", exception_name(f->vector), (unsigned long long)f->error_code, (unsigned long long)b[0],
-            (unsigned long long)b[1], (unsigned long long)b[2], (unsigned long long)b[3], (unsigned long long)b[4]);
+    /* ধাপ ১৯ঞ: ছোট ছোট লাইনে (চওড়া পর্দাতেও পুরোটা দেখা যায়) — আসল PC-র ছবি থেকে কারণ খোঁজা */
+    kprintf("\n[kernel] iretq to %s failed (%s, error 0x%llx) #%u\n", to_user ? "user" : "kernel",
+            exception_name(f->vector), (unsigned long long)f->error_code, ++fails);
+    kprintf("  frame: RIP=%016llx CS=%04llx\n", (unsigned long long)b[0], (unsigned long long)b[1]);
+    kprintf("         RFLAGS=%016llx\n", (unsigned long long)b[2]);
+    kprintf("         RSP=%016llx SS=%04llx\n", (unsigned long long)b[3], (unsigned long long)b[4]);
+    {
+        struct gdt_pointer g;
+        const volatile uint64_t *d;
+        char brand[49];
+        __asm__ __volatile__("sgdt %0" : "=m"(g));
+        d = (const volatile uint64_t *)(uintptr_t)g.base;
+        kprintf("  GDTR=%016llx/%x  [3]=%016llx [4]=%016llx\n", (unsigned long long)g.base, (unsigned)g.limit,
+                (unsigned long long)d[3], (unsigned long long)d[4]);
+        kprintf("  CR0=%llx CR3=%llx CR4=%llx EFER=%llx\n", (unsigned long long)cpu_read_cr0(),
+                (unsigned long long)cpu_read_cr3(), (unsigned long long)cpu_read_cr4(),
+                (unsigned long long)cpu_rdmsr(0xC0000080u));
+        cpu_brand(brand);
+        kprintf("  kernel RSP=%016llx  CPU: %s\n", (unsigned long long)f->rsp, brand);
+    }
     repaired = gdt_check_repair();
     tty_set_color(TTY_COLOR_LIGHT_GREY, TTY_COLOR_BLACK);
     if (!to_user) {
@@ -177,6 +210,14 @@ static int bad_iret(struct interrupt_frame *f)
     if (repaired && b[1] == GDT_USER_CODE_SEL && b[4] == GDT_USER_DATA_SEL) {
         kprintf("[kernel] GDT repaired - retrying the return to user mode\n");
         __asm__ __volatile__(".byte 0x0f, 0x01, 0xf8");   /* swapgs (TCC-র assembler-এর জন্য বাইটে) */          /* আবার ইউজারের GS — iretq-তে ফেরা */
+        return 1;
+    }
+    /* ধাপ ১৯ঞ: ফ্রেম ঠিক দেখালে একবার আবার চেষ্টা (সেকেন্ডে একবারের বেশি নয়) — সফল হলে সমস্যা
+     * ক্ষণস্থায়ী, পরের ছবিতে "#2" না এলে সেটাই বোঝা যাবে */
+    if (b[1] == GDT_USER_CODE_SEL && b[4] == GDT_USER_DATA_SEL && timer_ticks() - last_retry_tick > 1000) {
+        last_retry_tick = timer_ticks();
+        kprintf("[kernel] frame looks right - retrying once (retry %u)\n", ++retries);
+        __asm__ __volatile__(".byte 0x0f, 0x01, 0xf8");   /* swapgs — আবার ইউজারের GS */
         return 1;
     }
     if (user_fault_hook) {

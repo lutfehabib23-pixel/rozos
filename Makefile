@@ -3,6 +3,7 @@
 #   make            কার্নেল বিল্ড (build/rozos.elf)
 #   make initrd     sysroot/ থেকে build/initrd.tar (USTAR) — ISO-র পুরো সিস্টেম
 #   make rescue-initrd   build/initrd-rescue.tar — ডিস্কের boot partition-এর ছোট উদ্ধার-সিস্টেম
+#   make usb        build/usb/ — FAT32 পেন ড্রাইভে কপি করার ফাইল (আসল কম্পিউটারে, ধাপ ১৯ঝ)
 #   make iso        বুটযোগ্য ISO (rozos.iso) — BIOS ও UEFI দুটোতেই চলে
 #   make disk       sysroot/ থেকে ext2 ডিস্ক ইমেজ (rozos-disk.img) — শুধু না থাকলে বানায়
 #   make disk-reset ডিস্ক ইমেজ মুছে sysroot/ থেকে নতুন করে (ভেতরের সব পরিবর্তন হারাবে!)
@@ -898,6 +899,19 @@ endef
 
 $(ISO): $(KERNEL) $(INITRD) limine.conf $(LIMINE_DIR)/limine $(LIMINE_FILES)
 	$(call make_iso,$(KERNEL),$@,$(ISO_ROOT))
+
+# ধাপ ১৯ঝ: আসল কম্পিউটারে পরীক্ষা — Rufus ছাড়াই। পেন ড্রাইভ একবার FAT32 করে build/usb-এর সব
+# কিছু কপি; পরে শুধু boot/rozos.elf আর boot/initrd.tar বদলালেই হয়। UEFI-তে চলে (Secure Boot
+# বন্ধ)। limine.conf ISO-রটাই (debug এন্ট্রিসহ)। help real-hardware
+USB_DIR := $(BUILD)/usb
+usb: $(KERNEL) $(INITRD) limine.conf $(LIMINE_FILES)
+	@rm -rf $(USB_DIR) && mkdir -p $(USB_DIR)/EFI/BOOT $(USB_DIR)/boot/limine
+	@cp $(LIMINE_DIR)/BOOTX64.EFI $(LIMINE_DIR)/BOOTIA32.EFI $(USB_DIR)/EFI/BOOT/
+	@cp limine.conf $(USB_DIR)/boot/limine/
+	@cp $(KERNEL) $(USB_DIR)/boot/rozos.elf
+	@cp $(INITRD) $(USB_DIR)/boot/initrd.tar
+	@echo "  USB     $(USB_DIR)/ ($$(du -sm $(USB_DIR) | cut -f1) MB) - copy everything in it to a FAT32 pen drive (help real-hardware)"
+.PHONY: usb
 
 # ধাপ ১১: rozOS-এর ভেতরে `cd /usr/src/rozos && make` দিয়ে বানানো kernel ডিস্ক থেকে বের করে
 # আলাদা ISO (initrd একই)। QEMU চলার সময় চালাবেন না। তারপর: make run-self

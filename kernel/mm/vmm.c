@@ -15,6 +15,8 @@
 #include <rozos/early_map.h>
 #include <rozos/string.h>
 #include <arch/x86_64/cpu.h>
+#include <rozos/console.h>      /* ধাপ ১৯ঝ: fb_region */
+#include <rozos/printf.h>
 
 #define MSR_EFER  0xC0000080
 #define EFER_NXE  (1ULL << 11)
@@ -299,11 +301,23 @@ static int hhdm_type(uint64_t type, uint32_t *flags)
     }
 }
 
+/* ধাপ ১৯ঝ: cmdline-এ "bootdebug" থাকলে vmm_init-এর প্রতিটা ধাপ পর্দায় (আসল হার্ডওয়্যারে
+ * কোথায় আটকায় দেখতে) — পুরোনো (Limine-এর) টেবিলে থাকতেই ছাপা হয় */
+static int boot_debug(void)
+{
+    const char *c = bootinfo()->cmdline;
+    for (; *c; c++)
+        if (!strncmp(c, "bootdebug", 9) && (c == bootinfo()->cmdline || c[-1] == ' ') && (c[9] == ' ' || !c[9]))
+            return 1;
+    return 0;
+}
+
 int vmm_init(void)
 {
     const struct bootinfo *bi = bootinfo();
     uint64_t *pml4, i;
     size_t m;
+    int dbg = boot_debug();
 
     hhdm = bi->hhdm_offset;
     nx_ok = (cpu_rdmsr(MSR_EFER) & EFER_NXE) != 0;
@@ -324,6 +338,7 @@ int vmm_init(void)
         pml4[i] = phys | PTE_PRESENT | PTE_WRITABLE;
     }
 
+    if (dbg) kprintf("  [vmm] kernel image\n");
     /* ২. কার্নেল ইমেজ, প্রতিটি অংশ নিজের permission-এ (linker.ld-এর PHDRS অনুযায়ী) */
 #ifdef __TINYC__
     if (!map_kernel_from_phdrs(bootinfo()->kernel_virt)) {
@@ -339,6 +354,8 @@ int vmm_init(void)
 #endif
 
     /* ৩. HHDM */
+    if (dbg) kprintf("  [vmm] HHDM: %llu memory map entries (%llu did not fit)\n",
+                     (unsigned long long)bi->memmap_count, (unsigned long long)bi->memmap_truncated);
     for (i = 0; i < bi->memmap_count; i++) {
         const struct boot_memmap_entry *e = &bi->memmap[i];
         uint32_t flags;
@@ -354,6 +371,7 @@ int vmm_init(void)
     }
 
     /* ৪. early_map দিয়ে আগে ম্যাপ করা ডিভাইস মেমোরি (যেমন LAPIC) */
+    if (dbg) kprintf("  [vmm] early MMIO: %llu ranges\n", (unsigned long long)early_map_mmio_count());
     for (m = 0; m < early_map_mmio_count(); m++) {
         uint64_t phys, size;
         early_map_mmio_range(m, &phys, &size);
@@ -362,8 +380,31 @@ int vmm_init(void)
         }
     }
 
+    /* ৪খ. ধাপ ১৯ঝ: framebuffer সরাসরি Limine-এর framebuffer তথ্য থেকে — memory map-এ না
+     * থাকলেও (বা entry কাটা পড়লেও) পর্দা যেন নতুন টেবিলে ম্যাপ থাকে। আগেই ম্যাপ থাকা পেজ বাদ।
+     * আসল হার্ডওয়্যারে (RTX কার্ড, framebuffer 4 GB-এর ওপরে) এটা না থাকায় CR3 বদলের পরই
+     * প্রথম লেখায় page fault → বার্তাও লেখা যায় না → পর্দা স্থির। */
+    {
+        uint64_t fv, fsz, p, start, end, added = 0;
+        if (fb_region(&fv, &fsz) && fv >= hhdm) {
+            start = (fv - hhdm) & ~(VMM_PAGE_SIZE - 1);
+            end = (fv - hhdm + fsz + VMM_PAGE_SIZE - 1) & ~(VMM_PAGE_SIZE - 1);
+            for (p = start; p < end; p += VMM_PAGE_SIZE) {
+                if (vmm_virt_to_phys(&kernel_space, p + hhdm)) continue;
+                if (!vmm_map_page(&kernel_space, p + hhdm, p, VMM_WRITE | VMM_WC)) {
+                    return 0;
+                }
+                added++;
+            }
+            if (dbg) kprintf("  [vmm] framebuffer at phys 0x%llx, %llu KiB (%llu pages added)\n",
+                             (unsigned long long)start, (unsigned long long)(fsz / 1024), (unsigned long long)added);
+        }
+    }
+
     /* ৫. নতুন টেবিলে চলে যাওয়া */
+    if (dbg) kprintf("  [vmm] switching to the new page tables (CR3)\n");
     vmm_switch(&kernel_space);
+    if (dbg) kprintf("  [vmm] running on the new tables\n");
 
     /* এখন থেকে early_map-ও নতুন টেবিলে কাজ করবে, টেবিল নেবে PMM থেকে */
     early_map_set_table_allocator(pmm_alloc_zeroed_page);

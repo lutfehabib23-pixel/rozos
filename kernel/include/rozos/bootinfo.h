@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define BOOTINFO_MAX_MEMMAP   256
+#define BOOTINFO_MAX_MEMMAP   1024   /* ধাপ ১৯ঝ: ২৫৬ ছিল — নতুন UEFI বোর্ডে (RTX কার্ডসহ) এর বেশি entry আসে */
 #define BOOTINFO_MAX_MODULES  16
 #define BOOTINFO_STR_MAX      128
 

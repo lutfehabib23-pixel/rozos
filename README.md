@@ -6,7 +6,7 @@
 
 rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphical desktop. It includes a C compiler, a text editor, `make`, a TCP/IP stack with HTTPS, and a package manager, so you can write, compile and even rebuild the rozOS kernel **from inside rozOS itself**.
 
-> Status: hobby / educational OS, under active development (current: **0.19.8-phase19h**).
+> Status: hobby / educational OS, under active development (current: **0.19.10-phase19j**).
 > It runs in QEMU. Real hardware has not been tested yet.
 
 ---
@@ -34,7 +34,7 @@ rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphica
 | **Desktop apps** | **Code** (graphical C editor: menus, syntax colours, compile and run with tcc, clickable errors), **Files** (file manager with right-click menu, lock/unlock, hide/unhide), **Settings** (wallpaper, desktop icons, memory, processes, disks, network), calculator, paint, image viewer |
 | **Shell** | `rozsh`: pipes, redirection, `&&`/`||`, job control, history; about 50 own programs in `/bin` plus about 70 classic Unix tools from **sbase** (grep, sed, sort, head, tail, find, xargs, cut, tr, sha256sum ...) |
 | **C reference** | Turbo C-style help for C: the language and every function of `<stdio.h>`, `<stdlib.h>`, `<string.h>`, `<strings.h>`, `<ctype.h>`, `<math.h>`, `<time.h>`, and POSIX - `<unistd.h>`, `<fcntl.h>`, `<sys/*.h>`, `<signal.h>`, `<pthread.h>`, sockets, `<termios.h>`, `<regex.h>`, `<wchar.h>`, `<locale.h>`, `<iconv.h>` ..., and the rozOS libraries `<rozgfx.h>`, `<rozui.h>`, `<rozgame.h>`, `<rozhttp.h>`, `<rozos.h>`, `<rozlock.h>` plus guides to Lua (C API and the `game` module), zlib and SQLite (440 pages) with syntax, explanation and a runnable example; Ctrl+F1 on a word in Code or `edit`, the `crefview` window (Copy / Try it), and `cref` in a terminal; every example is compiled and run by `make cref-check` |
-| **Docs** | 113 built-in help pages (`help`, `help desktop`, `help syscalls`, …) |
+| **Docs** | 114 built-in help pages (`help`, `help desktop`, `help syscalls`, …) |
 
 ---
 
@@ -75,6 +75,7 @@ Other targets:
 | `make run-uefi` | boot through UEFI (OVMF) |
 | `make run-serial` | no window; you get a shell in this terminal |
 | `make iso` / `make run-iso` | build or boot the live ISO |
+| `make usb` | `build/usb/`: copy it to a FAT32 pen drive to boot a real PC (UEFI, Secure Boot off) - `help real-hardware` |
 | `make run USB=1` | also attach USB: a 64 MiB pen drive (mounted on `/mnt/usb`), keyboard, mouse; `USB_DEV=/dev/sdX` = a real pen drive via usbipd |
 | `make run NVME=1` | also attach a 64 MiB NVMe SSD (`mount /dev/nvmea /mnt/nvme`) |
 | `make disk-reset` | recreate the disk image from scratch (**erases** files you made inside rozOS) |

@@ -118,6 +118,13 @@ uint32_t fb_cols(void)     { return cols; }
 uint32_t fb_rows(void)     { return rows; }
 uint64_t fb_width(void)    { return fb_w; }
 uint64_t fb_height(void)   { return fb_h; }
+int fb_region(uint64_t *virt, uint64_t *bytes)
+{
+    if (!fb_addr || !fb_pitch || !fb_h) return 0;
+    *virt = (uint64_t)(uintptr_t)fb_addr;
+    *bytes = fb_pitch * fb_h;
+    return 1;
+}
 uint16_t fb_bpp(void)      { return fb_depth; }
 
 static void fill_rect(uint64_t x, uint64_t y, uint64_t w, uint64_t h, uint32_t color)
