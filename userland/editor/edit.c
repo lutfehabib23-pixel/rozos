@@ -1066,9 +1066,38 @@ static void leave(int code)
 
 /* ধাপ ১২ক: Ctrl+R — C ফাইল সংরক্ষণ, tcc দিয়ে কম্পাইল করে চালানো। এডিটরের পর্দা ছেড়ে
  * সাধারণ পর্দায় চলে (প্রোগ্রামের output/input স্বাভাবিক), Enter দিলে এডিটরে ফেরে। */
+/* ধাপ ১৯গ: প্রোগ্রাম কোন হেডার #include করেছে দেখে বাড়তি লাইব্রেরি (C সহায়িকার উদাহরণ
+ * সরাসরি চলে): rozhttp → -lrozhttp -lbearssl, lua/lauxlib → -llua, zlib → -lz, rozcref → -lrozcref */
+static int extra_libs(const char *file, const char **libs, int max)
+{
+    static const struct { const char *inc, *lib1, *lib2; } t[] = {
+        { "<rozhttp.h>", "-lrozhttp", "-lbearssl" }, { "<lua.h>", "-llua", NULL },
+        { "<lauxlib.h>", "-llua", NULL }, { "<zlib.h>", "-lz", NULL }, { "<rozcref.h>", "-lrozcref", NULL },
+    };
+    char line[512];
+    int n = 0, i, j, k;
+    FILE *f = fopen(file, "r");
+    if (!f) return 0;
+    while (fgets(line, sizeof(line), f)) {
+        if (!strstr(line, "include")) continue;
+        for (i = 0; i < (int)(sizeof(t) / sizeof(t[0])); i++) {
+            const char *l[2];
+            if (!strstr(line, t[i].inc)) continue;
+            l[0] = t[i].lib1;
+            l[1] = t[i].lib2;
+            for (j = 0; j < 2 && l[j]; j++) {
+                for (k = 0; k < n; k++) if (!strcmp(libs[k], l[j])) break;
+                if (k == n && n < max) libs[n++] = l[j];
+            }
+        }
+    }
+    fclose(f);
+    return n;
+}
+
 static void run_c(void)
 {
-    char cmd[sizeof(filename) + 96];
+    char cmd[sizeof(filename) + 300];
     const char *dot;
     int rc, c;
     if (save_file() < 0) return;
@@ -1083,7 +1112,18 @@ static void run_c(void)
     fflush(stdout);
     /* ধাপ ১৩: -lrozgfx — গ্রাফিক্স প্রোগ্রামও চলে (না লাগলে কিছুই যোগ হয় না) */
     /* ধাপ ১৮ক: -lrozgame -lm — গেমও চলে */
-    snprintf(cmd, sizeof(cmd), "set -e; tcc %s -lrozgame -lrozgfx -lm -o /tmp/edit-run; /tmp/edit-run", filename);
+    /* ধাপ ১৯গ: হেডার দেখে বাড়তি লাইব্রেরি (rozhttp, lua, zlib, rozcref); -lrozui-ও */
+    {
+        const char *extra[8];
+        char libs[160] = "";
+        int n = extra_libs(filename, extra, 8), i;
+        for (i = 0; i < n; i++) {
+            strncat(libs, extra[i], sizeof(libs) - strlen(libs) - 2);
+            strcat(libs, " ");
+        }
+        snprintf(cmd, sizeof(cmd), "set -e; tcc %s %s-lrozui -lrozgame -lrozgfx -lm -o /tmp/edit-run; /tmp/edit-run",
+                 filename, libs);
+    }
     set_isig(1);                        /* চলন্ত প্রোগ্রাম Ctrl+C-তে থামে, এডিটর নয় */
     rc = system(cmd);
     set_isig(0);

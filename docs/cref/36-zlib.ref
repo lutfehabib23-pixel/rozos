@@ -1,0 +1,154 @@
+# rozOS C reference - a short guide to zlib 1.3 (phase 19c)
+# #include <zlib.h>   build: tcc prog.c -lz -o prog
+# The most used calls; the full manual is in zlib.h and at zlib.net/manual.html.
+# gzip and gunzip in rozOS are built on zlib.
+
+@entry compress
+@also zlib zlib.h libz compress2 compressBound uncompress Z_OK Z_BUF_ERROR Z_BEST_COMPRESSION zlibVersion
+@header zlib.h
+@syntax int compress(Bytef *dest, uLongf *destLen, const Bytef *src, uLong srcLen);
+@syntax int compress2(Bytef *dest, uLongf *destLen, const Bytef *src, uLong srcLen, int level);
+@syntax uLong compressBound(uLong srcLen);
+@syntax int uncompress(Bytef *dest, uLongf *destLen, const Bytef *src, uLong srcLen);
+@syntax const char *zlibVersion(void);
+@summary Compress or uncompress a whole buffer in one call.
+@desc
+compressBound tells how big dest must be at most. Set *destLen to the
+size of dest before the call; afterwards it holds the real size. level
+0-9 (Z_BEST_COMPRESSION = 9; compress uses 6). uncompress needs to know a
+big enough output size - store the original size next to the data.
+@returns
+Z_OK (0), Z_MEM_ERROR, Z_BUF_ERROR (dest too small) or Z_DATA_ERROR.
+@see gzopen deflate crc32
+@example
+#include <stdio.h>
+#include <string.h>
+#include <zlib.h>
+
+int main(void)
+{
+    const char *text = "rozOS rozOS rozOS rozOS rozOS rozOS rozOS rozOS rozOS rozOS";
+    unsigned char packed[200], back[200];
+    uLongf plen = sizeof packed, blen = sizeof back;
+    uLong n = (uLong)strlen(text) + 1;
+    if (compress(packed, &plen, (const Bytef *)text, n) != Z_OK) return 1;
+    if (uncompress(back, &blen, packed, plen) != Z_OK) return 1;
+    printf("zlib %s: %lu bytes -> %lu bytes -> \"%.11s...\"\n", zlibVersion(),
+           (unsigned long)n, (unsigned long)plen, back);
+    return 0;
+}
+@end
+
+@entry gzopen
+@also gzread gzwrite gzprintf gzgets gzputs gzclose gzeof gzFile .gz
+@header zlib.h
+@syntax gzFile gzopen(const char *path, const char *mode);      /* "rb", "wb", "wb9" ... */
+@syntax int gzwrite(gzFile f, const void *buf, unsigned len);   int gzread(gzFile f, void *buf, unsigned len);
+@syntax int gzprintf(gzFile f, const char *fmt, ...);           char *gzgets(gzFile f, char *buf, int len);
+@syntax int gzputs(gzFile f, const char *s);                    int gzeof(gzFile f);
+@syntax int gzclose(gzFile f);
+@summary Read and write .gz files almost like stdio files.
+@desc
+gzopen with "wb" writes a gzip file (add a digit for the level, "wb9");
+"rb" reads one (also a plain, uncompressed file). The rest works like
+fwrite, fread, fprintf, fgets, fputs. gzclose finishes and closes - it
+must be called, or the file is incomplete. The result opens with gunzip.
+@returns
+gzopen: a handle or NULL. gzread/gzwrite: bytes (0 at the end, -1 error).
+@see compress fopen
+@example
+#include <stdio.h>
+#include <zlib.h>
+
+int main(void)
+{
+    char line[80];
+    int i;
+    gzFile f = gzopen("log.txt.gz", "wb9");
+    if (!f) return 1;
+    for (i = 1; i <= 3; i++) gzprintf(f, "line %d of a compressed log\n", i);
+    gzclose(f);
+    f = gzopen("log.txt.gz", "rb");
+    while (gzgets(f, line, sizeof line)) printf("read: %s", line);
+    gzclose(f);
+    return 0;
+}
+@end
+
+@entry deflate
+@also inflate deflateInit inflateInit deflateEnd inflateEnd z_stream Z_FINISH Z_NO_FLUSH Z_STREAM_END deflateInit2 inflateInit2 streaming
+@header zlib.h
+@syntax int deflateInit(z_streamp s, int level);    int deflate(z_streamp s, int flush);    int deflateEnd(z_streamp s);
+@syntax int inflateInit(z_streamp s);               int inflate(z_streamp s, int flush);    int inflateEnd(z_streamp s);
+@syntax int deflateInit2(s, level, Z_DEFLATED, windowBits, memLevel, strategy);   /* windowBits 15+16 = gzip */
+@summary Compress or uncompress data piece by piece (streams).
+@desc
+For data too big for one buffer, or arriving over time. Zero a z_stream,
+init it, then repeatedly set next_in/avail_in (input) and
+next_out/avail_out (room for output) and call deflate (flush Z_NO_FLUSH,
+and Z_FINISH for the last piece) or inflate. When output room runs out,
+take avail_out bytes and call again. Done when it returns Z_STREAM_END;
+then End frees the stream.
+@returns
+Z_OK, Z_STREAM_END (finished), Z_BUF_ERROR (no progress possible), or an
+error.
+@see compress gzopen
+@example
+#include <stdio.h>
+#include <string.h>
+#include <zlib.h>
+
+int main(void)
+{
+    unsigned char out[256], back[256];
+    const char *a = "first piece, ", *b = "second piece.";
+    z_stream s;
+    uLong packed;
+    memset(&s, 0, sizeof s);
+    deflateInit(&s, Z_DEFAULT_COMPRESSION);
+    s.next_out = out; s.avail_out = sizeof out;
+    s.next_in = (Bytef *)a; s.avail_in = (uInt)strlen(a);
+    deflate(&s, Z_NO_FLUSH);
+    s.next_in = (Bytef *)b; s.avail_in = (uInt)strlen(b) + 1;
+    deflate(&s, Z_FINISH);
+    packed = s.total_out;
+    printf("compressed to %lu bytes\n", (unsigned long)packed);
+    deflateEnd(&s);
+
+    memset(&s, 0, sizeof s);
+    inflateInit(&s);
+    s.next_in = out; s.avail_in = (uInt)packed;
+    s.next_out = back; s.avail_out = sizeof back;
+    if (inflate(&s, Z_FINISH) == Z_STREAM_END) printf("back: %s\n", back);
+    inflateEnd(&s);
+    return 0;
+}
+@end
+
+@entry crc32
+@also adler32 checksum
+@header zlib.h
+@syntax uLong crc32(uLong crc, const Bytef *buf, uInt len);
+@syntax uLong adler32(uLong adler, const Bytef *buf, uInt len);
+@summary Checksums: detect damaged or changed data.
+@desc
+Start with crc32(0, NULL, 0) (or adler32(0L, NULL, 0) = 1) and feed the
+data in any number of pieces, passing the previous value back in. CRC-32
+is the checksum used by gzip, ZIP and PNG.
+@returns
+The new checksum.
+@see rozhttp_sha256_init
+@example
+#include <stdio.h>
+#include <string.h>
+#include <zlib.h>
+
+int main(void)
+{
+    const char *s = "123456789";
+    uLong c = crc32(0L, Z_NULL, 0);
+    c = crc32(c, (const Bytef *)s, (uInt)strlen(s));
+    printf("crc32(\"123456789\") = %08lx\n", (unsigned long)c);
+    return 0;
+}
+@end

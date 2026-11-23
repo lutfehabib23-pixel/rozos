@@ -568,10 +568,40 @@ static void exe_name(char *out, size_t size)
 }
 
 /* 0 = ঠিক আছে */
+/* ধাপ ১৯গ: প্রোগ্রাম কোন হেডার #include করেছে দেখে বাড়তি লাইব্রেরি (C সহায়িকার উদাহরণ
+ * সরাসরি চলে): rozhttp → -lrozhttp -lbearssl, lua/lauxlib → -llua, zlib → -lz, rozcref → -lrozcref */
+static int extra_libs(const char *file, const char **libs, int max)
+{
+    static const struct { const char *inc, *lib1, *lib2; } t[] = {
+        { "<rozhttp.h>", "-lrozhttp", "-lbearssl" }, { "<lua.h>", "-llua", NULL },
+        { "<lauxlib.h>", "-llua", NULL }, { "<zlib.h>", "-lz", NULL }, { "<rozcref.h>", "-lrozcref", NULL },
+    };
+    char line[512];
+    int n = 0, i, j, k;
+    FILE *f = fopen(file, "r");
+    if (!f) return 0;
+    while (fgets(line, sizeof(line), f)) {
+        if (!strstr(line, "include")) continue;
+        for (i = 0; i < (int)(sizeof(t) / sizeof(t[0])); i++) {
+            const char *l[2];
+            if (!strstr(line, t[i].inc)) continue;
+            l[0] = t[i].lib1;
+            l[1] = t[i].lib2;
+            for (j = 0; j < 2 && l[j]; j++) {
+                for (k = 0; k < n; k++) if (!strcmp(libs[k], l[j])) break;
+                if (k == n && n < max) libs[n++] = l[j];
+            }
+        }
+    }
+    fclose(f);
+    return n;
+}
+
 static int compile(void)
 {
     char exe[512], dir[512], buf[512];
-    int pfd[2], st = 0, errors = 0, warnings = 0;
+    const char *extra[8];
+    int pfd[2], st = 0, errors = 0, warnings = 0, nextra, i;
     pid_t pid;
     FILE *f;
     if (modified || untitled) {
@@ -583,7 +613,13 @@ static int compile(void)
     if (!dir[0]) strcpy(dir, "/");
     out_clear();
     /* ধাপ ১৮ক: -lrozgame -lm — গেমও Build হয় (না লাগলে কিছু যোগ হয় না) */
-    snprintf(buf, sizeof(buf), "tcc -o %s %s -lrozui -lrozgame -lrozgfx -lm", base_name(exe), base_name(path));
+    nextra = extra_libs(path, extra, 8);
+    snprintf(buf, sizeof(buf), "tcc -o %s %s", base_name(exe), base_name(path));
+    for (i = 0; i < nextra; i++) {
+        strncat(buf, " ", sizeof(buf) - strlen(buf) - 1);
+        strncat(buf, extra[i], sizeof(buf) - strlen(buf) - 1);
+    }
+    strncat(buf, " -lrozui -lrozgame -lrozgfx -lm", sizeof(buf) - strlen(buf) - 1);
     out_add(buf);
     show_output = 1;
     if (pipe(pfd) < 0) { out_add("cannot start the compiler (pipe)"); return -1; }
@@ -594,7 +630,15 @@ static int compile(void)
         close(pfd[0]);
         close(pfd[1]);
         chdir(dir);
-        execlp("tcc", "tcc", "-o", base_name(exe), base_name(path), "-lrozui", "-lrozgame", "-lrozgfx", "-lm", (char *)NULL);
+        {
+            const char *av[20];
+            int n = 0;
+            av[n++] = "tcc"; av[n++] = "-o"; av[n++] = base_name(exe); av[n++] = base_name(path);
+            for (i = 0; i < nextra; i++) av[n++] = extra[i];
+            av[n++] = "-lrozui"; av[n++] = "-lrozgame"; av[n++] = "-lrozgfx"; av[n++] = "-lm";
+            av[n] = NULL;
+            execvp("tcc", (char *const *)av);
+        }
         printf("cannot run tcc: %s\n", strerror(errno));
         _exit(127);
     }

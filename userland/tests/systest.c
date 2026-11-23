@@ -1823,6 +1823,72 @@ static void test_phase19b(void)
     }
 }
 
+/* ধাপ ১৯গ: rozOS লাইব্রেরি (rozgfx, rozui, rozgame, rozhttp, rozos.h, rozcref), Lua game,
+ * Lua C API আর zlib-এর পাতা; zlib আর Lua-র উদাহরণ rozOS-এর tcc দিয়ে চালানো */
+static void test_phase19c(void)
+{
+    const cref_entry *e;
+    int n, ok, i, st;
+    n = cref_load(NULL);
+    check(n >= 420, "C reference has the rozOS library pages too (420+)");
+    e = cref_find("gfx_fill_rect");
+    ok = e && !strcmp(e->header, "rozgfx.h") && cref_find("ui_do_button") && !strcmp(cref_find("ui_do_button")->header, "rozui.h") &&
+         cref_find("game_tilemap_move") && !strcmp(cref_find("game_tilemap_move")->header, "rozgame.h") &&
+         cref_find("rozhttp_get") && cref_find("rozos_netinfo") && cref_find("cref_find");
+    check(ok, "cref_find: rozgfx, rozui, rozgame, rozhttp, rozos.h, rozcref");
+    e = cref_find("game.run");
+    ok = e && !strcmp(e->header, "lua game") && cref_find("lua_pcall") && cref_find("gzopen") &&
+         cref_find("img:draw") == cref_find("game.image");
+    check(ok, "cref_find: Lua game module, Lua C API, zlib");
+    if (access("/bin/tcc", X_OK) == 0) {
+        static const char *const ex[] = { "crc32", "lua_pcall" };
+        static const char *const lib[] = { "-lz", "-llua" };
+        static const char *const want[] = { "cbf43926", "twice(21) = 42" };
+        int good = 0;
+        for (i = 0; i < 2; i++) {
+            char *xargv[] = { "cref", "-x", (char *)ex[i], NULL };
+            char *cargv[] = { "tcc", "-o", "/tmp/cref19c", "/tmp/cref19c.c", (char *)lib[i], "-lm", NULL };
+            char *rargv[] = { "cref19c", NULL };
+            char buf[512];
+            int fd, saved;
+            size_t got;
+            FILE *f;
+            fflush(stdout);
+            fd = open("/tmp/cref19c.c", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            saved = dup(1);
+            dup2(fd, 1);
+            close(fd);
+            ok = run("/bin/cref", xargv, &st) > 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0;
+            fflush(stdout);
+            dup2(saved, 1);
+            close(saved);
+            ok = ok && run("/bin/tcc", cargv, &st) > 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0;
+            if (ok) {
+                fd = open("/tmp/cref19c.out", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                saved = dup(1);
+                dup2(fd, 1);
+                close(fd);
+                ok = run("/tmp/cref19c", rargv, &st) > 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0;
+                fflush(stdout);
+                dup2(saved, 1);
+                close(saved);
+            }
+            f = ok ? fopen("/tmp/cref19c.out", "r") : NULL;
+            got = f ? fread(buf, 1, sizeof buf - 1, f) : 0;
+            if (f) fclose(f);
+            buf[got] = 0;
+            if (ok && strstr(buf, want[i])) good++;
+            else printf("    (example %s: %s)\n", ex[i], ok ? buf : "did not build/run");
+        }
+        unlink("/tmp/cref19c.c");
+        unlink("/tmp/cref19c.out");
+        unlink("/tmp/cref19c");
+        check(good == 2, "zlib and Lua C API examples build with tcc and run");
+    } else {
+        check(1, "tcc not installed - zlib/Lua example test skipped");
+    }
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -1848,6 +1914,7 @@ int main(int argc, char **argv)
     test_phase18b();
     test_phase19a();
     test_phase19b();
+    test_phase19c();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

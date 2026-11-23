@@ -1,0 +1,322 @@
+# rozOS C reference - librozhttp (web), <rozos.h> (rozOS system calls),
+# librozcref (this reference) (phase 19c)
+
+@entry rozhttp_get
+@also rozhttp rozhttp.h librozhttp rozhttp_opts rozhttp_result https http-client
+@header rozhttp.h
+@syntax int rozhttp_get(const char *url, int out_fd, const struct rozhttp_opts *opts, struct rozhttp_result *r);
+@syntax build: tcc prog.c -lrozhttp -lbearssl -o prog
+@summary Download a web page or file over http:// or https://.
+@desc
+The body is written to out_fd (a file or 1 for the screen; -1 = only to
+on_data). HTTPS uses TLS 1.2 (BearSSL) and checks the server certificate
+against /etc/ssl/certs.pem. Redirects are followed (up to 5), chunked
+answers handled. opts may be NULL; its fields:
+  header_fd      write the response headers here (-1 none)
+  no_body        1 = headers only;  no_follow  1 = do not follow redirects
+  max_redirects  0 = 5;  progress 1 = show KiB on stderr;  verbose 1
+  on_data(ctx, data, len), on_data_ctx   called for every piece of body
+The result r gets status (200 ...), bytes, content_length (-1 unknown),
+redirects, tls, final_url, and error (the reason when it failed). http-get
+and rozpkg are built on this.
+@returns
+0 for a 2xx answer, otherwise -1 (r->error says why; r->status holds the
+HTTP status if there was one).
+@see rozhttp_sha256_init rozhttp_tls_available getaddrinfo
+@check compile
+@example
+#include <stdio.h>
+#include <string.h>
+#include <rozhttp.h>
+
+static void count(void *ctx, const void *data, size_t len)
+{
+    (void)data;
+    *(long *)ctx += (long)len;
+}
+
+int main(int argc, char **argv)
+{
+    struct rozhttp_opts o;
+    struct rozhttp_result r;
+    long got = 0;
+    const char *url = argc > 1 ? argv[1] : "https://example.com/";
+    memset(&o, 0, sizeof o);
+    o.header_fd = -1;
+    o.on_data = count;
+    o.on_data_ctx = &got;
+    if (rozhttp_get(url, -1, &o, &r) < 0) {
+        printf("failed: %s (status %d)\n", r.error, r.status);
+        return 1;
+    }
+    printf("%s: status %d, %ld bytes, %s, %d redirect(s)\n", r.final_url, r.status, got,
+           r.tls ? "https" : "http", r.redirects);
+    return 0;
+}
+@end
+
+@entry rozhttp_tls_available
+@also rozhttp_trust_anchor_count
+@header rozhttp.h
+@syntax int rozhttp_tls_available(void);
+@syntax int rozhttp_trust_anchor_count(void);
+@summary Is https available, and how many trusted certificate authorities are loaded?
+@desc
+https needs the library built with BearSSL (the normal rozOS build) and
+the certificate list /etc/ssl/certs.pem. The count loads the list the
+first time it is asked.
+@returns
+tls_available: 1 or 0. trust_anchor_count: the number of CAs (0 if none).
+@see rozhttp_get
+@example
+#include <stdio.h>
+#include <rozhttp.h>
+
+int main(void)
+{
+    printf("https support: %s\n", rozhttp_tls_available() ? "yes" : "no");
+    printf("trusted CAs loaded: %s\n", rozhttp_trust_anchor_count() > 0 ? "some" : "none here");
+    return 0;
+}
+@end
+
+@entry rozhttp_sha256_init
+@also rozhttp_sha256_update rozhttp_sha256_hex rozhttp_sha256 sha256
+@header rozhttp.h
+@syntax void rozhttp_sha256_init(struct rozhttp_sha256 *s);
+@syntax void rozhttp_sha256_update(struct rozhttp_sha256 *s, const void *data, size_t len);
+@syntax void rozhttp_sha256_hex(struct rozhttp_sha256 *s, char out[65]);
+@summary SHA-256 checksum of data (as rozpkg uses to check downloads).
+@desc
+init, then update with the data in as many pieces as you like (for
+example from rozhttp's on_data), then hex writes the 64 hex digits and a
+'\0'.
+@returns
+Nothing.
+@see rozhttp_get
+@example
+#include <stdio.h>
+#include <string.h>
+#include <rozhttp.h>
+
+int main(void)
+{
+    struct rozhttp_sha256 s;
+    char hex[65];
+    rozhttp_sha256_init(&s);
+    rozhttp_sha256_update(&s, "abc", 3);
+    rozhttp_sha256_hex(&s, hex);
+    printf("sha256(\"abc\") = %s\n", hex);
+    return 0;
+}
+@end
+
+@entry rozos.h
+@also rozos __syscall6 __syscall_ret __syscall3 syscall
+@header rozos.h
+@syntax #include <rozos.h>
+@syntax long __syscall6(long n, long a, long b, long c, long d, long e, long f);
+@syntax long __syscall_ret(long r);
+@summary rozOS's own system calls (not POSIX), and raw system calls.
+@desc
+<rozos.h> gives access to things only rozOS has: the kernel monitor,
+network interface information, kernel modules, USB and mount lists.
+__syscall6 makes any system call by number (Linux numbering, plus rozOS's
+own from 500); it returns -ERRNO on failure without setting errno -
+__syscall_ret turns that into -1 + errno.
+@returns
+(a header)
+@see rozos_netinfo rozos_now_ms rozos_init_module rozos_kmon
+@example
+#include <stdio.h>
+#include <rozos.h>
+
+int main(void)
+{
+    long pid = __syscall6(39, 0, 0, 0, 0, 0, 0);          /* 39 = getpid */
+    printf("getpid by number: %s\n", pid > 0 ? "ok" : "failed");
+    return 0;
+}
+@end
+
+@entry rozos_now_ms
+@header rozos.h
+@syntax long rozos_now_ms(void);
+@summary Milliseconds of the monotonic clock (never jumps).
+@desc
+The easy way to measure time inside a program; the same clock as
+clock_gettime(CLOCK_MONOTONIC).
+@returns
+Milliseconds.
+@see clock_gettime gfx_ticks_ms
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <rozos.h>
+
+int main(void)
+{
+    long t = rozos_now_ms();
+    usleep(50000);
+    printf("about %ld ms passed\n", (rozos_now_ms() - t) / 10 * 10);
+    return 0;
+}
+@end
+
+@entry rozos_netinfo
+@also rozos_netconfig rozos_netinfo-struct ifconfig
+@header rozos.h
+@syntax int rozos_netinfo(int index, struct rozos_netinfo *out);
+@syntax int rozos_netconfig(unsigned ip, unsigned mask, unsigned gw, unsigned dns);
+@summary Read the network interface's state; set its address (what ifconfig does).
+@desc
+struct rozos_netinfo: name ("eth0"), driver, mac[6], link_up, configured,
+dhcp, ip, netmask, gateway, dns (network byte order - print with
+inet_ntoa), and packet/byte counters. index 0 is the first interface.
+netconfig sets a fixed address (all in network byte order); ip 0 goes
+back to DHCP.
+@returns
+0, or -1 (errno ENODEV: no such interface).
+@see inet_ntop getaddrinfo
+@check compile
+@example
+#include <stdio.h>
+#include <arpa/inet.h>
+#include <rozos.h>
+
+int main(void)
+{
+    struct rozos_netinfo n;
+    struct in_addr a;
+    if (rozos_netinfo(0, &n) < 0) { printf("no network card\n"); return 0; }
+    a.s_addr = n.ip;
+    printf("%s (%s): %s, link %s, %lu packets in\n", n.name, n.driver, inet_ntoa(a),
+           n.link_up ? "up" : "down", n.rx_packets);
+    return 0;
+}
+@end
+
+@entry rozos_init_module
+@also rozos_delete_module rozos_module_list insmod rmmod lsmod
+@header rozos.h
+@syntax int  rozos_init_module(const void *image, unsigned long len, const char *name);
+@syntax int  rozos_delete_module(const char *name);
+@syntax long rozos_module_list(char *buf, unsigned long len, int kernel_symbols);
+@summary Load, remove and list kernel modules (.ko files).
+@desc
+init_module takes the whole .ko file read into memory; the kernel links
+and starts it. module_list writes one line per module (or the kernel's
+exported symbols when kernel_symbols is 1). insmod, rmmod and lsmod use
+these. See /lib/modules/hello.ko and `help modules`.
+@returns
+0 / bytes written; -1 with errno on failure.
+@see rozos.h
+@check compile
+@example
+#include <stdio.h>
+#include <rozos.h>
+
+int main(void)
+{
+    char buf[2048];
+    long n = rozos_module_list(buf, sizeof buf - 1, 0);
+    if (n < 0) { perror("module list"); return 1; }
+    buf[n] = '\0';
+    printf("loaded modules:\n%s", n ? buf : "(none)\n");
+    return 0;
+}
+@end
+
+@entry rozos_mounts
+@also rozos_usb_list
+@header rozos.h
+@syntax long rozos_mounts(char *buf, unsigned long len);
+@syntax long rozos_usb_list(char *buf, unsigned long len);
+@summary Lists of mounted file systems and USB devices (mount, lsusb).
+@desc
+rozos_mounts writes one line per mount: "device path filesystem".
+rozos_usb_list writes the USB devices as lsusb shows them.
+@returns
+Bytes written, or -1.
+@see mount
+@check compile
+@example
+#include <stdio.h>
+#include <rozos.h>
+
+int main(void)
+{
+    char buf[1024];
+    long n = rozos_mounts(buf, sizeof buf - 1);
+    if (n < 0) return 1;
+    buf[n] = '\0';
+    printf("%s", buf);
+    return 0;
+}
+@end
+
+@entry rozos_kmon
+@header rozos.h
+@syntax int rozos_kmon(void);
+@summary Open the kernel monitor (kmon) from a program.
+@desc
+The kernel monitor prints kernel tables (memory, processes, disks ...);
+typing "exit" returns to the program. Only on the text console. The
+kmon command calls this.
+@returns
+0 after exit, -1 on failure.
+@see rozos.h
+@check compile
+@example
+#include <rozos.h>
+
+int main(void)
+{
+    return rozos_kmon() < 0;
+}
+@end
+
+@entry cref_load
+@also rozcref rozcref.h librozcref cref_entry cref_load_file cref_count cref_at cref_find cref_search cref_format cref_headers CREF_DIR .ref
+@header rozcref.h
+@syntax int  cref_load(const char *dir);             /* NULL = /usr/share/cref */
+@syntax int  cref_load_file(const char *path);
+@syntax int  cref_count(void);
+@syntax const cref_entry *cref_at(int i);
+@syntax const cref_entry *cref_find(const char *name);
+@syntax int  cref_search(const char *word, const cref_entry **out, int max);
+@syntax char *cref_format(const cref_entry *e, int width);
+@syntax int  cref_headers(const char **out, int max);
+@syntax build: tcc prog.c -lrozcref -o prog
+@summary Read this C reference from your own program (cref, crefview and the editors use it).
+@desc
+The pages are .ref text files in /usr/share/cref (source: docs/cref),
+made of fields entry, also, header, syntax, summary, desc, returns, see,
+check, input and example ... end, each written with an at-sign first
+(look at any file there). cref_load reads them all; cref_find
+looks a name up (also the @also names); cref_search finds pages that
+mention a word; cref_format makes the readable page text (free it);
+cref_headers lists the headers. A cref_entry has name, also, header,
+syntax, summary, desc, returns, see, example, check, input, file. You can
+add your own pages: a new .ref file in /usr/share/cref.
+@returns
+load: number of pages, or -1. find: the page or NULL. search/headers: count.
+@see main
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <rozcref.h>
+
+int main(void)
+{
+    const cref_entry *e;
+    if (cref_load(NULL) < 0) { printf("no reference files here\n"); return 0; }
+    e = cref_find("strlen");
+    if (e) {
+        char *page = cref_format(e, 70);
+        printf("%d pages; strlen is in <%s>:\n%s", cref_count(), e->header, page);
+        free(page);
+    }
+    return 0;
+}
+@end

@@ -4,7 +4,8 @@
  *   crefview strcpy     সোজা সেই পাতা (Code আর edit-এর Ctrl+F1 এভাবেই খোলে)
  *
  * বাঁয়ে তালিকা আর খোঁজার ঘর, ডানে পাতা। "See also"-এর নামে ক্লিক করলে সেই পাতা, Back ফেরায়।
- * Copy = উদাহরণ ক্লিপবোর্ডে (Code/edit/rozterm-এ পেস্ট), Try it = উদাহরণ Code-এ খোলে (F5 চালায়)। */
+ * Copy = উদাহরণ ক্লিপবোর্ডে (Code/edit/rozterm-এ পেস্ট), Try it = উদাহরণ Code-এ খোলে (F5 চালায়)।
+ * ধাপ ১৯গ: Lua game-এর পাতায় Try it সরাসরি luagame দিয়ে চালায়। */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -256,12 +257,14 @@ static void try_it(void)
     char path[128], name[48];
     const char *argv[3];
     FILE *f;
-    int i, j = 0;
+    int i, j = 0, lua;
     if (!cur || !*cur->example) return;
     for (i = 0; cur->name[i] && j < (int)sizeof(name) - 1; i++)
         name[j++] = isalnum((unsigned char)cur->name[i]) ? cur->name[i] : '_';
     name[j] = 0;
-    snprintf(path, sizeof(path), "/tmp/cref-%s.c", name);
+    /* ধাপ ১৯গ: Lua-র game মডিউলের পাতা (header "lua game") — .lua ফাইল, luagame দিয়ে চালানো */
+    lua = !strcmp(cur->header, "lua game");
+    snprintf(path, sizeof(path), "/tmp/cref-%s.%s", name, lua ? "lua" : "c");
     f = fopen(path, "w");
     if (!f) {
         snprintf(status, sizeof(status), "cannot write %s", path);
@@ -269,6 +272,14 @@ static void try_it(void)
     }
     fprintf(f, "%s\n", cur->example);
     fclose(f);
+    if (lua) {
+        argv[0] = "luagame";
+        argv[1] = path;
+        argv[2] = NULL;
+        ui_launch(argv, "/tmp");
+        snprintf(status, sizeof(status), "Running %s with luagame (edit it in Code, run: luagame %s)", path, path);
+        return;
+    }
     argv[0] = "code";
     argv[1] = path;
     argv[2] = NULL;

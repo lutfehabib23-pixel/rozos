@@ -1,0 +1,175 @@
+# rozOS C reference - a short guide to the Lua 5.4 C API (phase 19c)
+# #include <lua.h> <lauxlib.h> <lualib.h>   build: tcc prog.c -llua -lm -o prog
+# This is a summary of the most used calls, not every function; the full
+# manual is at lua.org/manual/5.4. luagame.c (/usr/src/games) is a big example.
+
+@entry lua_State
+@also lua.h lauxlib.h lualib.h luaL_newstate luaL_openlibs lua_close luaL_dostring luaL_dofile luaL_loadstring luaL_loadfile embedding-lua liblua
+@header lua.h
+@syntax lua_State *L = luaL_newstate();     luaL_openlibs(L);     lua_close(L);
+@syntax int luaL_dostring(lua_State *L, const char *code);     int luaL_dofile(lua_State *L, const char *file);
+@syntax int luaL_loadstring(lua_State *L, const char *code);   int luaL_loadfile(lua_State *L, const char *file);
+@summary Run Lua scripts inside a C program.
+@desc
+A lua_State is one Lua world. luaL_newstate makes it, luaL_openlibs gives
+it the standard libraries (string, table, math, io, os ...), lua_close
+ends it. dostring/dofile load and run code at once; loadstring/loadfile
+only compile it and push it as a function (run it with lua_pcall). On an
+error the message is on the top of the stack (lua_tostring(L, -1)).
+Programs that let users write settings, plugins or game logic in Lua work
+this way.
+@returns
+dostring/dofile/load*: 0 (LUA_OK) or an error code.
+@see lua_pushnumber lua_pcall lua_register
+@example
+#include <stdio.h>
+#include <lua.h>
+#include <lauxlib.h>
+#include <lualib.h>
+
+int main(void)
+{
+    lua_State *L = luaL_newstate();
+    luaL_openlibs(L);
+    if (luaL_dostring(L, "x = 6 * 7  print('Lua says x = ' .. x)") != LUA_OK)
+        printf("error: %s\n", lua_tostring(L, -1));
+    if (luaL_dostring(L, "this is not lua") != LUA_OK)
+        printf("caught: %s\n", lua_tostring(L, -1));
+    lua_close(L);
+    return 0;
+}
+@end
+
+@entry lua_pushnumber
+@also lua_pushinteger lua_pushstring lua_pushboolean lua_pushnil lua_pushfstring lua_tonumber lua_tointeger lua_tostring lua_toboolean lua_type lua_isnumber lua_isstring lua_gettop lua_settop lua_pop lua_getglobal lua_setglobal lua-stack
+@header lua.h
+@syntax void lua_pushnumber(lua_State *L, lua_Number n);   void lua_pushinteger(L, lua_Integer n);
+@syntax void lua_pushstring(L, const char *s);   void lua_pushboolean(L, int b);   void lua_pushnil(L);
+@syntax lua_Number lua_tonumber(L, int idx);   lua_Integer lua_tointeger(L, idx);
+@syntax const char *lua_tostring(L, idx);       int lua_toboolean(L, idx);
+@syntax int lua_type(L, idx);   int lua_isnumber(L, idx);   int lua_isstring(L, idx);
+@syntax int lua_gettop(L);   void lua_settop(L, int idx);   void lua_pop(L, int n);
+@syntax int lua_getglobal(L, const char *name);   void lua_setglobal(L, const char *name);
+@summary The Lua stack: how C and Lua pass values to each other.
+@desc
+Every value goes through a stack. push* put a C value on top; to* read
+the value at an index: 1, 2, 3 ... from the bottom, -1 is the top, -2
+below it. getglobal pushes a global variable; setglobal pops the top into
+one. gettop is the number of values; pop(n) removes n. lua_type gives
+LUA_TNUMBER, LUA_TSTRING, LUA_TTABLE, LUA_TNIL ...
+@returns
+As listed.
+@see lua_State lua_pcall lua_getfield
+@example
+#include <stdio.h>
+#include <lua.h>
+#include <lauxlib.h>
+#include <lualib.h>
+
+int main(void)
+{
+    lua_State *L = luaL_newstate();
+    luaL_openlibs(L);
+    lua_pushinteger(L, 21);
+    lua_setglobal(L, "half");                      /* C -> Lua */
+    (void)luaL_dostring(L, "answer = half * 2  name = 'rozOS'");
+    lua_getglobal(L, "answer");                    /* Lua -> C */
+    lua_getglobal(L, "name");
+    printf("answer = %lld, name = %s, stack has %d values\n",
+           (long long)lua_tointeger(L, -2), lua_tostring(L, -1), lua_gettop(L));
+    lua_pop(L, 2);
+    lua_close(L);
+    return 0;
+}
+@end
+
+@entry lua_pcall
+@also lua_call lua_pushcfunction lua_register lua_CFunction luaL_checkinteger luaL_checknumber luaL_checkstring luaL_optinteger luaL_error luaL_newlib luaL_Reg
+@header lua.h
+@syntax int lua_pcall(lua_State *L, int nargs, int nresults, int msgh);
+@syntax typedef int (*lua_CFunction)(lua_State *L);
+@syntax void lua_register(lua_State *L, const char *name, lua_CFunction f);
+@syntax lua_Integer luaL_checkinteger(L, int arg);   lua_Number luaL_checknumber(L, arg);
+@syntax const char *luaL_checkstring(L, arg);   int luaL_error(L, const char *fmt, ...);
+@syntax luaL_newlib(L, const luaL_Reg funcs[]);     /* a table of C functions (a module) */
+@summary Call Lua functions from C, and give Lua new functions written in C.
+@desc
+Calling Lua: push the function (lua_getglobal), push the arguments, then
+lua_pcall(L, nargs, nresults, 0) - "protected": an error comes back as a
+return code with the message on the stack, instead of ending the program.
+C functions for Lua have the type int f(lua_State *L): read arguments
+with luaL_check* (they raise a clear Lua error for wrong types), push the
+results, return how many. lua_register makes one a global; luaL_newlib
+builds a module table from a { name, function } array ending in
+{ NULL, NULL } - luagame's `game` table is made this way.
+@returns
+pcall: LUA_OK (0) or an error code.
+@see lua_State lua_pushnumber
+@example
+#include <stdio.h>
+#include <lua.h>
+#include <lauxlib.h>
+#include <lualib.h>
+
+static int c_add(lua_State *L)                     /* Lua: add(a, b) */
+{
+    lua_pushnumber(L, luaL_checknumber(L, 1) + luaL_checknumber(L, 2));
+    return 1;
+}
+
+int main(void)
+{
+    lua_State *L = luaL_newstate();
+    luaL_openlibs(L);
+    lua_register(L, "add", c_add);
+    (void)luaL_dostring(L, "function twice(n) return add(n, n) end");
+    lua_getglobal(L, "twice");
+    lua_pushnumber(L, 21);
+    if (lua_pcall(L, 1, 1, 0) == LUA_OK) printf("twice(21) = %g\n", lua_tonumber(L, -1));
+    lua_pop(L, 1);
+    (void)luaL_dostring(L, "add('x', 1)");               /* wrong type: clean error */
+    printf("error: %s\n", lua_tostring(L, -1));
+    lua_close(L);
+    return 0;
+}
+@end
+
+@entry lua_getfield
+@also lua_setfield lua_newtable lua_createtable lua_gettable lua_settable lua_geti lua_seti lua_rawlen lua_next luaL_len lua-tables
+@header lua.h
+@syntax void lua_newtable(lua_State *L);
+@syntax int  lua_getfield(L, int idx, const char *key);   void lua_setfield(L, int idx, const char *key);
+@syntax int  lua_geti(L, int idx, lua_Integer i);          void lua_seti(L, int idx, lua_Integer i);
+@syntax int  lua_next(L, int idx);                         lua_Integer luaL_len(L, int idx);
+@summary Make and read Lua tables from C.
+@desc
+newtable pushes an empty table. setfield(L, idx, "key") pops the top
+value into t.key of the table at idx; getfield pushes t.key. geti/seti
+do the same with array indexes (Lua arrays start at 1). lua_next walks
+all pairs: push nil, then while (lua_next(L, t)) { key at -2, value at
+-1; lua_pop(L, 1); }. Remember that pushing shifts negative indexes.
+@returns
+getfield/geti: the type of the value pushed.
+@see lua_pushnumber
+@example
+#include <stdio.h>
+#include <lua.h>
+#include <lauxlib.h>
+#include <lualib.h>
+
+int main(void)
+{
+    lua_State *L = luaL_newstate();
+    luaL_openlibs(L);
+    lua_newtable(L);                                  /* settings = {} */
+    lua_pushinteger(L, 640); lua_setfield(L, -2, "width");
+    lua_pushstring(L, "dark"); lua_setfield(L, -2, "theme");
+    lua_setglobal(L, "settings");
+    (void)luaL_dostring(L, "list = { 'a', 'b', 'c' }  print(settings.width, settings.theme)");
+    lua_getglobal(L, "list");
+    lua_geti(L, -1, 2);
+    printf("list has %lld items, list[2] = %s\n", (long long)luaL_len(L, -2), lua_tostring(L, -1));
+    lua_close(L);
+    return 0;
+}
+@end

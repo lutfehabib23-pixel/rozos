@@ -1,0 +1,264 @@
+# rozOS C reference - the Lua "game" module (luagame) (phase 19c)
+# These pages are Lua, not C: run a script with `luagame file.lua`.
+# In crefview, "Try it" runs the example with luagame. Full list: help luagame.
+
+@entry game.run
+@also luagame lua-game game-module
+@header lua game
+@syntax game.run{ title = "...", init = f, update = function(dt) end, draw = function() end, quit = f,
+@syntax           width = 640, height = 480, scale = "fit", smooth = false, show_fps = false, max_fps = 60 }
+@summary Start a Lua game: the same loop as rozgame's game_run, written in Lua.
+@desc
+luagame runs a Lua 5.4 script in which the table `game` already exists.
+game.run takes a table: update(dt) runs at a fixed 60 times a second,
+draw() paints the logical screen (640 x 480 unless width/height say
+otherwise). scale is "fit", "integer", "stretch" or "native". No
+compiling - change the script and run it again; an error shows the line.
+Everything is the C library underneath (rozgame), so drawing is just as
+fast. Source of luagame: /usr/src/games/luagame.c; a whole game:
+/usr/share/games/stars.lua.
+@returns
+true when the game ended normally.
+@see rozgame game_run game.key_down game.image
+@check none
+@example
+local x, y = 320, 240
+game.run{
+  title = "Move the ball",
+  update = function(dt)
+    if game.key_down("left")  then x = x - 200 * dt end
+    if game.key_down("right") then x = x + 200 * dt end
+    if game.key_down("up")    then y = y - 200 * dt end
+    if game.key_down("down")  then y = y + 200 * dt end
+    if game.key_pressed("escape") then game.quit() end
+  end,
+  draw = function()
+    game.clear(game.rgb(20, 24, 40))
+    game.circle(x, y, 20, game.rgb(255, 210, 40))
+    game.text(10, 10, "arrows move, Esc quits")
+  end }
+@end
+
+@entry game.key_down
+@also game.key_pressed game.key_released game.key_typed game.text_input game.mouse game.mouse_down game.mouse_pressed game.mouse_released game.mouse_wheel
+@header lua game
+@syntax game.key_down(name)   game.key_pressed(name)   game.key_released(name)   game.key_typed(name)
+@syntax s = game.text_input()
+@syntax x, y = game.mouse()   game.mouse_down("left")   game.mouse_pressed(b)   game.mouse_released(b)
+@syntax n = game.mouse_wheel()
+@summary Keyboard and mouse in a Lua game.
+@desc
+Key names: "left" "right" "up" "down" "space" "enter" "escape" "tab"
+"backspace", letters "a".."z", digits "0".."9", "f1".."f12", "lshift"
+"rshift" "lctrl" "lalt" ... key_down = held now, key_pressed = went down
+this frame, key_released, key_typed (with auto-repeat, for menus).
+text_input gives the characters typed this frame. Mouse buttons: "left",
+"right", "middle"; positions are on the logical screen; wheel -1 / +1.
+@returns
+true/false; text_input a string; mouse() two numbers.
+@see game_key_down game.run
+@check none
+@example
+local dots = {}
+game.run{
+  update = function(dt)
+    if game.mouse_pressed("left") then
+      local x, y = game.mouse()
+      dots[#dots + 1] = { x = x, y = y }
+    end
+    if game.key_pressed("c") then dots = {} end
+    if game.key_pressed("escape") then game.quit() end
+  end,
+  draw = function()
+    game.clear(0)
+    for _, d in ipairs(dots) do game.circle(d.x, d.y, 6, game.rgb(255, 255, 0)) end
+    game.text(10, 10, "click: dot   c: clear   " .. #dots .. " dots")
+  end }
+@end
+
+@entry game.clear
+@also game.rgb game.hsv game.color_lerp game.fill_rect game.rect game.circle game.line game.gradient game.text game.text_center game.ttf game.ttf_center game.ttf_width
+@header lua game
+@syntax c = game.rgb(r, g, b [, alpha])     c = game.hsv(h, s, v)     c = game.color_lerp(c1, c2, t)
+@syntax game.clear(c)   game.fill_rect(x, y, w, h, c)   game.rect(x, y, w, h, c)   game.circle(x, y, r, c)
+@syntax game.line(x0, y0, x1, y1, c)   game.gradient(x, y, w, h, top, bottom)
+@syntax game.text(x, y, s [, c])   game.text_center(y, s [, c])
+@syntax game.ttf(size, x, y, s [, c])   game.ttf_center(size, y, s [, c])   w = game.ttf_width(size, s)
+@summary Colours, shapes and text in a Lua game.
+@desc
+Colours are numbers made by game.rgb (alpha 0-255, default 255) or
+game.hsv (h 0-360). fill_rect with alpha below 255 blends. text uses the
+8x16 font, ttf smooth DejaVuSans of any size; the colour defaults to
+white.
+@returns
+rgb/hsv/color_lerp a colour; text/ttf the width drawn.
+@see game_clear game_text GFX_RGB
+@check none
+@example
+local t = 0
+game.run{
+  update = function(dt) t = t + dt; if game.key_pressed("escape") then game.quit() end end,
+  draw = function()
+    game.gradient(0, 0, 640, 480, game.rgb(10, 20, 60), game.rgb(120, 40, 80))
+    for i = 0, 11 do
+      game.circle(320 + 150 * math.cos(t + i * 0.52), 240 + 150 * math.sin(t + i * 0.52), 14,
+                  game.hsv(i * 30, 1, 1))
+    end
+    game.fill_rect(170, 200, 300, 80, game.rgb(0, 0, 0, 140))
+    game.ttf_center(40, 220, "rozOS", game.rgb(255, 255, 255))
+  end }
+@end
+
+@entry game.image
+@also game.image_new game.sheet img:draw img:draw_part img:draw_scaled img:draw_rotated img:resize img:size img:background sheet:draw sheet:draw_scaled sheet:count
+@header lua game
+@syntax img = game.image("file.png")        img = game.image_new(w, h)
+@syntax img:draw(x, y [, alpha])   img:draw_part(sx, sy, sw, sh, x, y [, flipx, flipy])
+@syntax img:draw_scaled(x, y, w, h)   img:draw_rotated(cx, cy, angle, scale)   img:background()
+@syntax small = img:resize(w, h, smooth)   w, h = img:size()
+@syntax sh = game.sheet("walk.png", frame_w, frame_h)   sh:draw(frame, x, y [, flipx])
+@syntax sh:draw_scaled(frame, x, y, w, h)   n = sh:count()
+@summary Pictures and sprite sheets in a Lua game.
+@desc
+Files are looked for in the current folder, then /usr/share/games
+(PNG, JPG, BMP, GIF, TGA). Frames of a sheet are numbered from 0, left to
+right, top to bottom. Images are freed by Lua's garbage collector.
+@returns
+image/sheet: an object, or nil if the file is missing.
+@see game_image_load game_sheet_load
+@check none
+@example
+local ball = game.image("breakout-ball.png")
+local a = 0
+game.run{
+  update = function(dt) a = a + dt; if game.key_pressed("escape") then game.quit() end end,
+  draw = function()
+    game.clear(game.rgb(10, 10, 30))
+    if ball then
+      local w, h = ball:size()
+      ball:draw(100, 100)
+      ball:draw_scaled(200, 100, w * 3, h * 3)
+      ball:draw_rotated(400, 240, a, 4)
+    else
+      game.text(10, 10, "breakout-ball.png not found")
+    end
+  end }
+@end
+
+@entry game.tilemap
+@also map:draw map:size map:get map:set map:solid_at map:find map:move map:edges game.HIT_BOTTOM game.HIT_TOP game.HIT_LEFT game.HIT_RIGHT game.EDGE_BOTTOM
+@header lua game
+@syntax m = game.tilemap("level.map")   m:draw(view_x, view_y)   cols, rows, tw, th = m:size()
+@syntax ch = m:get(col, row)   m:set(col, row, "C")   m:solid_at(x, y)
+@syntax index, col, row = m:find("P" [, start])
+@syntax x, y, hit = m:move(x, y, w, h, dx, dy)      -- hit & game.HIT_BOTTOM ...
+@syntax m:edges(game.EDGE_LEFT | game.EDGE_RIGHT ...)
+@summary Tile-map levels (.map files) in a Lua game.
+@desc
+The same .map text format as game_tilemap_load in C. find gives the
+cells of special characters (start of the player, coins ...); move moves
+a box and stops it at solid tiles - hit tells where it bumped
+(game.HIT_BOTTOM = standing on the ground).
+@returns
+tilemap: a map or nil.
+@see game_tilemap_load game_tilemap_move game.camera
+@check none
+@example
+local m = game.tilemap("platformer-1.map")
+local px, py, vy = 64, 64, 0
+game.run{
+  update = function(dt)
+    if not m then return end
+    local dx = 0
+    if game.key_down("left") then dx = -150 * dt end
+    if game.key_down("right") then dx = 150 * dt end
+    vy = vy + 900 * dt
+    local hit
+    px, py, hit = m:move(px, py, 20, 28, dx, vy * dt)
+    if hit & game.HIT_BOTTOM ~= 0 then
+      vy = 0
+      if game.key_pressed("space") then vy = -420 end
+    end
+    if game.key_pressed("escape") then game.quit() end
+  end,
+  draw = function()
+    game.clear(game.rgb(90, 150, 220))
+    if m then m:draw(0, 0) end
+    game.fill_rect(px, py, 20, 28, game.rgb(255, 80, 80))
+  end }
+@end
+
+@entry game.camera
+@also cam:bounds cam:follow cam:shake cam:update cam:view game.particles ps:burst ps:update ps:draw ps:alive
+@header lua game
+@syntax cam = game.camera()   cam:bounds(x0, y0, x1, y1)   cam:follow(x, y, speed, dt)
+@syntax cam:shake(amp, seconds)   cam:update(dt)   vx, vy = cam:view()
+@syntax ps = game.particles([max])   ps:burst(x, y, n, { color = c, color_end = c2, speed = 200,
+@syntax     speed_min = 50, life = 0.8, size = 4, size_end = 0, gravity = 200, drag = 0, angle = 0, spread = 6.28 })
+@syntax ps:update(dt)   ps:draw(vx, vy)   n = ps:alive()
+@summary Camera for big worlds, and particle effects, in a Lua game.
+@desc
+Draw world things at (x - vx, y - vy). follow keeps the target in the
+middle (speed about 7); bounds keeps the view inside the world; shake
+for hits and explosions. Particles: burst throws n dots; every field of
+the table may be left out.
+@returns
+view: two numbers; alive: a number.
+@see game_camera game_particles_new
+@check none
+@example
+local ps = game.particles(400)
+game.run{
+  update = function(dt)
+    if game.mouse_pressed("left") then
+      local x, y = game.mouse()
+      ps:burst(x, y, 40, { color = game.rgb(255, 200, 60), speed = 250, life = 0.7, gravity = 300 })
+    end
+    ps:update(dt)
+    if game.key_pressed("escape") then game.quit() end
+  end,
+  draw = function()
+    game.clear(0)
+    ps:draw(0, 0)
+    game.text(10, 10, "click for fireworks: " .. ps:alive())
+  end }
+@end
+
+@entry game.overlap
+@also game.circle_overlap game.rand_int game.rand_float game.clamp game.lerp game.approach game.score_load game.score_save game.data_path game.width game.height game.time game.fps game.focused game.quit game.screenshot game.set_title
+@header lua game
+@syntax game.overlap(ax, ay, aw, ah, bx, by, bw, bh)   game.circle_overlap(x1, y1, r1, x2, y2, r2)
+@syntax game.rand_int(a, b)   game.rand_float([a, b])   game.clamp(v, lo, hi)   game.lerp(a, b, t)
+@syntax game.approach(v, target, step)
+@syntax game.score_load("name")   game.score_save("name", n)   game.data_path("file")
+@syntax game.width()  game.height()  game.time()  game.fps()  game.focused()
+@syntax game.quit()  game.screenshot("x.bmp")  game.set_title("...")
+@summary Collisions, random numbers, helpers, high scores and game state in Lua.
+@desc
+The same helpers as in C (game_rect_overlap, game_rand_int, game_lerp,
+game_score_save ...). score_save returns true for a new record.
+@returns
+As in C.
+@see game_rect game_rand game_score_load
+@check none
+@example
+local best = game.score_load("clicker")
+local score = 0
+game.run{
+  title = "Clicker",
+  update = function(dt)
+    if game.mouse_pressed("left") then
+      local x, y = game.mouse()
+      if game.circle_overlap(x, y, 1, 320, 240, 60) then score = score + game.rand_int(1, 3) end
+    end
+    if game.key_pressed("escape") then
+      if game.score_save("clicker", score) then print("new record: " .. score) end
+      game.quit()
+    end
+  end,
+  draw = function()
+    game.clear(game.rgb(20, 20, 20))
+    game.circle(320, 240, 60, game.rgb(80, 200, 120))
+    game.text(10, 10, "score " .. score .. "   best " .. best)
+  end }
+@end

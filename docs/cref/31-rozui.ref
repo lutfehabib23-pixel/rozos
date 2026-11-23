@@ -1,0 +1,505 @@
+# rozOS C reference - librozui: windows with buttons, menus and dialogs (phase 19c)
+# #include <rozui.h>   build: tcc prog.c -lrozui -lrozgfx -o prog
+# Code and edit link these for you (F5 / Ctrl+R). Run it on the desktop.
+
+@entry rozui
+@also rozui.h librozui ui_ctx immediate-mode widgets gui
+@header rozui.h
+@syntax #include <rozui.h>          tcc prog.c -lrozui -lrozgfx -o prog
+@summary The rozOS widget library: buttons, check boxes, text boxes, lists, menus, dialogs.
+@desc
+rozui is "immediate mode": there are no button objects to create. Every
+time the window is drawn you call the widget functions again, and a
+button function simply returns 1 in the frame it was clicked:
+  ui_init(&ui);
+  while (ui_run(&ui)) {         wait for input, then draw a new frame
+      gfx_clear(ui.s, ...);
+      if (ui_do_button(&ui, ...)) ...the button was clicked...
+  }
+The state lives in your own variables (the text of a text box is your
+char array, a check box is your int). ui_ctx (ui.s, ui.w, ui.h, ui.mx,
+ui.my, ui.key ...) tells you about the current frame. All colours come
+from the theme (ui_theme_get). Files and Code in rozOS are built this
+way.
+@returns
+(a library)
+@see ui_run ui_do_button ui_menubar ui_msgbox rozgfx
+@check compile
+@example
+#include <rozui.h>
+
+int main(void)
+{
+    ui_ctx ui;
+    char name[64] = "";
+    int big = 0;
+    if (gfx_init_window("Hello", 360, 200) < 0) return 1;
+    ui_init(&ui);
+    while (ui_run(&ui)) {
+        gfx_clear(ui.s, ui_theme_get()->window_bg);
+        ui_label(ui.s, 16, 20, "Your name:", ui_theme_get()->text);
+        ui_do_textbox(&ui, 110, 16, 220, name, sizeof name);
+        ui_do_check(&ui, 16, 56, "Big letters", &big);
+        if (ui_do_button(&ui, 16, 100, 100, 28, "Hello"))
+            ui_msgbox("Hi", name[0] ? name : "nobody", UI_MB_OK | UI_MB_INFO);
+        if (ui_do_button(&ui, 130, 100, 100, 28, "Quit")) ui_quit(&ui);
+    }
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry ui_run
+@also ui_init ui_quit ui_redraw ui_ask_before_close tick_ms closing
+@header rozui.h
+@syntax void ui_init(ui_ctx *u);                /* after gfx_init / gfx_init_window */
+@syntax int  ui_run(ui_ctx *u);                 /* show last frame, wait; 0 = finish */
+@syntax void ui_quit(ui_ctx *u);
+@syntax void ui_redraw(ui_ctx *u);
+@syntax void ui_ask_before_close(ui_ctx *u, int on);
+@summary The rozui main loop: one frame per user action.
+@desc
+ui_run shows the frame you just drew, waits for input (mouse, key,
+resize) and returns 1 so you draw the next frame - or 0 when the program
+should end (ui_quit was called, or the window's [X]). Nothing is redrawn
+while nothing happens, so an idle window costs no CPU. For animation set
+u->tick_ms (a new frame every so many ms) or call ui_redraw.
+ui_ask_before_close(u, 1): [X] does not end the loop but sets
+u->closing = 1, so you can ask "Save changes?" and call ui_quit yourself.
+@returns
+ui_run: 1 = draw a frame, 0 = end.
+@see rozui ui_msgbox gfx_keep_open
+@check compile
+@example
+#include <stdio.h>
+#include <rozui.h>
+
+int main(void)
+{
+    ui_ctx ui;
+    int changed = 1;
+    char clock[32];
+    if (gfx_init_window("Ticker", 260, 120) < 0) return 1;
+    ui_init(&ui);
+    ui_ask_before_close(&ui, 1);
+    ui.tick_ms = 500;                           /* redraw twice a second */
+    while (ui_run(&ui)) {
+        if (ui.closing) {
+            if (!changed || ui_msgbox("Quit", "Really quit?", UI_MB_YESNO | UI_MB_QUESTION) == UI_YES)
+                ui_quit(&ui);
+            ui.closing = 0;
+        }
+        gfx_clear(ui.s, ui_theme_get()->window_bg);
+        snprintf(clock, sizeof clock, "%ld ms", ui.now);
+        ui_label(ui.s, 20, 40, clock, ui_theme_get()->text);
+    }
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry ui_do_button
+@also ui_do_tool ui_hover ui_clicked
+@header rozui.h
+@syntax int ui_do_button(ui_ctx *u, int x, int y, int w, int h, const char *label);
+@syntax int ui_do_tool(ui_ctx *u, int x, int y, int w, int h, const char *image, char kind, const char *label);
+@syntax int ui_hover(ui_ctx *u, int x, int y, int w, int h);
+@syntax int ui_clicked(ui_ctx *u, int x, int y, int w, int h);
+@summary A push button (returns 1 when clicked), a toolbar button, mouse tests.
+@desc
+ui_do_tool shows an icon (picture /usr/share/icons/<image>.png, or the
+drawn sign kind - see ui_icon) and optional label. ui_hover: the mouse is
+over the rectangle; ui_clicked: it was left-clicked there in this frame -
+use them for your own clickable areas.
+@returns
+1 when clicked (hover: 1 while over), else 0.
+@see ui_run ui_icon
+@check compile
+@example
+#include <stdio.h>
+#include <rozui.h>
+
+int main(void)
+{
+    ui_ctx ui;
+    int count = 0;
+    char text[32];
+    if (gfx_init_window("Counter", 240, 110) < 0) return 1;
+    ui_init(&ui);
+    while (ui_run(&ui)) {
+        gfx_clear(ui.s, ui_theme_get()->window_bg);
+        if (ui_do_tool(&ui, 10, 10, 90, 28, NULL, 'y', "Add")) count++;
+        if (ui_do_button(&ui, 110, 10, 90, 28, "Reset")) count = 0;
+        snprintf(text, sizeof text, "count: %d", count);
+        ui_label(ui.s, 10, 60, text, ui_theme_get()->text);
+    }
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry ui_do_check
+@also ui_do_radio
+@header rozui.h
+@syntax int ui_do_check(ui_ctx *u, int x, int y, const char *label, int *value);
+@syntax int ui_do_radio(ui_ctx *u, int x, int y, const char *label, int *value, int mine);
+@summary Check box (on/off) and radio button (one of several).
+@desc
+The check box flips *value between 0 and 1. Radio buttons that share one
+int each have their own number (mine); clicking one sets *value = mine,
+and the one whose number equals *value is shown selected.
+@returns
+1 if the value changed in this frame.
+@see ui_do_button
+@check compile
+@example
+#include <rozui.h>
+
+int main(void)
+{
+    ui_ctx ui;
+    int sound = 1, level = 1;
+    if (gfx_init_window("Options", 240, 160) < 0) return 1;
+    ui_init(&ui);
+    while (ui_run(&ui)) {
+        gfx_clear(ui.s, ui_theme_get()->window_bg);
+        ui_do_check(&ui, 16, 16, "Sound", &sound);
+        ui_do_radio(&ui, 16, 50, "Easy", &level, 0);
+        ui_do_radio(&ui, 16, 76, "Normal", &level, 1);
+        ui_do_radio(&ui, 16, 102, "Hard", &level, 2);
+    }
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry ui_do_textbox
+@also ui_focus_next UI_TEXTBOX_H
+@header rozui.h
+@syntax int ui_do_textbox(ui_ctx *u, int x, int y, int w, char *buf, int size);
+@syntax void ui_focus_next(ui_ctx *u);
+@summary A one-line text field that edits your char buffer.
+@desc
+Click it (or Tab) to type; arrows, Home/End, Backspace/Delete, Ctrl+C/V
+(clipboard) work. Height is UI_TEXTBOX_H. ui_focus_next moves the typing
+focus to the next text box or list.
+@returns
+0 nothing, 1 the text changed, 2 Enter was pressed.
+@see ui_inputbox ui_do_list
+@check compile
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <rozui.h>
+
+int main(void)
+{
+    ui_ctx ui;
+    char a[16] = "2", b[16] = "3", sum[40] = "";
+    if (gfx_init_window("Add", 300, 130) < 0) return 1;
+    ui_init(&ui);
+    while (ui_run(&ui)) {
+        gfx_clear(ui.s, ui_theme_get()->window_bg);
+        ui_do_textbox(&ui, 10, 10, 80, a, sizeof a);
+        ui_do_textbox(&ui, 100, 10, 80, b, sizeof b);
+        if (ui_do_button(&ui, 190, 8, 90, 28, "="))
+            snprintf(sum, sizeof sum, "%s + %s = %d", a, b, atoi(a) + atoi(b));
+        ui_label(ui.s, 10, 60, sum, ui_theme_get()->text);
+    }
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry ui_do_list
+@also ui_do_vscroll ui_do_slider
+@header rozui.h
+@syntax int ui_do_list(ui_ctx *u, int x, int y, int w, int h, const char *const *items, int n, int *sel, int *top);
+@syntax int ui_do_vscroll(ui_ctx *u, int x, int y, int w, int h, int *pos, int total, int page);
+@syntax int ui_do_slider(ui_ctx *u, int x, int y, int w, int *value, int min, int max);
+@summary A scrolling list, a scroll bar, a slider.
+@desc
+The list shows items[0..n-1]; *sel is the selected index (-1 none), *top
+the first visible row - keep both in your variables. Arrows, PgUp/PgDn,
+the wheel and its own scroll bar work. vscroll: *pos from 0 to
+total - page. slider: *value from min to max.
+@returns
+list: 1 selection changed, 2 double-click or Enter. vscroll/slider: 1 if changed.
+@see ui_do_textbox
+@check compile
+@example
+#include <stdio.h>
+#include <rozui.h>
+
+int main(void)
+{
+    static const char *const fruit[] = { "apple", "banana", "cherry", "date", "fig", "grape", "kiwi", "lemon", "mango" };
+    ui_ctx ui;
+    int sel = 0, top = 0, volume = 50;
+    char info[64];
+    if (gfx_init_window("List", 320, 220) < 0) return 1;
+    ui_init(&ui);
+    while (ui_run(&ui)) {
+        gfx_clear(ui.s, ui_theme_get()->window_bg);
+        if (ui_do_list(&ui, 10, 10, 140, 150, fruit, 9, &sel, &top) == 2)
+            ui_msgbox("Chosen", fruit[sel], UI_MB_OK);
+        ui_do_slider(&ui, 170, 20, 130, &volume, 0, 100);
+        snprintf(info, sizeof info, "volume %d", volume);
+        ui_label(ui.s, 170, 50, info, ui_theme_get()->text);
+    }
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry ui_menubar
+@also ui_menu ui_menuitem ui_shortcut_key UI_MENUBAR_H menu
+@header rozui.h
+@syntax struct ui_menuitem { const char *label; const char *shortcut; int id; };
+@syntax struct ui_menu { const char *title; const struct ui_menuitem *items; int n; };
+@syntax int ui_menubar(ui_ctx *u, int x, int y, int w, const struct ui_menu *menus, int n);
+@syntax int ui_shortcut_key(const char *shortcut);
+@summary A menu bar (File, Edit, Help ...) with keyboard shortcuts.
+@desc
+Describe the menus in static arrays; a label "-" is a separator line,
+shortcut ("Ctrl+S", "F5", or NULL) is shown and also works as a key.
+Call ui_menubar first in each frame (before other widgets); it returns
+the id of the chosen item, or 0. F10 opens the first menu. The bar is
+UI_MENUBAR_H pixels high. ui_shortcut_key turns "Ctrl+S" into the key
+code (19).
+@returns
+The chosen item's id, or 0.
+@see ui_run ui_msgbox
+@check compile
+@example
+#include <rozui.h>
+
+enum { M_NEW = 1, M_QUIT, M_ABOUT };
+
+static const struct ui_menuitem file_items[] = {
+    { "New", "Ctrl+N", M_NEW }, { "-", NULL, 0 }, { "Quit", "Ctrl+Q", M_QUIT }
+};
+static const struct ui_menuitem help_items[] = { { "About", "F1", M_ABOUT } };
+static const struct ui_menu menus[] = { { "File", file_items, 3 }, { "Help", help_items, 1 } };
+
+int main(void)
+{
+    ui_ctx ui;
+    if (gfx_init_window("Menus", 360, 200) < 0) return 1;
+    ui_init(&ui);
+    while (ui_run(&ui)) {
+        int id;
+        gfx_clear(ui.s, ui_theme_get()->window_bg);
+        id = ui_menubar(&ui, 0, 0, ui.w, menus, 2);
+        if (id == M_QUIT) ui_quit(&ui);
+        if (id == M_ABOUT) ui_msgbox("About", "A rozui menu demo", UI_MB_OK | UI_MB_INFO);
+        if (id == M_NEW) ui_msgbox("New", "Nothing to make yet", UI_MB_OK);
+    }
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry ui_msgbox
+@also ui_inputbox UI_MB_OK UI_MB_OKCANCEL UI_MB_YESNO UI_MB_YESNOCANCEL UI_MB_INFO UI_MB_WARN UI_MB_ERROR UI_MB_QUESTION UI_OK UI_YES UI_NO UI_CANCEL dialog
+@header rozui.h
+@syntax int ui_msgbox(const char *title, const char *text, int type);
+@syntax int ui_inputbox(const char *title, const char *prompt, char *buf, int size);
+@summary Message box with buttons; a box that asks for one line of text.
+@desc
+type = buttons + sign: UI_MB_OK, UI_MB_OKCANCEL, UI_MB_YESNO or
+UI_MB_YESNOCANCEL, plus UI_MB_INFO, UI_MB_WARN, UI_MB_ERROR or
+UI_MB_QUESTION. Both wait until the user answers ('\n' in text makes
+new lines). inputbox starts with what is in buf and puts the answer
+there.
+@returns
+msgbox: UI_OK, UI_YES, UI_NO or UI_CANCEL. inputbox: 1 = OK, 0 = Cancel.
+@see ui_filedlg ui_run
+@check compile
+@example
+#include <stdio.h>
+#include <rozui.h>
+
+int main(void)
+{
+    char name[40] = "world";
+    char hello[80];
+    if (gfx_init_window("Dialogs", 200, 80) < 0) return 1;
+    if (ui_inputbox("Name", "What is your name?", name, sizeof name)) {
+        snprintf(hello, sizeof hello, "Hello, %s!", name);
+        ui_msgbox("Greeting", hello, UI_MB_OK | UI_MB_INFO);
+    }
+    if (ui_msgbox("Again?", "Show it once more?", UI_MB_YESNO | UI_MB_QUESTION) == UI_YES)
+        ui_msgbox("Greeting", hello, UI_MB_OK);
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry ui_filedlg
+@header rozui.h
+@syntax int ui_filedlg(const char *title, char *path, int size, int save);
+@summary The Open / Save file dialog.
+@desc
+path holds the starting folder or file and receives the chosen file.
+save = 1 lets the user type a new name and asks "Replace?" if the file
+exists.
+@returns
+1 if a file was chosen, 0 for Cancel.
+@see ui_msgbox
+@check compile
+@example
+#include <stdio.h>
+#include <rozui.h>
+
+int main(void)
+{
+    char path[256] = "/home";
+    if (gfx_init_window("Open", 200, 80) < 0) return 1;
+    if (ui_filedlg("Open a text file", path, sizeof path, 0)) {
+        FILE *f = fopen(path, "r");
+        char line[200];
+        if (f && fgets(line, sizeof line, f)) ui_msgbox(path, line, UI_MB_OK);
+        if (f) fclose(f);
+    }
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry ui_label
+@also ui_label_center ui_bevel ui_panel ui_sunken ui_button ui_menu_item ui_separator ui_progress ui_groupbox ui_statusbar
+@header rozui.h
+@syntax void ui_label(gfx_surface *s, int x, int y, const char *text, uint32_t color);
+@syntax void ui_label_center(gfx_surface *s, int x, int y, int w, int h, const char *text, uint32_t color);
+@syntax void ui_bevel(gfx_surface *s, int x, int y, int w, int h, int raised);
+@syntax void ui_panel(gfx_surface *s, int x, int y, int w, int h, uint32_t face, int raised);
+@syntax void ui_sunken(gfx_surface *s, int x, int y, int w, int h, uint32_t inside);
+@syntax void ui_button(gfx_surface *s, int x, int y, int w, int h, const char *label, int state);
+@syntax void ui_menu_item(gfx_surface *s, int x, int y, int w, int h, const char *label, int selected);
+@syntax void ui_separator(gfx_surface *s, int x, int y, int w);
+@syntax void ui_progress(gfx_surface *s, int x, int y, int w, int h, int percent);
+@syntax void ui_groupbox(gfx_surface *s, int x, int y, int w, int h, const char *title);
+@syntax void ui_statusbar(gfx_surface *s, int x, int y, int w, int h, const char *text);
+@summary Drawing-only pieces in the rozOS 3D style (no input handling).
+@desc
+Labels, raised/sunken frames (bevel, panel, sunken), a button picture
+(state UI_NORMAL, UI_HOVER, UI_DOWN, UI_DISABLED), menu rows, separator
+lines, a progress bar (0-100), a group box with a title, a status bar.
+They only draw on a surface; widgets (ui_do_*) use them inside.
+@returns
+Nothing.
+@see ui_theme_get ui_do_button
+@example
+#include <stdio.h>
+#include <rozui.h>
+
+int main(void)
+{
+    gfx_surface *s = gfx_surface_new(300, 120);
+    const struct ui_theme *t = ui_theme_get();
+    gfx_clear(s, t->window_bg);
+    ui_groupbox(s, 8, 8, 284, 70, "Download");
+    ui_progress(s, 20, 34, 260, 18, 65);
+    ui_statusbar(s, 0, 96, 300, 24, "65% done");
+    printf("saved: %d\n", gfx_save_bmp(s, "panel.bmp"));
+    gfx_surface_free(s);
+    return 0;
+}
+@end
+
+@entry ui_theme_get
+@also ui_theme theme UI_NORMAL UI_HOVER UI_DOWN UI_DISABLED
+@header rozui.h
+@syntax const struct ui_theme *ui_theme_get(void);
+@summary The colours of the rozOS look.
+@desc
+Fields: window_bg, text, text_dim, face, face_hover, face_down, light,
+dark (3D edges), select, field, field_text, menubar, accent, desktop,
+panel, taskbar, title colours... Use them instead of fixed colours so your
+window matches the rest of rozOS (Ebony title bars, Obsidian fields, Onyx
+buttons, white text).
+@returns
+A pointer to the theme (do not change it).
+@see ui_label GFX_RGB
+@example
+#include <stdio.h>
+#include <rozui.h>
+
+int main(void)
+{
+    const struct ui_theme *t = ui_theme_get();
+    printf("window %06x, text %06x, button %06x, field %06x\n",
+           (unsigned)(t->window_bg & 0xffffff), (unsigned)(t->text & 0xffffff),
+           (unsigned)(t->face & 0xffffff), (unsigned)(t->field & 0xffffff));
+    return 0;
+}
+@end
+
+@entry ui_icon
+@also ui_draw_icon ui_icon_image icons
+@header rozui.h
+@syntax void ui_icon(gfx_surface *s, int x, int y, char kind, uint32_t color);
+@syntax void ui_draw_icon(gfx_surface *s, int x, int y, int size, const char *image, char kind);
+@syntax gfx_surface *ui_icon_image(const char *image, int size);
+@summary Small drawn signs and picture icons.
+@desc
+ui_icon draws a 16x16 sign: 't' terminal, 'g' graphics, 'f' folder, 'p'
+program, 'd' document, 'c' C source, 'i' image, 'e' editor, 's' system,
+'n' network, 'h' home, 'u' up, 'b' back, 'k' new folder, 'm' delete, 'v'
+save, 'y' run, 'w' compile, 'x' close, '_' minimize, 'o' maximize, 'r' restore.
+ui_draw_icon uses /usr/share/icons/<image>.png (.bmp .jpg .gif .tga) or a
+full path if it exists - scaled to size, with transparency - otherwise
+the sign kind. ui_icon_image gives that picture (cached; do not free).
+@returns
+ui_icon_image: the picture or NULL.
+@see ui_do_tool
+@example
+#include <stdio.h>
+#include <rozui.h>
+
+int main(void)
+{
+    gfx_surface *s = gfx_surface_new(200, 40);
+    const char kinds[] = "tfcdy";
+    int i;
+    for (i = 0; kinds[i]; i++) ui_icon(s, 8 + i * 24, 12, kinds[i], GFX_WHITE);
+    ui_draw_icon(s, 140, 4, 32, "files", 'f');
+    printf("files icon picture %s\n", ui_icon_image("files", 32) ? "found" : "not here (sign drawn)");
+    gfx_surface_free(s);
+    return 0;
+}
+@end
+
+@entry ui_launch
+@also ui_clip_set ui_clip_get clipboard
+@header rozui.h
+@syntax int   ui_launch(const char *const argv[], const char *dir);
+@syntax int   ui_clip_set(const char *text, int len);
+@syntax char *ui_clip_get(int *len);
+@summary Start another program without waiting; the shared clipboard.
+@desc
+ui_launch runs argv[0] (searched in PATH) in folder dir (NULL = here)
+and returns at once - Code starts rozterm this way. The clipboard is
+/tmp/.clipboard, shared by rozterm, Code, Files and edit's Copy example.
+ui_clip_get returns malloc'd text (free it) or NULL when empty.
+@returns
+launch: 0 when started, -1 if fork failed. clip_set: 0 or -1.
+@see fork execvp
+@example
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <rozui.h>
+
+int main(void)
+{
+    int len;
+    char *t;
+    ui_clip_set("copied from C", (int)strlen("copied from C"));
+    t = ui_clip_get(&len);
+    printf("clipboard holds %d bytes: %s\n", len, t ? t : "(empty)");
+    free(t);
+    return 0;
+}
+@end

@@ -1,4 +1,4 @@
-# cref, crefview - the C reference (phase 19a, 19b)
+# cref, crefview - the C reference (phase 19a, 19b, 19c)
 Every function of the C library with its syntax, what it does, what it
 returns, and a small program that uses it - like the help of Turbo C.
 Also the C language itself: types, if/for/while, pointers, structs,
@@ -45,7 +45,17 @@ Phase 19b: POSIX - every function of
               <fenv.h> <inttypes.h>
 Pages also say what rozOS does differently (one user, no symbolic
 links, no shared libraries ...). Try `cref -l` for the full list.
-Coming (19c): the rozOS libraries (rozgfx, rozui, rozgame, rozhttp ...).
+Phase 19c: the rozOS libraries - every function of
+  <rozgfx.h>   graphics: shapes, pictures, text, keys and mouse
+  <rozui.h>    windows: buttons, text boxes, lists, menus, dialogs
+  <rozgame.h>  games: loop, input, images, sprites, maps, camera, particles
+  <rozhttp.h>  http/https downloads; <rozos.h> rozOS system calls;
+  <rozcref.h>  this reference itself
+and short guides: the Lua `game` module (luagame - Try it runs the script),
+the Lua C API (<lua.h>) and zlib (<zlib.h>).
+Libraries: Code (F5) and edit (Ctrl+R) link -lrozui -lrozgame -lrozgfx -lm
+always, and add -lrozhttp -lbearssl, -llua, -lz or -lrozcref when the
+program includes that header - so every example runs with Try it.
 
 The pages are text files in /usr/share/cref (source: docs/cref in the
 rozOS tree). Every example is compiled and run when rozOS is built

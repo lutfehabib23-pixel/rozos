@@ -54,10 +54,12 @@ def parse(path):
 
 
 def own_decls(header, incdir):
-    """হেডার নিজে যে ফাংশন ঘোষণা করে (যেগুলো সে #include করে সেগুলো বাদ)"""
+    """হেডার নিজে যে ফাংশন ঘোষণা করে (যেগুলো সে #include করে সেগুলো বাদ)
+    ধাপ ১৯গ: incdir একাধিক ডিরেক্টরি হতে পারে (ফাঁকা দিয়ে আলাদা)"""
+    dirs = incdir.split() if isinstance(incdir, str) else list(incdir)
     def decls(h):
         gccinc = subprocess.run(["gcc", "-print-file-name=include"], capture_output=True, text=True).stdout.strip()
-        src = subprocess.run(["gcc", "-E", "-P", "-nostdinc", "-I" + incdir, "-isystem", gccinc, "-x", "c", "-"],
+        src = subprocess.run(["gcc", "-E", "-P", "-nostdinc"] + ["-I" + d for d in dirs] + ["-isystem", gccinc, "-x", "c", "-"],
                              input=f"#include <{h}>\n", capture_output=True, text=True).stdout
         for _ in range(3):
             src = re.sub(r"\{[^{}]*\}", "", src)
@@ -71,9 +73,11 @@ def own_decls(header, incdir):
                 names.add(m.group(1))
         return names
     own = decls(header)
-    text = open(os.path.join(incdir, header)).read()
+    where = [d for d in dirs if os.path.exists(os.path.join(d, header))]
+    text = open(os.path.join(where[0], header)).read() if where else ""
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)      # মন্তব্যের ভেতরের #include (উদাহরণ) বাদ
     for inc in re.findall(r'#\s*include\s*<([^>]+)>', text):
-        if os.path.exists(os.path.join(incdir, inc)):
+        if inc != header and any(os.path.exists(os.path.join(d, inc)) for d in dirs):
             own -= decls(inc)
     return {n for n in own if not n.startswith("_")}
 
@@ -89,6 +93,8 @@ def main():
     ap.add_argument("--libs", default="")
     ap.add_argument("--tcc", default="", help="tcc command too (examples must build with tcc in rozOS)")
     ap.add_argument("--only", default="", help="check only these entry names (comma list)")
+    # ধাপ ১৯গ: "rozgfx.h=a.a,b.a lua.h=liblua.a" — উদাহরণে সেই হেডার থাকলে এই লাইব্রেরিগুলো যোগ
+    ap.add_argument("--autolib", default="", help="header=lib,lib ... libraries added for examples that include header")
     a = ap.parse_args()
 
     ents = []
@@ -136,15 +142,21 @@ def main():
             src = os.path.join(tmp, f"ex{i}.c")
             exe = os.path.join(tmp, f"ex{i}")
             open(src, "w").write("\n".join(e["example"]) + "\n")
-            cmd = shlex.split(a.cc) + shlex.split(a.cflags) + ["-o", exe] + shlex.split(a.ldflags) + [src] + \
-                shlex.split(a.libs)
+            extra = []
+            for item in a.autolib.split():
+                h, _, libs = item.partition("=")
+                if re.search(r'#\s*include\s*<' + re.escape(h) + '>', "\n".join(e["example"])):
+                    extra += [l for l in libs.split(",") if l and l not in extra]
+            incs = ["-I" + d for d in a.include.split()]
+            cmd = shlex.split(a.cc) + shlex.split(a.cflags) + incs + ["-o", exe] + shlex.split(a.ldflags) + [src] + \
+                extra + shlex.split(a.libs)
             r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode != 0:
                 print(f"{e['file']}: {e['name']}: example does not compile:\n{r.stderr[:1500]}")
                 errors += 1
                 continue
             if a.tcc:
-                r = subprocess.run(shlex.split(a.tcc) + ["-c", src, "-o", exe + ".tcc.o"], capture_output=True, text=True)
+                r = subprocess.run(shlex.split(a.tcc) + incs + ["-c", src, "-o", exe + ".tcc.o"], capture_output=True, text=True)
                 if r.returncode != 0:
                     print(f"{e['file']}: {e['name']}: example does not compile with tcc:\n{r.stderr[:1500]}")
                     errors += 1

@@ -1,0 +1,688 @@
+# rozOS C reference - librozgfx: graphics (phase 19c)
+# #include <rozgfx.h>   build: tcc prog.c -lrozgfx -o prog
+# Code (the editor) and edit link it for you when you press F5 / Ctrl+R.
+
+@entry rozgfx
+@also rozgfx.h librozgfx graphics
+@header rozgfx.h
+@syntax #include <rozgfx.h>          tcc prog.c -lrozgfx -o prog
+@summary The rozOS graphics library: draw shapes, pictures and text, read keys and mouse.
+@desc
+Pattern of every graphics program:
+  gfx_init()        open the screen (a window when the desktop runs,
+                    the whole screen otherwise - the same code works in both)
+  gfx_screen()      the drawing surface (a back buffer)
+  draw ...          gfx_clear, gfx_fill_rect, gfx_text, gfx_blit ...
+  gfx_present()     show what you drew
+  events            gfx_wait_event / gfx_poll_event in a loop
+  gfx_quit()        give the screen back
+Colours are 0xAARRGGBB numbers - write them with GFX_RGB(r, g, b). Drawing
+outside a surface (or its clip rectangle) is simply cut off. For games,
+librozgame (<rozgame.h>) adds a game loop, logical resolution, sprites and
+more on top of this. For windows with buttons and menus use rozui.
+@returns
+(a library)
+@see gfx_init gfx_surface_new gfx_poll_event rozgame rozui
+@check compile
+@example
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_surface *s;
+    gfx_event ev;
+    if (gfx_init_window("Hello", 400, 240) < 0) return 1;
+    s = gfx_screen();
+    gfx_clear(s, GFX_RGB(20, 30, 60));
+    gfx_fill_circle(s, 200, 120, 70, GFX_RGB(255, 200, 0));
+    gfx_text(s, NULL, 20, 20, "Hello, rozOS!  (q quits)", GFX_WHITE);
+    gfx_present();
+    while (gfx_wait_event(&ev, -1)) {
+        if (ev.type == GFX_EV_CLOSE) break;
+        if (ev.type == GFX_EV_KEY && ev.key == 'q') break;
+    }
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry gfx_init
+@also gfx_init_window gfx_init_fullscreen gfx_windowed gfx_quit gfx_set_title
+@header rozgfx.h
+@syntax int  gfx_init(void);
+@syntax int  gfx_init_window(const char *title, int w, int h);
+@syntax int  gfx_init_fullscreen(void);
+@syntax int  gfx_windowed(void);
+@syntax void gfx_set_title(const char *title);
+@syntax void gfx_quit(void);
+@summary Open (and close) the screen or a window for drawing.
+@desc
+With the desktop running, gfx_init opens a window (gfx_init_window lets you
+give its title and size; 0 picks a size). Without the desktop the program
+takes the whole screen (/dev/fb0) until gfx_quit - the text console
+returns afterwards, even if the program crashes. gfx_init_fullscreen
+always takes the whole screen (rozwm itself uses it). gfx_windowed says
+which case you are in. gfx_set_title changes the window title.
+@returns
+init: 0, or -1 (no frame buffer; errno set). gfx_windowed: 1 or 0.
+@see gfx_screen gfx_present gfx_poll_event
+@check compile
+@example
+#include <stdio.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_event ev;
+    if (gfx_init_window("Size", 320, 120) < 0) { perror("gfx_init"); return 1; }
+    printf("%s, %d x %d\n", gfx_windowed() ? "in a window" : "full screen", gfx_width(), gfx_height());
+    gfx_clear(gfx_screen(), GFX_GRAY);
+    gfx_present();
+    gfx_wait_event(&ev, 3000);                  /* up to 3 seconds */
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry gfx_screen
+@also gfx_width gfx_height gfx_present gfx_present_rect back-buffer double-buffering
+@header rozgfx.h
+@syntax gfx_surface *gfx_screen(void);
+@syntax int gfx_width(void);     int gfx_height(void);
+@syntax void gfx_present(void);
+@syntax void gfx_present_rect(int x, int y, int w, int h);
+@summary The drawing surface of the screen/window, and showing it.
+@desc
+You never draw straight on the visible screen: gfx_screen gives a back
+buffer, and gfx_present copies it to the screen in one go, so nothing
+flickers. gfx_present_rect copies only one rectangle - faster when only a
+small part changed. gfx_width/gfx_height give the current size (it
+changes after GFX_EV_RESIZE).
+@returns
+The surface; the size in pixels.
+@see gfx_init gfx_surface_new
+@check compile
+@example
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_surface *s;
+    gfx_event ev;
+    int x = 0;
+    if (gfx_init_window("Moving box", 400, 200) < 0) return 1;
+    s = gfx_screen();
+    while (x < gfx_width() - 40) {
+        gfx_clear(s, GFX_BLACK);
+        gfx_fill_rect(s, x, 80, 40, 40, GFX_GREEN);
+        gfx_present();
+        if (gfx_poll_event(&ev, 16) && ev.type == GFX_EV_CLOSE) break;
+        x += 4;
+    }
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry gfx_surface
+@also gfx_surface_new gfx_surface_wrap gfx_surface_free stride px
+@header rozgfx.h
+@syntax typedef struct gfx_surface { int w, h; int stride; uint32_t *px; ... } gfx_surface;
+@syntax gfx_surface *gfx_surface_new(int w, int h);
+@syntax gfx_surface *gfx_surface_wrap(uint32_t *px, int w, int h, int stride);
+@syntax void gfx_surface_free(gfx_surface *s);
+@summary A picture in memory that you can draw on.
+@desc
+Pixel (x, y) is s->px[y * s->stride + x], a 0xAARRGGBB number. surface_new
+makes a black, fully transparent one (alpha 0); surface_wrap uses memory
+you already have (it is not freed by surface_free). Draw on surfaces
+off-screen, then copy them to the screen with gfx_blit. Loaded pictures
+(gfx_load_image) are surfaces too. No screen is needed for any of this.
+@returns
+A surface, or NULL (out of memory).
+@see gfx_blit gfx_load_image gfx_pixel
+@example
+#include <stdio.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_surface *s = gfx_surface_new(64, 32);
+    if (!s) return 1;
+    gfx_clear(s, GFX_RGB(10, 20, 30));
+    s->px[5 * s->stride + 7] = GFX_RED;                 /* direct pixel access */
+    printf("%d x %d, pixel (7,5) = %08x\n", s->w, s->h, (unsigned)gfx_get_pixel(s, 7, 5));
+    gfx_surface_free(s);
+    return 0;
+}
+@end
+
+@entry GFX_RGB
+@also GFX_RGBA GFX_R GFX_G GFX_B GFX_A GFX_BLACK GFX_WHITE GFX_RED GFX_GREEN GFX_BLUE GFX_YELLOW GFX_GRAY colors colours
+@header rozgfx.h
+@syntax uint32_t c = GFX_RGB(r, g, b);        /* alpha 255 */
+@syntax uint32_t c = GFX_RGBA(r, g, b, a);
+@syntax int r = GFX_R(c), g = GFX_G(c), b = GFX_B(c), a = GFX_A(c);
+@summary Make a colour from red, green, blue (0-255) and take it apart again.
+@desc
+A colour is 0xAARRGGBB. Alpha (A) matters only for the *_alpha functions,
+gfx_blend_pixel and TrueType text: 255 is solid, 0 invisible. Ready
+colours: GFX_BLACK, GFX_WHITE, GFX_RED, GFX_GREEN, GFX_BLUE, GFX_YELLOW,
+GFX_GRAY.
+@returns
+(macros)
+@see gfx_fill_rect_alpha game_hsv
+@example
+#include <stdio.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    uint32_t sky = GFX_RGB(80, 160, 230), glass = GFX_RGBA(255, 255, 255, 64);
+    printf("sky = %08x: r %u g %u b %u\n", (unsigned)sky, (unsigned)GFX_R(sky), (unsigned)GFX_G(sky), (unsigned)GFX_B(sky));
+    printf("glass alpha = %u of 255\n", (unsigned)GFX_A(glass));
+    return 0;
+}
+@end
+
+@entry gfx_set_clip
+@also gfx_reset_clip clip
+@header rozgfx.h
+@syntax void gfx_set_clip(gfx_surface *s, int x, int y, int w, int h);
+@syntax void gfx_reset_clip(gfx_surface *s);
+@summary Limit drawing on a surface to one rectangle.
+@desc
+After set_clip every drawing function leaves pixels outside the rectangle
+alone - handy for a scrolling panel or a status bar. reset_clip allows
+the whole surface again.
+@returns
+Nothing.
+@see gfx_fill_rect
+@example
+#include <stdio.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_surface *s = gfx_surface_new(100, 100);
+    gfx_set_clip(s, 10, 10, 20, 20);
+    gfx_fill_rect(s, 0, 0, 100, 100, GFX_WHITE);        /* only 20 x 20 gets painted */
+    gfx_reset_clip(s);
+    printf("(15,15) %s, (50,50) %s\n", gfx_get_pixel(s, 15, 15) ? "white" : "black",
+           gfx_get_pixel(s, 50, 50) ? "white" : "black");
+    gfx_surface_free(s);
+    return 0;
+}
+@end
+
+@entry gfx_pixel
+@also gfx_clear gfx_get_pixel gfx_blend_pixel
+@header rozgfx.h
+@syntax void     gfx_clear(gfx_surface *s, uint32_t color);
+@syntax void     gfx_pixel(gfx_surface *s, int x, int y, uint32_t color);
+@syntax uint32_t gfx_get_pixel(const gfx_surface *s, int x, int y);
+@syntax void     gfx_blend_pixel(gfx_surface *s, int x, int y, uint32_t color);
+@summary Fill a whole surface; set, read or blend one pixel.
+@desc
+blend_pixel mixes color over the pixel by its alpha (GFX_RGBA(..., 128) =
+half see-through). get_pixel outside the surface gives 0. For many pixels
+writing s->px directly is faster.
+@returns
+get_pixel: the colour.
+@see GFX_RGB gfx_surface
+@example
+#include <stdio.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_surface *s = gfx_surface_new(4, 4);
+    gfx_clear(s, GFX_RGB(0, 0, 200));
+    gfx_blend_pixel(s, 1, 1, GFX_RGBA(255, 0, 0, 128));      /* half red over blue */
+    printf("blended: %08x\n", (unsigned)gfx_get_pixel(s, 1, 1));
+    gfx_surface_free(s);
+    return 0;
+}
+@end
+
+@entry gfx_line
+@also gfx_hline gfx_vline gfx_thick_line
+@header rozgfx.h
+@syntax void gfx_line(gfx_surface *s, int x0, int y0, int x1, int y1, uint32_t color);
+@syntax void gfx_thick_line(gfx_surface *s, int x0, int y0, int x1, int y1, int width, uint32_t color);
+@syntax void gfx_hline(gfx_surface *s, int x, int y, int w, uint32_t color);
+@syntax void gfx_vline(gfx_surface *s, int x, int y, int h, uint32_t color);
+@summary Draw lines.
+@desc
+hline/vline are fast horizontal/vertical lines of w/h pixels.
+@returns
+Nothing.
+@see gfx_rect gfx_circle
+@check compile
+@example
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_surface *s;
+    gfx_event ev;
+    int i;
+    if (gfx_init_window("Lines", 300, 300) < 0) return 1;
+    s = gfx_screen();
+    gfx_clear(s, GFX_BLACK);
+    for (i = 0; i <= 300; i += 20) gfx_line(s, 0, i, i, 300, GFX_RGB(i * 255 / 300, 120, 255));
+    gfx_thick_line(s, 20, 20, 280, 60, 6, GFX_YELLOW);
+    gfx_present();
+    gfx_wait_event(&ev, -1);
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry gfx_rect
+@also gfx_fill_rect gfx_fill_rect_alpha gfx_round_rect gfx_fill_round_rect gfx_gradient_v
+@header rozgfx.h
+@syntax void gfx_rect(gfx_surface *s, int x, int y, int w, int h, uint32_t color);
+@syntax void gfx_fill_rect(gfx_surface *s, int x, int y, int w, int h, uint32_t color);
+@syntax void gfx_fill_rect_alpha(gfx_surface *s, int x, int y, int w, int h, uint32_t color);
+@syntax void gfx_round_rect / gfx_fill_round_rect(gfx_surface *s, int x, int y, int w, int h, int r, uint32_t color);
+@syntax void gfx_gradient_v(gfx_surface *s, int x, int y, int w, int h, uint32_t top, uint32_t bottom);
+@summary Rectangles: outline, filled, see-through, rounded, colour gradient.
+@desc
+(x, y) is the top-left corner. fill_rect_alpha mixes by the colour's
+alpha (a dark see-through panel over a picture). r is the corner radius.
+gradient_v goes from top colour to bottom colour.
+@returns
+Nothing.
+@see gfx_line GFX_RGB
+@example
+#include <stdio.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_surface *s = gfx_surface_new(200, 100);
+    gfx_gradient_v(s, 0, 0, 200, 100, GFX_RGB(0, 0, 80), GFX_RGB(200, 120, 0));
+    gfx_fill_round_rect(s, 20, 20, 160, 60, 12, GFX_RGB(40, 40, 40));
+    gfx_fill_rect_alpha(s, 0, 0, 200, 30, GFX_RGBA(0, 0, 0, 128));
+    gfx_rect(s, 0, 0, 200, 100, GFX_WHITE);
+    printf("saved: %d\n", gfx_save_bmp(s, "rects.bmp"));
+    gfx_surface_free(s);
+    return 0;
+}
+@end
+
+@entry gfx_circle
+@also gfx_fill_circle gfx_ellipse gfx_fill_triangle gfx_flood_fill
+@header rozgfx.h
+@syntax void gfx_circle / gfx_fill_circle(gfx_surface *s, int cx, int cy, int r, uint32_t color);
+@syntax void gfx_ellipse(gfx_surface *s, int cx, int cy, int rx, int ry, uint32_t color);
+@syntax void gfx_fill_triangle(gfx_surface *s, int x0, int y0, int x1, int y1, int x2, int y2, uint32_t color);
+@syntax void gfx_flood_fill(gfx_surface *s, int x, int y, uint32_t color);
+@summary Circles, ellipses, triangles, and paint-bucket fill.
+@desc
+(cx, cy) is the centre. flood_fill paints the area of same-coloured pixels
+around (x, y), like the bucket in Paint.
+@returns
+Nothing.
+@see gfx_rect gfx_line
+@example
+#include <stdio.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_surface *s = gfx_surface_new(120, 120);
+    gfx_clear(s, GFX_WHITE);
+    gfx_circle(s, 60, 60, 40, GFX_BLACK);
+    gfx_flood_fill(s, 60, 60, GFX_YELLOW);            /* inside the ring */
+    gfx_fill_triangle(s, 10, 110, 30, 80, 50, 110, GFX_BLUE);
+    printf("centre is yellow: %s\n", gfx_get_pixel(s, 60, 60) == GFX_YELLOW ? "yes" : "no");
+    gfx_surface_free(s);
+    return 0;
+}
+@end
+
+@entry gfx_blit
+@also gfx_blit_alpha gfx_blit_scaled sprite
+@header rozgfx.h
+@syntax void gfx_blit(gfx_surface *dst, int dx, int dy, const gfx_surface *src, int sx, int sy, int w, int h);
+@syntax void gfx_blit_alpha(gfx_surface *dst, int dx, int dy, const gfx_surface *src, int sx, int sy, int w, int h);
+@syntax void gfx_blit_scaled(gfx_surface *dst, int dx, int dy, int dw, int dh, const gfx_surface *src);
+@summary Copy (part of) a picture onto another surface or the screen.
+@desc
+blit copies the rectangle (sx, sy, w, h) of src to (dx, dy) of dst; w or h
+below 0 means the whole src. blit_alpha mixes by each pixel's alpha
+(PNG pictures with see-through parts). blit_scaled stretches all of src to
+dw x dh (nearest pixel - fast).
+@returns
+Nothing.
+@see gfx_load_image game_draw_image
+@example
+#include <stdio.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_surface *tile = gfx_surface_new(8, 8), *map = gfx_surface_new(64, 64);
+    int x, y;
+    gfx_clear(tile, GFX_GREEN);
+    gfx_rect(tile, 0, 0, 8, 8, GFX_BLACK);
+    for (y = 0; y < 64; y += 8)
+        for (x = 0; x < 64; x += 8) gfx_blit(map, x, y, tile, 0, 0, -1, -1);
+    printf("map pixel (9,9) is green: %s\n", gfx_get_pixel(map, 9, 9) == GFX_GREEN ? "yes" : "no");
+    gfx_surface_free(tile);
+    gfx_surface_free(map);
+    return 0;
+}
+@end
+
+@entry gfx_load_image
+@also gfx_image_error gfx_save_bmp gfx_load_image_stb jpeg png bmp
+@header rozgfx.h
+@syntax gfx_surface *gfx_load_image(const char *path);
+@syntax const char *gfx_image_error(void);
+@syntax int gfx_save_bmp(const gfx_surface *s, const char *path);
+@syntax gfx_surface *gfx_load_image_stb(const unsigned char *data, long size);
+@summary Load a picture file (JPEG, PNG, BMP, GIF, TGA, PPM) or save one as BMP.
+@desc
+The result is a new surface - free it with gfx_surface_free. If a picture
+cannot be decoded, gfx_image_error says why (it may be NULL when the file
+itself could not be opened - then errno tells). load_image_stb decodes a picture that is
+already in memory. save_bmp writes a 32-bit BMP (screenshots, generated
+art). Pictures in rozOS: /usr/share/images, /usr/share/icons,
+/usr/share/games.
+@returns
+A surface or NULL; save_bmp 0 or -1.
+@see gfx_blit gfx_surface game_image_load
+@example
+#include <stdio.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_surface *s = gfx_surface_new(32, 16), *back;
+    gfx_clear(s, GFX_RGB(200, 100, 50));
+    gfx_save_bmp(s, "small.bmp");
+    back = gfx_load_image("small.bmp");
+    if (!back) { printf("load failed: %s\n", gfx_image_error()); return 1; }
+    printf("loaded %d x %d, colour %08x\n", back->w, back->h, (unsigned)gfx_get_pixel(back, 3, 3));
+    if (!gfx_load_image("missing.png")) printf("missing.png: %s\n", gfx_image_error() ? gfx_image_error() : "cannot open");
+    gfx_surface_free(s);
+    gfx_surface_free(back);
+    return 0;
+}
+@end
+
+@entry gfx_text
+@also gfx_text_bg gfx_text_width gfx_font_load gfx_font_default gfx_font_free gfx_font_width gfx_font_height gfx_glyph gfx_font psf
+@header rozgfx.h
+@syntax int gfx_text(gfx_surface *s, gfx_font *font, int x, int y, const char *str, uint32_t color);
+@syntax int gfx_text_bg(gfx_surface *s, gfx_font *font, int x, int y, const char *str, uint32_t fg, uint32_t bg);
+@syntax int gfx_text_width(gfx_font *font, const char *str);
+@syntax gfx_font *gfx_font_load(const char *path);     gfx_font *gfx_font_default(void);
+@syntax int gfx_font_width(const gfx_font *f);   int gfx_font_height(const gfx_font *f);
+@syntax void gfx_glyph(gfx_surface *s, gfx_font *font, int x, int y, int index, uint32_t fg, uint32_t bg);
+@syntax void gfx_font_free(gfx_font *f);
+@summary Write text with a fixed-width bitmap (PSF) font.
+@desc
+font NULL means the default rozos-mono-16 (8 x 16 pixels). Other fonts:
+/usr/share/fonts/rozos-mono-20/24/32.psf. (x, y) is the top-left of the
+text; '\n' starts a new line. text_bg also paints the background. glyph
+draws one character by number (0-255). For smooth text of any size use
+gfx_ttf_text.
+@returns
+gfx_text: the x after the last character. text_width: width in pixels.
+@see gfx_ttf_text
+@example
+#include <stdio.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_surface *s = gfx_surface_new(200, 40);
+    gfx_font *f = gfx_font_default();
+    int end;
+    if (!f) { printf("no font file here\n"); return 0; }
+    end = gfx_text(s, f, 4, 4, "Score: 120", GFX_WHITE);
+    printf("font %d x %d, text ends at x = %d, width %d\n", gfx_font_width(f), gfx_font_height(f),
+           end, gfx_text_width(f, "Score: 120"));
+    gfx_surface_free(s);
+    return 0;
+}
+@end
+
+@entry gfx_ttf_text
+@also gfx_ttf_load gfx_ttf_free gfx_ttf_width gfx_ttf truetype ttf
+@header rozgfx.h
+@syntax gfx_ttf *gfx_ttf_load(const char *path);
+@syntax int gfx_ttf_text(gfx_surface *s, gfx_ttf *t, float size, int x, int y, const char *utf8, uint32_t color);
+@syntax int gfx_ttf_width(gfx_ttf *t, float size, const char *utf8);
+@syntax void gfx_ttf_free(gfx_ttf *t);
+@summary Smooth TrueType text at any size.
+@desc
+Fonts: /usr/share/fonts/DejaVuSans.ttf and DejaVuSansMono.ttf. size is the
+line height in pixels; (x, y) is the top-left; the text is UTF-8 and is
+blended with the colour's alpha. Scripts that need shaping (joined
+Bengali letters) are not arranged yet.
+@returns
+ttf_text: x after the text. ttf_width: width in pixels. load: NULL on error.
+@see gfx_text game_ttf
+@check compile
+@example
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_ttf *t;
+    gfx_event ev;
+    if (gfx_init_window("TrueType", 420, 160) < 0) return 1;
+    t = gfx_ttf_load("/usr/share/fonts/DejaVuSans.ttf");
+    gfx_clear(gfx_screen(), GFX_RGB(30, 30, 40));
+    if (t) {
+        gfx_ttf_text(gfx_screen(), t, 48, 20, 20, "rozOS", GFX_WHITE);
+        gfx_ttf_text(gfx_screen(), t, 18, 20, 90, "smooth text at any size", GFX_RGB(180, 200, 255));
+    }
+    gfx_present();
+    gfx_wait_event(&ev, -1);
+    gfx_ttf_free(t);
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry gfx_poll_event
+@also gfx_wait_event gfx_event GFX_EV_KEY GFX_EV_MOUSE_DOWN GFX_EV_MOUSE_UP GFX_EV_MOUSE_MOVE GFX_EV_MOUSE_WHEEL GFX_EV_CLOSE GFX_EV_RESIZE GFX_EV_FOCUS GFX_KEY_UP GFX_KEY_ESC GFX_KEY_ENTER GFX_BUTTON_LEFT GFX_MOD_CTRL events
+@header rozgfx.h
+@syntax int gfx_poll_event(gfx_event *ev, int timeout_ms);
+@syntax int gfx_wait_event(gfx_event *ev, int timeout_ms);
+@summary Get the next key, mouse or window event.
+@desc
+timeout_ms: 0 just checks, -1 waits forever, n waits up to n ms. Then look
+at ev.type:
+  GFX_EV_KEY         ev.key: a character, or GFX_KEY_UP/DOWN/LEFT/RIGHT,
+                     HOME, END, PAGE_UP, F1..F12, GFX_KEY_ESC/ENTER/
+                     BACKSPACE/TAB; ev.mods: GFX_MOD_SHIFT/ALT/CTRL
+  GFX_EV_MOUSE_MOVE  ev.x, ev.y, ev.dx, ev.dy, ev.buttons
+  GFX_EV_MOUSE_DOWN / _UP   ev.button (GFX_BUTTON_LEFT/RIGHT/MIDDLE)
+  GFX_EV_MOUSE_WHEEL ev.wheel (-1 up, +1 down)
+  GFX_EV_CLOSE       the window's [X]: end the program
+  GFX_EV_RESIZE      new size in ev.x, ev.y
+  GFX_EV_FOCUS       ev.key 1 = in front, 0 = behind
+  GFX_EV_KEY_DOWN / _UP  key pressed / released (after gfx_raw_keys(1))
+gfx_wait_event is the same function. Mouse positions are inside your
+window.
+@returns
+1 if an event was stored, 0 if none came in time.
+@see gfx_raw_keys gfx_mouse_pos gfx_keep_open
+@check compile
+@example
+#include <stdio.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_surface *s;
+    gfx_event ev;
+    char msg[80] = "press keys, click, Esc quits";
+    if (gfx_init_window("Events", 420, 120) < 0) return 1;
+    s = gfx_screen();
+    for (;;) {
+        gfx_clear(s, GFX_BLACK);
+        gfx_text(s, NULL, 10, 50, msg, GFX_WHITE);
+        gfx_present();
+        if (!gfx_wait_event(&ev, -1)) continue;
+        if (ev.type == GFX_EV_CLOSE || (ev.type == GFX_EV_KEY && ev.key == GFX_KEY_ESC)) break;
+        if (ev.type == GFX_EV_KEY)
+            snprintf(msg, sizeof msg, "key %d%s", ev.key, ev.mods & GFX_MOD_CTRL ? " with Ctrl" : "");
+        else if (ev.type == GFX_EV_MOUSE_DOWN)
+            snprintf(msg, sizeof msg, "button %d at %d,%d", ev.button, ev.x, ev.y);
+    }
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry gfx_raw_keys
+@also GFX_EV_KEY_DOWN GFX_EV_KEY_UP GFX_KEY_LSHIFT GFX_KEY_LCTRL GFX_KEY_COUNT repeat key-up
+@header rozgfx.h
+@syntax int gfx_raw_keys(int on);
+@summary Also get key-press and key-release events (for games).
+@desc
+Normal GFX_EV_KEY events say only "a key was typed". After
+gfx_raw_keys(1) you also get GFX_EV_KEY_DOWN when a key goes down and
+GFX_EV_KEY_UP when it comes up (ev.key = the key, ev.repeat = 1 for
+auto-repeat), so you can tell how long a key is held. Shift, Ctrl, Alt
+and the lock keys come as keys of their own (GFX_KEY_LSHIFT ...). All codes
+are below GFX_KEY_COUNT, handy for a "key is down" table. librozgame does
+this for you.
+@returns
+1 if raw events are available (keyboard or desktop), 0 if not (serial).
+@see gfx_poll_event game_key_down
+@check compile
+@example
+#include <stdio.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    static char down[GFX_KEY_COUNT];
+    gfx_event ev;
+    int x = 200;
+    if (gfx_init_window("Hold the arrows", 420, 100) < 0) return 1;
+    gfx_raw_keys(1);
+    for (;;) {
+        while (gfx_poll_event(&ev, 0)) {
+            if (ev.type == GFX_EV_CLOSE) { gfx_quit(); return 0; }
+            if (ev.type == GFX_EV_KEY_DOWN && ev.key < GFX_KEY_COUNT) down[ev.key] = 1;
+            if (ev.type == GFX_EV_KEY_UP && ev.key < GFX_KEY_COUNT) down[ev.key] = 0;
+        }
+        if (down[GFX_KEY_LEFT]) x -= 3;
+        if (down[GFX_KEY_RIGHT]) x += 3;
+        gfx_clear(gfx_screen(), GFX_BLACK);
+        gfx_fill_circle(gfx_screen(), x, 50, 15, GFX_YELLOW);
+        gfx_present();
+        gfx_sleep_ms(16);
+    }
+}
+@end
+
+@entry gfx_mouse_pos
+@also gfx_cursor_draw gfx_cursor_restore
+@header rozgfx.h
+@syntax void gfx_mouse_pos(int *x, int *y);
+@syntax void gfx_cursor_draw(gfx_surface *s, int x, int y);
+@syntax void gfx_cursor_restore(gfx_surface *s);
+@summary Where the mouse is; draw your own mouse arrow (full-screen programs).
+@desc
+In a window the desktop draws the arrow. A full-screen program (no
+desktop) draws it itself: cursor_draw paints the arrow and remembers the
+pixels under it, cursor_restore puts them back before you draw the next
+frame.
+@returns
+Nothing.
+@see gfx_poll_event
+@check compile
+@example
+#include <stdio.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_event ev;
+    int x, y;
+    if (gfx_init() < 0) return 1;
+    gfx_clear(gfx_screen(), GFX_BLUE);
+    gfx_present();
+    gfx_wait_event(&ev, 2000);
+    gfx_mouse_pos(&x, &y);
+    gfx_quit();
+    printf("mouse at %d, %d\n", x, y);
+    return 0;
+}
+@end
+
+@entry gfx_ticks_ms
+@also gfx_sleep_ms
+@header rozgfx.h
+@syntax long gfx_ticks_ms(void);
+@syntax void gfx_sleep_ms(int ms);
+@summary Milliseconds since boot; wait some milliseconds.
+@desc
+Use ticks to time animations ("move 100 pixels per second") so they run
+at the same speed on fast and slow machines.
+@returns
+ticks: milliseconds.
+@see clock_gettime game_dt
+@example
+#include <stdio.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    long t0 = gfx_ticks_ms();
+    gfx_sleep_ms(120);
+    printf("slept about %ld ms\n", (gfx_ticks_ms() - t0) / 10 * 10);
+    return 0;
+}
+@end
+
+@entry gfx_keep_open
+@also gfx_event_fds gfx_input_keyboard_only
+@header rozgfx.h
+@syntax void gfx_keep_open(void);
+@syntax int  gfx_event_fds(int *fds, int max);
+@syntax void gfx_input_keyboard_only(int on);
+@summary Less common window and input controls.
+@desc
+gfx_keep_open: after GFX_EV_CLOSE the desktop ends a program that does
+not quit within 3 seconds; call this first if you want to ask "Save
+changes?". gfx_event_fds gives the descriptors behind the events, so you
+can poll() them together with your own (a terminal watches its PTY this
+way) - when one is readable call gfx_poll_event(&ev, 0).
+gfx_input_keyboard_only(1) before gfx_init takes keys only from the PC
+keyboard, not the serial line (init starts rozwm like that).
+@returns
+event_fds: how many descriptors were stored.
+@see gfx_poll_event poll ui_ask_before_close
+@check compile
+@example
+#include <stdio.h>
+#include <poll.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    int fds[8], n, i;
+    struct pollfd p[9];
+    gfx_event ev;
+    if (gfx_init_window("poll", 300, 80) < 0) return 1;
+    n = gfx_event_fds(fds, 8);
+    for (i = 0; i < n; i++) { p[i].fd = fds[i]; p[i].events = POLLIN; }
+    p[n].fd = 0; p[n].events = POLLIN;                   /* also standard input */
+    poll(p, (nfds_t)(n + 1), 3000);
+    while (gfx_poll_event(&ev, 0)) printf("event %d\n", ev.type);
+    gfx_quit();
+    return 0;
+}
+@end

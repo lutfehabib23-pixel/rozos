@@ -1,0 +1,938 @@
+# rozOS C reference - librozgame: making games (phase 19c)
+# #include <rozgame.h>   build: tcc game.c -lrozgame -lrozgfx -lm -o game
+# Code and edit link these for you. Examples of whole games: /usr/src/games
+# (snake.c, breakout.c, tetris.c, platformer.c) and the template
+# /usr/share/templates/game.c (`edit --new game`, Code: File > New game).
+
+@entry rozgame
+@also rozgame.h librozgame games game-loop
+@header rozgame.h
+@syntax #include <rozgame.h>        tcc game.c -lrozgame -lrozgfx -lm -o game
+@summary The rozOS game library, on top of rozgfx: loop, input, images, text, collisions, maps.
+@desc
+A game draws on a "logical" screen of fixed size (640 x 480 unless you
+choose another); the library scales it to the window or the whole screen
+(keeping the shape, black bars at the sides). Two ways to write the loop:
+  1. game_run with update/draw functions - update runs at a fixed rate
+     (60 per second), so the game has the same speed on any machine.
+  2. your own loop: game_open; while (game_begin()) { ... game_end(); }
+     game_close();
+What is inside: keyboard/mouse state (game_key_down ...), fast images
+with transparency, sprite sheets and animations, simple drawing, PSF and
+TrueType text, menus, rectangle/circle collisions, a camera, tile maps,
+particles, random numbers, high scores.
+@returns
+(a library)
+@see game_run game_open game_key_down game_image_load game_tilemap_load rozgfx
+@check compile
+@example
+#include <rozgame.h>
+
+static float x = 300, y = 220;
+
+static void update(void *ud, float dt)
+{
+    (void)ud;
+    if (game_key_down(GFX_KEY_LEFT))  x -= 200 * dt;
+    if (game_key_down(GFX_KEY_RIGHT)) x += 200 * dt;
+    if (game_key_down(GFX_KEY_UP))    y -= 200 * dt;
+    if (game_key_down(GFX_KEY_DOWN))  y += 200 * dt;
+    if (game_key_pressed(GFX_KEY_ESC)) game_quit();
+}
+
+static void draw(void *ud, gfx_surface *s)
+{
+    (void)ud; (void)s;
+    game_clear(GFX_RGB(20, 24, 40));
+    game_fill_circle((int)x, (int)y, 20, GFX_YELLOW);
+    game_text(10, 10, "arrows move, Esc quits", GFX_WHITE);
+}
+
+int main(void)
+{
+    game_config c = game_default_config("Move the ball");
+    game_app a = { NULL, update, draw, NULL, NULL };
+    return game_run(&c, &a);
+}
+@end
+
+@entry game_run
+@also game_app game_config game_default_config GAME_SCALE_FIT GAME_SCALE_INTEGER GAME_SCALE_STRETCH GAME_SCALE_NATIVE update_hz max_fps show_fps
+@header rozgame.h
+@syntax game_config game_default_config(const char *title);
+@syntax int game_run(const game_config *cfg, const game_app *app);
+@syntax typedef struct game_app { int (*init)(void *ud); void (*update)(void *ud, float dt);
+@syntax     void (*draw)(void *ud, gfx_surface *screen); void (*quit)(void *ud); void *ud; } game_app;
+@summary Run a game with fixed-rate update and draw functions.
+@desc
+Start from game_default_config and change what you need:
+  width, height   logical size (0 = 640 x 480)
+  scale           GAME_SCALE_FIT (keep shape, default), GAME_SCALE_INTEGER
+                  (only 1x/2x/3x - sharp pixel art), GAME_SCALE_STRETCH,
+                  GAME_SCALE_NATIVE (logical = real window size; for big
+                  photos at full resolution)
+  smooth          1 = smooth scaling (slower)
+  update_hz       updates per second (0 = 60); max_fps (0 = 60, -1 no limit)
+  window_w/_h     first window size; border_color; show_fps = 1 shows fps
+game_app holds your functions (any may be NULL) and ud, a pointer passed
+back to them. update gets a fixed dt (1/update_hz s); draw paints the
+logical screen. game_quit() ends the loop; then quit(ud) runs.
+@returns
+0 at the end (or non-zero if the screen or init failed).
+@see game_open game_quit rozgame
+@check compile
+@example
+#include <rozgame.h>
+
+struct world { float angle; int score; };
+
+static int init(void *ud) { ((struct world *)ud)->score = 0; return 0; }
+
+static void update(void *ud, float dt)
+{
+    struct world *w = ud;
+    w->angle += 2.0f * dt;
+    if (game_key_pressed(' ')) w->score++;
+    if (game_key_pressed(GFX_KEY_ESC)) game_quit();
+}
+
+static void draw(void *ud, gfx_surface *s)
+{
+    struct world *w = ud;
+    (void)s;
+    game_clear(GFX_BLACK);
+    game_fill_circle(320 + (int)(150 * cosf(w->angle)), 240 + (int)(150 * sinf(w->angle)), 16, GFX_GREEN);
+    game_printf(10, 10, GFX_WHITE, "Space: %d", w->score);
+}
+
+int main(void)
+{
+    static struct world w;
+    game_config c = game_default_config("Orbit");
+    game_app a = { init, update, draw, NULL, &w };
+    c.scale = GAME_SCALE_INTEGER;
+    c.show_fps = 1;
+    return game_run(&c, &a);
+}
+@end
+
+@entry game_open
+@also game_begin game_end game_close game_quit game_running
+@header rozgame.h
+@syntax int  game_open(const game_config *cfg);
+@syntax int  game_begin(void);
+@syntax void game_end(void);
+@syntax void game_close(void);
+@syntax void game_quit(void);
+@syntax int  game_running(void);
+@summary Write the game loop yourself.
+@desc
+game_begin reads the input for a new frame and returns 0 when the game
+must stop (window closed or game_quit called). Draw, then game_end shows
+the frame and waits to keep the frame rate (max_fps). Use game_dt() for
+the time step. game_running tells whether the loop is still going.
+@returns
+open: 0, or -1 (no graphics). begin: 1 go on, 0 stop.
+@see game_run game_dt
+@check compile
+@example
+#include <rozgame.h>
+
+int main(void)
+{
+    game_config c = game_default_config("My loop");
+    float x = 0;
+    if (game_open(&c) < 0) return 1;
+    while (game_begin()) {
+        x += 120 * game_dt();
+        if (x > game_width()) x = 0;
+        if (game_key_pressed(GFX_KEY_ESC)) game_quit();
+        game_clear(GFX_RGB(0, 40, 0));
+        game_fill_rect((int)x, 220, 40, 40, GFX_WHITE);
+        game_end();
+    }
+    game_close();
+    return 0;
+}
+@end
+
+@entry game_dt
+@also game_screen game_width game_height game_time game_fps game_frame_count game_focused game_set_title game_screenshot
+@header rozgame.h
+@syntax float  game_dt(void);         double game_time(void);
+@syntax float  game_fps(void);        long   game_frame_count(void);
+@syntax gfx_surface *game_screen(void);
+@syntax int    game_width(void);      int    game_height(void);
+@syntax int    game_focused(void);
+@syntax void   game_set_title(const char *title);
+@syntax int    game_screenshot(const char *path);
+@summary Frame time, clock, logical screen and window information.
+@desc
+game_dt: seconds since the last frame (at most 0.1) - multiply speeds by
+it. game_time: seconds since start. game_screen is the logical screen (a
+gfx_surface - all rozgfx drawing works on it); width/height its size.
+game_focused: the window is in front (pause when it is not).
+game_screenshot saves the logical screen as a BMP file.
+@returns
+As listed; screenshot 0 or -1.
+@see game_open gfx_ticks_ms
+@check compile
+@example
+#include <rozgame.h>
+
+int main(void)
+{
+    game_config c = game_default_config("Info");
+    if (game_open(&c) < 0) return 1;
+    while (game_begin()) {
+        game_clear(GFX_BLACK);
+        game_printf(10, 10, GFX_WHITE, "%d x %d  fps %.0f  time %.1f s%s", game_width(), game_height(),
+                    game_fps(), game_time(), game_focused() ? "" : "  (paused)");
+        if (game_key_pressed('p')) game_screenshot("/tmp/shot.bmp");
+        if (game_key_pressed(GFX_KEY_ESC)) game_quit();
+        game_end();
+    }
+    game_close();
+    return 0;
+}
+@end
+
+@entry game_key_down
+@also game_key_pressed game_key_released game_key_typed game_any_key_pressed game_text_input game_raw_keys keyboard
+@header rozgame.h
+@syntax int game_key_down(int key);        /* held now */
+@syntax int game_key_pressed(int key);     /* went down this frame */
+@syntax int game_key_released(int key);    /* came up this frame */
+@syntax int game_key_typed(int key);       /* pressed, or auto-repeat (menus) */
+@syntax int game_any_key_pressed(void);
+@syntax int game_text_input(char *buf, int size);
+@syntax int game_raw_keys(void);
+@summary Keyboard state for games.
+@desc
+key: a lower-case letter ('a'), digit ('1'), ' ', GFX_KEY_ENTER,
+GFX_KEY_ESC, GFX_KEY_UP/DOWN/LEFT/RIGHT, GFX_KEY_F1..., GFX_KEY_LSHIFT,
+GFX_KEY_LCTRL, GFX_KEY_LALT ... Use key_down for movement, key_pressed
+for jumps and shots (once per press). text_input gives the characters
+typed this frame (ASCII), for a name entry. game_raw_keys says whether real
+press/release events are available (keyboard or desktop; not over the
+serial line, where held keys are guessed from repeats).
+@returns
+1/0; any_key_pressed the key or 0; text_input the number of characters.
+@see game_mouse_x gfx_raw_keys
+@check compile
+@example
+#include <string.h>
+#include <rozgame.h>
+
+int main(void)
+{
+    game_config c = game_default_config("Type your name");
+    char name[32] = "", in[16];
+    if (game_open(&c) < 0) return 1;
+    while (game_begin()) {
+        int n = game_text_input(in, sizeof in), i;
+        for (i = 0; i < n; i++)
+            if (in[i] >= ' ' && strlen(name) < sizeof name - 1) strncat(name, &in[i], 1);
+        if (game_key_typed(GFX_KEY_BACKSPACE) && name[0]) name[strlen(name) - 1] = '\0';
+        if (game_key_pressed(GFX_KEY_ESC)) game_quit();
+        game_clear(GFX_BLACK);
+        game_text(40, 200, "Name:", GFX_GRAY);
+        game_text(100, 200, name, GFX_WHITE);
+        game_end();
+    }
+    game_close();
+    return 0;
+}
+@end
+
+@entry game_mouse_x
+@also game_mouse_y game_mouse_down game_mouse_pressed game_mouse_released game_mouse_wheel game_mouse_inside mouse
+@header rozgame.h
+@syntax int game_mouse_x(void);     int game_mouse_y(void);
+@syntax int game_mouse_down(int button);     int game_mouse_pressed(int button);
+@syntax int game_mouse_released(int button);
+@syntax int game_mouse_wheel(void);
+@syntax int game_mouse_inside(void);
+@summary Mouse state for games, in logical-screen pixels.
+@desc
+Positions are already converted to the logical screen, whatever the
+window size. button is GFX_BUTTON_LEFT, _RIGHT or _MIDDLE. wheel: -1 up,
++1 down, 0 this frame. mouse_inside: over the logical screen (not on the
+black bars).
+@returns
+As described.
+@see game_key_down
+@check compile
+@example
+#include <rozgame.h>
+
+int main(void)
+{
+    game_config c = game_default_config("Paint dots");
+    int r = 6;
+    if (game_open(&c) < 0) return 1;
+    game_clear(GFX_BLACK);
+    while (game_begin()) {
+        r += game_mouse_wheel();
+        if (r < 2) r = 2;
+        if (game_mouse_down(GFX_BUTTON_LEFT) && game_mouse_inside())
+            game_fill_circle(game_mouse_x(), game_mouse_y(), r, GFX_YELLOW);
+        if (game_mouse_pressed(GFX_BUTTON_RIGHT)) game_clear(GFX_BLACK);
+        if (game_key_pressed(GFX_KEY_ESC)) game_quit();
+        game_end();                         /* no clear: dots stay */
+    }
+    game_close();
+    return 0;
+}
+@end
+
+@entry game_image_load
+@also game_image game_image_new game_image_from_surface game_image_free game_image_update game_image_colorkey
+@header rozgame.h
+@syntax game_image *game_image_load(const char *path);
+@syntax game_image *game_image_new(int w, int h);
+@syntax game_image *game_image_from_surface(gfx_surface *s);
+@syntax void game_image_update(game_image *img);
+@syntax void game_image_colorkey(game_image *img, uint32_t rgb);
+@syntax void game_image_free(game_image *img);
+@summary Pictures for games (PNG, JPG, BMP, GIF, TGA, PPM), drawn fast.
+@desc
+A game_image has w, h and surf (a gfx_surface). When loaded, each row is
+marked fully transparent, fully solid or mixed, so solid rows are copied
+straight and see-through rows are skipped - big pictures draw fast.
+After changing pixels yourself (img->surf->px) call game_image_update.
+colorkey makes one colour (e.g. magenta 0xFF00FF) transparent, for old
+sprite art. from_surface takes over a surface (do not free it yourself).
+game_data_path finds the file next to the game or in /usr/share/games.
+@returns
+An image, or NULL.
+@see game_draw_image game_sheet_load game_data_path
+@example
+#include <stdio.h>
+#include <rozgame.h>
+
+int main(void)
+{
+    game_image *img = game_image_new(16, 16);
+    gfx_fill_rect(img->surf, 4, 4, 8, 8, GFX_RED);       /* draw into it */
+    game_image_update(img);
+    printf("%d x %d, fully solid: %s\n", img->w, img->h, img->opaque ? "yes" : "no");
+    game_image_free(img);
+    return 0;
+}
+@end
+
+@entry game_draw_image
+@also game_draw_image_ex game_draw_image_scaled game_draw_image_alpha game_draw_image_rotated game_draw_background GAME_FLIP_X GAME_FLIP_Y
+@header rozgame.h
+@syntax void game_draw_image(const game_image *img, int x, int y);
+@syntax void game_draw_image_ex(const game_image *img, int sx, int sy, int sw, int sh, int x, int y, int flags);
+@syntax void game_draw_image_scaled(const game_image *img, int sx, int sy, int sw, int sh, int x, int y, int w, int h, int flags);
+@syntax void game_draw_image_alpha(const game_image *img, int x, int y, int alpha);
+@syntax void game_draw_image_rotated(const game_image *img, int cx, int cy, float angle, float scale);
+@syntax void game_draw_background(const game_image *img);
+@summary Draw a game image on the logical screen: whole, part, flipped, scaled, faded, rotated.
+@desc
+_ex draws the part (sx, sy, sw, sh); flags GAME_FLIP_X / GAME_FLIP_Y
+mirror it (a character facing left). _scaled also resizes. _alpha fades
+(0 invisible - 255 normal). _rotated turns it around its centre (cx, cy)
+by angle radians and scales it. draw_background fills the whole screen
+(resized if the sizes differ).
+@returns
+Nothing.
+@see game_image_load game_draw_frame
+@check compile
+@example
+#include <rozgame.h>
+
+int main(void)
+{
+    game_config c = game_default_config("Images");
+    game_image *ship;
+    float a = 0;
+    if (game_open(&c) < 0) return 1;
+    ship = game_image_load(game_data_path("breakout-ball.png"));
+    if (!ship) ship = game_image_new(24, 24);
+    while (game_begin()) {
+        a += game_dt();
+        game_clear(GFX_RGB(10, 10, 30));
+        game_draw_image(ship, 50, 50);
+        game_draw_image_ex(ship, 0, 0, ship->w, ship->h, 120, 50, GAME_FLIP_X);
+        game_draw_image_alpha(ship, 190, 50, 100);
+        game_draw_image_rotated(ship, 320, 240, a, 3.0f);
+        if (game_key_pressed(GFX_KEY_ESC)) game_quit();
+        game_end();
+    }
+    game_image_free(ship);
+    game_close();
+    return 0;
+}
+@end
+
+@entry game_image_resize
+@also game_image_sub
+@header rozgame.h
+@syntax game_image *game_image_resize(const game_image *img, int w, int h, int smooth);
+@syntax game_image *game_image_sub(const game_image *img, int x, int y, int w, int h);
+@summary Make a resized copy, or a copy of one part, of an image.
+@desc
+Resize big photos once at load time (smooth = 1 for good quality) and
+then draw the copy every frame - much faster than scaling every frame.
+Both return a new image; free it as well as the original.
+@returns
+A new image, or NULL.
+@see game_image_load game_draw_image
+@example
+#include <stdio.h>
+#include <rozgame.h>
+
+int main(void)
+{
+    game_image *big = game_image_new(400, 300), *small, *part;
+    gfx_clear(big->surf, GFX_BLUE);
+    game_image_update(big);
+    small = game_image_resize(big, 100, 75, 1);
+    part = game_image_sub(big, 10, 10, 32, 32);
+    printf("small %d x %d, part %d x %d\n", small->w, small->h, part->w, part->h);
+    game_image_free(big);
+    game_image_free(small);
+    game_image_free(part);
+    return 0;
+}
+@end
+
+@entry game_sheet_load
+@also game_sheet game_sheet_new game_sheet_free game_draw_frame game_draw_frame_scaled sprite-sheet
+@header rozgame.h
+@syntax game_sheet *game_sheet_load(const char *path, int frame_w, int frame_h);
+@syntax game_sheet *game_sheet_new(game_image *img, int frame_w, int frame_h);
+@syntax void game_draw_frame(const game_sheet *sh, int frame, int x, int y, int flags);
+@syntax void game_draw_frame_scaled(const game_sheet *sh, int frame, int x, int y, int w, int h, int flags);
+@syntax void game_sheet_free(game_sheet *sh);
+@summary One picture holding many equal-sized frames (a sprite sheet).
+@desc
+Frames are numbered left to right, top to bottom, starting at 0
+(sh->count frames, sh->cols per row). game_sheet_new takes over img.
+flags as in game_draw_image_ex.
+@returns
+A sheet, or NULL.
+@see game_anim_set game_image_load
+@example
+#include <stdio.h>
+#include <rozgame.h>
+
+int main(void)
+{
+    game_image *img = game_image_new(128, 64);       /* 4 x 2 frames of 32 x 32 */
+    game_sheet *sh = game_sheet_new(img, 32, 32);
+    printf("%d frames, %d per row\n", sh->count, sh->cols);
+    game_sheet_free(sh);
+    return 0;
+}
+@end
+
+@entry game_anim_set
+@also game_anim game_anim_update game_anim_frame game_anim_restart animation
+@header rozgame.h
+@syntax void game_anim_set(game_anim *a, int first, int count, float fps, int loop);
+@syntax void game_anim_update(game_anim *a, float dt);
+@syntax int  game_anim_frame(const game_anim *a);
+@syntax void game_anim_restart(game_anim *a);
+@summary Step through sheet frames at a given speed.
+@desc
+anim_set chooses frames first .. first+count-1 at fps frames per second;
+loop 0 plays once and stops on the last frame (a->done becomes 1).
+Calling anim_set again with the same values does not restart it, so you
+can call it every frame ("walking" / "standing"). anim_frame gives the
+frame number to pass to game_draw_frame.
+@returns
+anim_frame: the frame number.
+@see game_sheet_load
+@example
+#include <stdio.h>
+#include <rozgame.h>
+
+int main(void)
+{
+    game_anim walk;
+    int i;
+    game_anim_set(&walk, 4, 3, 10.0f, 1);       /* frames 4, 5, 6 at 10 fps */
+    for (i = 0; i < 6; i++) {
+        printf("%d ", game_anim_frame(&walk));
+        game_anim_update(&walk, 0.1f);
+    }
+    printf("\n");
+    return 0;
+}
+@end
+
+@entry game_clear
+@also game_fill_rect game_draw_rect game_fill_circle game_line game_gradient
+@header rozgame.h
+@syntax void game_clear(uint32_t color);
+@syntax void game_fill_rect(int x, int y, int w, int h, uint32_t color);
+@syntax void game_draw_rect(int x, int y, int w, int h, uint32_t color);
+@syntax void game_fill_circle(int cx, int cy, int r, uint32_t color);
+@syntax void game_line(int x0, int y0, int x1, int y1, uint32_t color);
+@syntax void game_gradient(int x, int y, int w, int h, uint32_t top, uint32_t bottom);
+@summary Simple drawing on the logical screen.
+@desc
+Short forms of the rozgfx functions for game_screen(). game_fill_rect
+blends when the colour's alpha is below 255 (GFX_RGBA). For anything else
+use rozgfx on game_screen() directly.
+@returns
+Nothing.
+@see gfx_fill_rect GFX_RGB
+@check compile
+@example
+#include <rozgame.h>
+
+int main(void)
+{
+    game_config c = game_default_config("Shapes");
+    if (game_open(&c) < 0) return 1;
+    while (game_begin()) {
+        game_gradient(0, 0, 640, 480, GFX_RGB(20, 40, 90), GFX_RGB(200, 120, 60));
+        game_fill_circle(500, 100, 40, GFX_YELLOW);
+        game_fill_rect(0, 400, 640, 80, GFX_RGB(30, 90, 40));
+        game_fill_rect(100, 100, 200, 100, GFX_RGBA(0, 0, 0, 120));
+        game_draw_rect(100, 100, 200, 100, GFX_WHITE);
+        game_line(0, 400, 640, 400, GFX_BLACK);
+        if (game_key_pressed(GFX_KEY_ESC)) game_quit();
+        game_end();
+    }
+    game_close();
+    return 0;
+}
+@end
+
+@entry game_text
+@also game_text_width game_text_height game_text_center game_text_shadow game_printf game_font_load game_ttf game_ttf_width game_ttf_center
+@header rozgame.h
+@syntax int  game_text(int x, int y, const char *str, uint32_t color);
+@syntax int  game_printf(int x, int y, uint32_t color, const char *fmt, ...);
+@syntax int  game_text_width(const char *str);    int game_text_height(void);
+@syntax void game_text_center(int y, const char *str, uint32_t color);
+@syntax void game_text_shadow(int x, int y, const char *str, uint32_t color);
+@syntax gfx_ttf *game_font_load(const char *path);
+@syntax int  game_ttf(gfx_ttf *font, float size, int x, int y, const char *utf8, uint32_t color);
+@syntax int  game_ttf_width(gfx_ttf *font, float size, const char *utf8);
+@syntax void game_ttf_center(gfx_ttf *font, float size, int y, const char *utf8, uint32_t color);
+@summary Text on the logical screen: bitmap font, printf, and smooth TrueType.
+@desc
+game_text uses the 8x16 PSF font; printf formats like printf; _center
+centres horizontally; _shadow adds a dark shadow (readable on pictures).
+game_ttf draws DejaVuSans at any size (font NULL = default) - use it for
+titles and scores; game_font_load loads another .ttf.
+@returns
+game_text/game_printf/game_ttf: width drawn.
+@see gfx_text gfx_ttf_text game_menu_do
+@check compile
+@example
+#include <rozgame.h>
+
+int main(void)
+{
+    game_config c = game_default_config("Text");
+    int score = 0;
+    if (game_open(&c) < 0) return 1;
+    while (game_begin()) {
+        score++;
+        game_clear(GFX_RGB(30, 0, 40));
+        game_ttf_center(NULL, 64, 120, "GAME OVER", GFX_RGB(255, 80, 80));
+        game_text_center(220, "press Esc", GFX_GRAY);
+        game_text_shadow(10, 10, "shadowed text", GFX_WHITE);
+        game_printf(10, 450, GFX_YELLOW, "frames: %d", score);
+        if (game_key_pressed(GFX_KEY_ESC)) game_quit();
+        game_end();
+    }
+    game_close();
+    return 0;
+}
+@end
+
+@entry game_menu_do
+@also game_menu game_menu_update game_menu_draw
+@header rozgame.h
+@syntax typedef struct game_menu { const char *const *items; int count, sel; float size; uint32_t color, sel_color; ... } game_menu;
+@syntax int  game_menu_do(game_menu *m, int y);       /* own loop */
+@syntax int  game_menu_update(game_menu *m);          /* game_run: in update */
+@syntax void game_menu_draw(game_menu *m, int y);     /* game_run: in draw */
+@summary A small title-screen menu (Up/Down or W/S, Enter/Space or click).
+@desc
+Fill items and count (size 0 = 28 pixel TrueType; colours 0 = defaults).
+In your own loop game_menu_do draws it centred from height y and returns
+the chosen index. With game_run use game_menu_update in update and
+game_menu_draw in draw.
+@returns
+The chosen item's index, or -1 while nothing was chosen.
+@see game_run game_text
+@check compile
+@example
+#include <rozgame.h>
+
+int main(void)
+{
+    static const char *const items[] = { "Start", "Options", "Quit" };
+    game_menu m = { items, 3, 0, 0, 0, 0, 0, 0, 0 };
+    game_config c = game_default_config("Menu");
+    if (game_open(&c) < 0) return 1;
+    while (game_begin()) {
+        int k;
+        game_clear(GFX_BLACK);
+        game_ttf_center(NULL, 48, 80, "My Game", GFX_WHITE);
+        k = game_menu_do(&m, 200);
+        if (k == 2 || game_key_pressed(GFX_KEY_ESC)) game_quit();
+        game_end();
+    }
+    game_close();
+    return 0;
+}
+@end
+
+@entry game_rect
+@also game_make_rect game_rect_overlap game_rect_contains game_rect_intersect game_circle_overlap game_circle_rect game_rect_hit_side game_rect_push_out GAME_SIDE_LEFT GAME_SIDE_RIGHT GAME_SIDE_TOP GAME_SIDE_BOTTOM collision
+@header rozgame.h
+@syntax typedef struct game_rect { float x, y, w, h; } game_rect;
+@syntax game_rect game_make_rect(float x, float y, float w, float h);
+@syntax int  game_rect_overlap(game_rect a, game_rect b);
+@syntax int  game_rect_contains(game_rect r, float x, float y);
+@syntax game_rect game_rect_intersect(game_rect a, game_rect b);
+@syntax int  game_circle_overlap(float x1, float y1, float r1, float x2, float y2, float r2);
+@syntax int  game_circle_rect(float cx, float cy, float r, game_rect b);
+@syntax int  game_rect_hit_side(game_rect a, game_rect b);
+@syntax int  game_rect_push_out(game_rect *a, game_rect b);
+@summary Collision tests between rectangles and circles.
+@desc
+overlap / contains / circle tests answer "do they touch". intersect gives
+the shared part (w = h = 0 if none). rect_hit_side tells which side of a
+hit b (GAME_SIDE_LEFT means a's left side: reverse the x speed) - made for
+a ball and bricks. push_out moves a out of b the shortest way and returns
+the side.
+@returns
+1/0, a rect, or GAME_SIDE_*.
+@see game_tilemap_move
+@example
+#include <stdio.h>
+#include <rozgame.h>
+
+int main(void)
+{
+    game_rect ball = game_make_rect(95, 40, 10, 10), brick = game_make_rect(100, 30, 40, 20);
+    printf("overlap: %d\n", game_rect_overlap(ball, brick));
+    printf("ball side hit: %s\n", game_rect_hit_side(ball, brick) == GAME_SIDE_RIGHT ? "right (bounce left)" : "other");
+    game_rect_push_out(&ball, brick);
+    printf("after push_out: x = %.0f, overlap %d\n", ball.x, game_rect_overlap(ball, brick));
+    printf("circles touch: %d\n", game_circle_overlap(0, 0, 5, 8, 0, 4));
+    return 0;
+}
+@end
+
+@entry game_camera
+@also game_camera_init game_camera_bounds game_camera_follow game_camera_shake game_camera_update game_camera_view_x game_camera_view_y camera scrolling
+@header rozgame.h
+@syntax void game_camera_init(game_camera *c);
+@syntax void game_camera_bounds(game_camera *c, float x0, float y0, float x1, float y1);
+@syntax void game_camera_follow(game_camera *c, float tx, float ty, float speed, float dt);
+@syntax void game_camera_shake(game_camera *c, float amp, float seconds);
+@syntax void game_camera_update(game_camera *c, float dt);
+@syntax int  game_camera_view_x(const game_camera *c);   int game_camera_view_y(const game_camera *c);
+@summary A camera for worlds bigger than the screen: follow, limits, shake.
+@desc
+Keep things in world coordinates and draw each at (x - view_x, y - view_y).
+follow moves the view towards keeping (tx, ty) in the middle (speed about
+8; 0 = jump at once); bounds keeps the view inside the world;
+shake(amp, seconds) shakes it (explosions); call camera_update once per
+frame. view_x/view_y include the shake.
+@returns
+view_x/view_y: whole pixels.
+@see game_tilemap_draw game_particles_draw
+@example
+#include <stdio.h>
+#include <rozgame.h>
+
+int main(void)
+{
+    game_camera cam;
+    game_camera_init(&cam);
+    cam.w = 640; cam.h = 480;
+    game_camera_bounds(&cam, 0, 0, 2000, 480);
+    game_camera_follow(&cam, 1000, 240, 0, 0.016f);      /* jump to the player */
+    game_camera_update(&cam, 0.016f);
+    printf("view starts at x = %d\n", game_camera_view_x(&cam));
+    game_camera_follow(&cam, 1990, 240, 0, 0.016f);      /* near the world's end */
+    game_camera_update(&cam, 0.016f);
+    printf("stays inside: x = %d\n", game_camera_view_x(&cam));
+    return 0;
+}
+@end
+
+@entry game_tilemap_load
+@also game_tilemap game_tilemap_new game_tilemap_free game_tilemap_tile game_tilemap_get game_tilemap_set game_tilemap_draw game_tilemap_find .map tilemap GAME_EDGE_LEFT GAME_EDGE_BOTTOM
+@header rozgame.h
+@syntax game_tilemap *game_tilemap_load(const char *path);
+@syntax game_tilemap *game_tilemap_new(int cols, int rows, int tw, int th);
+@syntax void game_tilemap_tile(game_tilemap *m, int ch, int frame, int solid);
+@syntax int  game_tilemap_get(const game_tilemap *m, int col, int row);
+@syntax void game_tilemap_set(game_tilemap *m, int col, int row, int ch);
+@syntax int  game_tilemap_find(const game_tilemap *m, int ch, int start, int *col, int *row);
+@syntax void game_tilemap_draw(const game_tilemap *m, int view_x, int view_y);
+@syntax void game_tilemap_free(game_tilemap *m);
+@summary Levels made of tiles, written as text (.map files).
+@desc
+A .map file:
+  tileset platformer-tiles.png 32 32    picture and tile size
+  tile # 0 solid                        character -> frame, solid or not
+  tile ^ 5
+  color = 806040 solid                  a tile drawn with a colour
+  map                                   then one line per row:
+  ....P....C....
+  ##############
+Other characters (P, C, E ...) are not drawn: find them with
+tilemap_find (start positions of player, coins, enemies) and replace them
+with set. get returns the character at a cell ('.' or ' ' = empty, 0
+outside). m->edges (GAME_EDGE_*) says which sides outside the map count
+as solid (default left, right, top). draw paints only the visible part.
+See /usr/share/games/platformer-1.map.
+@returns
+load/new: a map or NULL (reason on stderr). find: cell index or -1.
+@see game_tilemap_move game_camera
+@example
+#include <stdio.h>
+#include <rozgame.h>
+
+int main(void)
+{
+    game_tilemap *m = game_tilemap_new(10, 4, 16, 16);
+    const char *rows[] = { "..........", "..P....C..", "....##....", "##########" };
+    int r, c, col, row;
+    game_tilemap_tile(m, '#', -1, 1);
+    for (r = 0; r < 4; r++)
+        for (c = 0; c < 10; c++) game_tilemap_set(m, c, r, rows[r][c]);
+    if (game_tilemap_find(m, 'P', 0, &col, &row) >= 0) printf("player starts at %d,%d\n", col, row);
+    printf("cell (4,2) is '%c', solid %d\n", game_tilemap_get(m, 4, 2), game_tilemap_solid(m, 4, 2));
+    game_tilemap_free(m);
+    return 0;
+}
+@end
+
+@entry game_tilemap_move
+@also game_tilemap_solid game_tilemap_solid_at game_tilemap_rect_solid GAME_HIT_LEFT GAME_HIT_RIGHT GAME_HIT_TOP GAME_HIT_BOTTOM
+@header rozgame.h
+@syntax int game_tilemap_move(const game_tilemap *m, game_rect *r, float dx, float dy);
+@syntax int game_tilemap_solid(const game_tilemap *m, int col, int row);
+@syntax int game_tilemap_solid_at(const game_tilemap *m, float x, float y);
+@syntax int game_tilemap_rect_solid(const game_tilemap *m, game_rect r);
+@summary Move a rectangle through a tile map, stopping at solid tiles.
+@desc
+move shifts r by dx, then dy, and stops it at walls/floors. The result
+says what it hit: GAME_HIT_BOTTOM means it landed on the ground (allow a
+jump, zero the fall speed), GAME_HIT_TOP a ceiling, LEFT/RIGHT a wall.
+solid_at tests a world pixel, rect_solid a whole rectangle.
+@returns
+move: GAME_HIT_* bits (0 = moved freely). The tests: 1/0.
+@see game_tilemap_load game_rect
+@example
+#include <stdio.h>
+#include <rozgame.h>
+
+int main(void)
+{
+    game_tilemap *m = game_tilemap_new(10, 6, 16, 16);
+    game_rect p = game_make_rect(40, 10, 12, 14);
+    int c, hit;
+    game_tilemap_tile(m, '#', -1, 1);
+    for (c = 0; c < 10; c++) game_tilemap_set(m, c, 5, '#');   /* floor at y = 80 */
+    hit = game_tilemap_move(m, &p, 0, 200);                       /* fall a long way */
+    printf("landed: %s, bottom at y = %.0f\n", hit & GAME_HIT_BOTTOM ? "yes" : "no", p.y + p.h);
+    game_tilemap_free(m);
+    return 0;
+}
+@end
+
+@entry game_particles_new
+@also game_particles game_emitter game_emitter_default game_particles_burst game_particles_update game_particles_draw game_particles_clear game_particles_alive game_particles_free particles
+@header rozgame.h
+@syntax game_particles *game_particles_new(int max);
+@syntax game_emitter game_emitter_default(uint32_t color);
+@syntax void game_particles_burst(game_particles *ps, float x, float y, int n, const game_emitter *e);
+@syntax void game_particles_update(game_particles *ps, float dt);
+@syntax void game_particles_draw(const game_particles *ps, int view_x, int view_y);
+@syntax int  game_particles_alive(const game_particles *ps);
+@syntax void game_particles_clear(game_particles *ps);   void game_particles_free(game_particles *ps);
+@summary Sparks, smoke, explosions: many small dots that fly and fade.
+@desc
+A pool holds up to max particles. burst throws n of them from (x, y) as
+the emitter says: speed_min/max, angle and spread (radians; 6.28 = all
+directions), life_min/max (s), size_start/end, color_start/end (alpha
+too, so they can fade out), gravity, drag. emitter_default(color) is an
+all-direction fading burst. Update and draw every frame (draw takes the
+camera view).
+@returns
+new: a pool or NULL. alive: how many are flying.
+@see game_camera
+@example
+#include <stdio.h>
+#include <rozgame.h>
+
+int main(void)
+{
+    game_particles *ps = game_particles_new(200);
+    game_emitter e = game_emitter_default(GFX_YELLOW);
+    int i;
+    e.life_min = 0.2f; e.life_max = 0.5f;
+    game_particles_burst(ps, 100, 100, 50, &e);
+    printf("flying: %d\n", game_particles_alive(ps));
+    for (i = 0; i < 60; i++) game_particles_update(ps, 1.0f / 60);    /* one second */
+    printf("after 1 s: %d\n", game_particles_alive(ps));
+    game_particles_free(ps);
+    return 0;
+}
+@end
+
+@entry game_rand
+@also game_rand_seed game_rand_int game_rand_float
+@header rozgame.h
+@syntax void     game_rand_seed(uint32_t seed);
+@syntax uint32_t game_rand(void);
+@syntax int      game_rand_int(int lo, int hi);
+@syntax float    game_rand_float(float lo, float hi);
+@summary Random numbers for games.
+@desc
+Without game_rand_seed the series starts from /dev/urandom (different each
+run). Give a fixed seed to get the same "random" level every time.
+rand_int includes both lo and hi.
+@returns
+The number.
+@see rand getrandom
+@example
+#include <stdio.h>
+#include <rozgame.h>
+
+int main(void)
+{
+    int i;
+    game_rand_seed(42);
+    printf("dice:");
+    for (i = 0; i < 6; i++) printf(" %d", game_rand_int(1, 6));
+    printf("\nfloat in [0,1): %s\n", game_rand_float(0, 1) < 1.0f ? "ok" : "?");
+    return 0;
+}
+@end
+
+@entry game_lerp
+@also game_clamp game_approach game_dist game_every game_color_lerp game_hsv
+@header rozgame.h
+@syntax float game_clamp(float v, float lo, float hi);
+@syntax float game_lerp(float a, float b, float t);
+@syntax float game_approach(float v, float target, float step);
+@syntax float game_dist(float x1, float y1, float x2, float y2);
+@syntax int   game_every(float *acc, float interval, float dt);
+@syntax uint32_t game_color_lerp(uint32_t a, uint32_t b, float t);
+@syntax uint32_t game_hsv(float h, float s, float v);
+@summary Small helpers: limits, blending, steady approach, timers, colours.
+@desc
+lerp: a + (b - a) * t. approach: move v towards target by at most step
+(speed up / slow down smoothly). every: returns 1 each time interval
+seconds have passed (keep acc in a variable) - spawn an enemy every 2 s.
+color_lerp mixes two colours; hsv(h 0-360, s, v 0-1) makes rainbow
+colours.
+@returns
+As described.
+@see game_rand
+@example
+#include <stdio.h>
+#include <rozgame.h>
+
+int main(void)
+{
+    float acc = 0, speed = 0;
+    int i, spawned = 0;
+    for (i = 0; i < 120; i++) {                       /* two seconds at 60 fps */
+        if (game_every(&acc, 0.5f, 1.0f / 60)) spawned++;
+        speed = game_approach(speed, 300, 10);
+    }
+    printf("spawned %d, speed %.0f, clamp %.0f, lerp %.1f\n", spawned, speed,
+           game_clamp(150, 0, 100), game_lerp(0, 10, 0.25f));
+    printf("red from hsv: %06x\n", (unsigned)(game_hsv(0, 1, 1) & 0xffffff));
+    return 0;
+}
+@end
+
+@entry game_score_load
+@also game_score_save high-score
+@header rozgame.h
+@syntax long game_score_load(const char *name);
+@syntax int  game_score_save(const char *name, long score);
+@summary Remember the best score of a game.
+@desc
+Kept in $HOME/.rozgame/<name>.score (/home if HOME is not set).
+score_save writes only if the new score is higher.
+@returns
+load: the best score (0 if none). save: 1 = new record, 0 = not higher.
+@see game_data_path
+@example
+#include <stdio.h>
+#include <rozgame.h>
+
+int main(void)
+{
+    printf("best so far: %ld\n", game_score_load("demo"));
+    printf("120: %s\n", game_score_save("demo", 120) ? "new record!" : "not a record");
+    printf("80:  %s\n", game_score_save("demo", 80) ? "new record!" : "not a record");
+    printf("best now: %ld\n", game_score_load("demo"));
+    return 0;
+}
+@end
+
+@entry game_data_path
+@header rozgame.h
+@syntax const char *game_data_path(const char *file);
+@summary Find a game file: here first, then /usr/share/games.
+@desc
+Lets the same game run from its source folder while you work on it and
+after it is installed. The result is in a static buffer (copy it to keep
+it).
+@returns
+The path to use (the plain name if found nowhere).
+@see game_image_load game_tilemap_load
+@example
+#include <stdio.h>
+#include <rozgame.h>
+
+int main(void)
+{
+    printf("%s\n", game_data_path("platformer-1.map"));
+    return 0;
+}
+@end
+
+@entry game_inject_event
+@also game_input_frame
+@header rozgame.h
+@syntax void game_inject_event(const gfx_event *ev);
+@syntax void game_input_frame(void);
+@summary Feed a fake input event (for tests).
+@desc
+systest uses these to check the input code without a keyboard.
+game_input_frame starts a new input frame (it clears the "pressed this
+frame" state, as game_begin does); then each injected gfx_event updates
+the key/mouse state exactly like a real one.
+@returns
+Nothing.
+@see game_key_down
+@example
+#include <stdio.h>
+#include <rozgame.h>
+
+int main(void)
+{
+    gfx_event ev = {0};
+    ev.type = GFX_EV_KEY;
+    ev.key = 'a';
+    game_input_frame();                     /* new frame first */
+    game_inject_event(&ev);
+    printf("'a' pressed this frame: %d\n", game_key_pressed('a'));
+    return 0;
+}
+@end

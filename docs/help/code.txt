@@ -29,7 +29,9 @@ Bengali and other UTF-8 letters are kept exactly, but shown as a dot
 
 == Compile and run ==
 Compile saves, then runs `tcc -o NAME NAME.c -lrozui -lrozgame -lrozgfx -lm` in the
-file's folder; the messages appear in the Output panel - click an
+file's folder (phase 19c: plus -lrozhttp -lbearssl, -llua, -lz or -lrozcref
+when the file includes <rozhttp.h>, <lua.h>, <zlib.h> or <rozcref.h>);
+the messages appear in the Output panel - click an
 error line to jump to it. Run (Ctrl+R / F5) compiles, then starts
 ./NAME in a new terminal window ([[rozterm]] -w: it waits for a key at
 the end). Graphics programs ([[rozgfx]], [[rozui]]) open their own window.

@@ -621,7 +621,6 @@ define stage_esp
 	@cp $(KERNEL) $(1)/rozos-factory.elf
 	@cp $(INITRD) $(1)/initrd.tar
 	@cp limine-disk.conf $(1)/limine.conf
-	@cp boot-wallpaper.jpg $(1)/
 	@cp $(LIMINE_DIR)/limine-bios.sys $(1)/
 	@cp $(LIMINE_DIR)/BOOTX64.EFI $(LIMINE_DIR)/BOOTIA32.EFI $(1)/EFI/BOOT/
 	@echo "factory" > $(1)/kernels/default
@@ -681,7 +680,7 @@ disk-check: $(DISK)
 # ভেতরে লেখা বাকি সব ফাইল থাকে। QEMU চলার সময় চালাবেন না।
 disk-update: $(DISK_BIN_STAMP)
 
-$(DISK_BIN_STAMP): $(USER_STRIPPED) $(if $(HAVE_ZLIB),$(ZLIB_ZCONF)) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(APP_FILES) $(TEMPLATE_FILES) $(FONT_FILES) $(IMAGE_FILES) $(ICON_FILES) $(GFX_SRC_FILES) $(GAME_SRC_FILES) $(GAME_DATA_FILES) $(CREF_FILES) $(MOD_KOS) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES) $(KERNEL) $(INITRD) boot-wallpaper.jpg | $(DISK)
+$(DISK_BIN_STAMP): $(USER_STRIPPED) $(if $(HAVE_ZLIB),$(ZLIB_ZCONF)) $(LIBC_A) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_EXTRA) $(HELP_FILES) $(APP_FILES) $(TEMPLATE_FILES) $(FONT_FILES) $(IMAGE_FILES) $(ICON_FILES) $(GFX_SRC_FILES) $(GAME_SRC_FILES) $(GAME_DATA_FILES) $(CREF_FILES) $(MOD_KOS) $(CA_PEM) $(DEV_LIBS) $(DEV_HEADERS) $(KSRC_MK) $(KSRC_FILES) $(KERNEL) $(INITRD) | $(DISK)
 	@command -v debugfs >/dev/null || { echo "debugfs নেই — sudo apt install e2fsprogs"; exit 1; }
 	@if [ "$$(./toolchain/disk-offsets.sh $(DISK))" = old ]; then $(MAKE) --no-print-directory disk-migrate; fi
 	@./toolchain/disk-grow.sh $(DISK) $(DISK_MIB)
@@ -760,7 +759,7 @@ $(DISK_BIN_STAMP): $(USER_STRIPPED) $(if $(HAVE_ZLIB),$(ZLIB_ZCONF)) $(LIBC_A) $
 	 mcopy -o -i "$$M" $(KERNEL) ::/rozos-factory.elf && \
 	 mcopy -o -i "$$M" $(INITRD) ::/initrd.tar && \
 	 mcopy -o -i "$$M" $(LIMINE_DIR)/limine-bios.sys ::/limine-bios.sys && \
-	 mcopy -o -i "$$M" boot-wallpaper.jpg ::/boot-wallpaper.jpg && \
+	 { ! mdir -i "$$M" ::/boot-wallpaper.jpg >/dev/null 2>&1 || mdel -i "$$M" ::/boot-wallpaper.jpg; } && \
 	 mcopy -o -i "$$M" $(LIMINE_DIR)/BOOTX64.EFI $(LIMINE_DIR)/BOOTIA32.EFI ::/EFI/BOOT/ && \
 	 { mdir -i "$$M" ::/limine.conf >/dev/null 2>&1 || mcopy -i "$$M" limine-disk.conf ::/limine.conf; } && \
 	 { mdir -i "$$M" ::/kernels >/dev/null 2>&1 || mmd -i "$$M" ::/kernels; } && \
@@ -785,7 +784,7 @@ define make_iso
 	@mkdir -p $(3)/boot/limine $(3)/EFI/BOOT
 	@cp $(1) $(3)/boot/rozos.elf
 	@cp $(INITRD) $(3)/boot/initrd.tar
-	@cp limine.conf boot-wallpaper.jpg $(LIMINE_DIR)/limine-bios.sys $(LIMINE_DIR)/limine-bios-cd.bin \
+	@cp limine.conf $(LIMINE_DIR)/limine-bios.sys $(LIMINE_DIR)/limine-bios-cd.bin \
 	    $(LIMINE_DIR)/limine-uefi-cd.bin $(3)/boot/limine/
 	@cp $(LIMINE_DIR)/BOOTX64.EFI $(LIMINE_DIR)/BOOTIA32.EFI $(3)/EFI/BOOT/
 	@xorriso -as mkisofs -R -r -J \
@@ -797,12 +796,12 @@ define make_iso
 	@echo "  DONE    $(2)"
 endef
 
-$(ISO): $(KERNEL) $(INITRD) limine.conf boot-wallpaper.jpg $(LIMINE_DIR)/limine $(LIMINE_FILES)
+$(ISO): $(KERNEL) $(INITRD) limine.conf $(LIMINE_DIR)/limine $(LIMINE_FILES)
 	$(call make_iso,$(KERNEL),$@,$(ISO_ROOT))
 
 # ধাপ ১১: rozOS-এর ভেতরে `cd /usr/src/rozos && make` দিয়ে বানানো kernel ডিস্ক থেকে বের করে
 # আলাদা ISO (initrd একই)। QEMU চলার সময় চালাবেন না। তারপর: make run-self
-self-iso: $(INITRD) limine.conf boot-wallpaper.jpg $(LIMINE_DIR)/limine $(LIMINE_FILES) | $(DISK)
+self-iso: $(INITRD) limine.conf $(LIMINE_DIR)/limine $(LIMINE_FILES) | $(DISK)
 	@command -v debugfs >/dev/null || { echo "debugfs নেই — sudo apt install e2fsprogs"; exit 1; }
 	@mkdir -p $(dir $(SELF_KERNEL))
 	@rm -f $(SELF_KERNEL)
@@ -896,9 +895,19 @@ CREF_COVER ?= stdio.h stdlib.h string.h strings.h ctype.h math.h time.h \
   sys/socket.h sys/utsname.h sys/resource.h sys/times.h sys/file.h sys/random.h sys/mount.h sys/reboot.h \
   netinet/in.h arpa/inet.h netdb.h dirent.h signal.h setjmp.h pthread.h semaphore.h sched.h poll.h \
   termios.h pty.h regex.h wchar.h wctype.h locale.h langinfo.h iconv.h getopt.h fnmatch.h glob.h libgen.h \
-  pwd.h grp.h syslog.h search.h utime.h dlfcn.h err.h fenv.h inttypes.h
-cref-check: $(LIBC_A) $(LIBC_CRT0)
-	@python3 toolchain/cref-check.py --dir docs/cref --include libc/include --cover "$(CREF_COVER)" \
+  pwd.h grp.h syslog.h search.h utime.h dlfcn.h err.h fenv.h inttypes.h \
+  rozgfx.h rozui.h rozgame.h rozhttp.h rozos.h rozcref.h
+# ধাপ ১৯গ: rozOS-এর লাইব্রেরি (rozgfx, rozui, rozgame, rozhttp, rozcref) আর Lua/zlib-এর পাতাও;
+# উদাহরণে যে হেডার আছে সেই অনুযায়ী লাইব্রেরি যোগ হয় (--autolib)
+CREF_INCLUDE := libc/include userland/lib $(if $(wildcard ports/lua/src/lua.h),ports/lua/src) $(if $(wildcard ports/zlib/src/zlib.h),ports/zlib/src)
+DL := $(BUILD)/devlib
+CREF_AUTOLIB := rozui.h=$(DL)/librozui.a,$(DL)/librozgame.a,$(DL)/librozgfx.a \
+  rozgame.h=$(DL)/librozgame.a,$(DL)/librozgfx.a rozgfx.h=$(DL)/librozgfx.a rozcref.h=$(DL)/librozcref.a \
+  rozhttp.h=$(DL)/librozhttp.a$(if $(HAVE_BEARSSL),$(comma)$(DL)/libbearssl.a) \
+  lua.h=$(DL)/liblua.a lauxlib.h=$(DL)/liblua.a zlib.h=$(DL)/libz.a
+cref-check: $(LIBC_A) $(LIBC_CRT0) $(DEV_LIBS)
+	@python3 toolchain/cref-check.py --dir docs/cref --include "$(CREF_INCLUDE)" --cover "$(CREF_COVER)" \
 	  --cc "$(CC)" --cflags "$(USER_CFLAGS)" --ldflags "$(USER_LDFLAGS) $(LIBC_CRT0)" --libs "$(LIBC_A) -lgcc" \
+	  --autolib "$(CREF_AUTOLIB)" \
 	  $(if $(CREF_TCC),--tcc "$(CREF_TCC)") $(if $(CREF_ONLY),--only "$(CREF_ONLY)")
 .PHONY: cref-check

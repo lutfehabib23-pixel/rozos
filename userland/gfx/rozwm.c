@@ -1050,16 +1050,33 @@ static void mouse_event(const gfx_event *ev)
 
 /* ---------- শুরু, লুপ, শেষ ---------- */
 
-/* ধাপ ১৯খ: ডেস্কটপ আসার আগে বুট ছবি (splash) — /etc/rozos.conf-এর splash= (খালি = বন্ধ),
- * splash_ms= (কমপক্ষে কতক্ষণ দেখাবে)। ছবি অনুপাত ঠিক রেখে পর্দায় বসে, চারপাশ কালো। */
+/* ধাপ ১৯খ: ডেস্কটপ আসার আগে বুট ছবি (splash) — /etc/rozos.conf-এর splash= (খালি = বন্ধ)।
+ * ছবি অনুপাত ঠিক রেখে পর্দায় বসে, চারপাশ কালো।
+ * ধাপ ১৯খ-২: কালো পর্দায় ছবি ধীরে ধীরে ফুটে ওঠে — splash_fade_ms= (ডিফল্ট 2500; 0 = সাথে সাথে)।
+ * splash_ms= ছবি শুরু থেকে কমপক্ষে কতক্ষণ থাকবে (ডিফল্ট 0 = ফেড শেষ হলেই ডেস্কটপ)। */
 static long splash_until;
+
+/* src-এর উজ্জ্বলতা a/256 করে S-এর (x, y)-তে (R আর B একসাথে, G আলাদা গুণ) */
+static void splash_frame(const gfx_surface *src, int x, int y, unsigned a)
+{
+    int r, c;
+    for (r = 0; r < src->h; r++) {
+        const uint32_t *in = src->px + (long)r * src->stride;
+        uint32_t *out = S->px + (long)(y + r) * S->stride + x;
+        for (c = 0; c < src->w; c++) {
+            uint32_t p = in[c];
+            out[c] = ((((p & 0xff00ffu) * a) >> 8) & 0xff00ffu) | ((((p & 0x00ff00u) * a) >> 8) & 0x00ff00u);
+        }
+    }
+    gfx_present_rect(x, y, src->w, src->h);
+}
 
 static void show_splash(void)
 {
     FILE *f = fopen("/etc/rozos.conf", "r");
     char line[256], path[200] = "/usr/share/images/rozos-boot.jpg";
-    int ms = 1500;
-    gfx_surface *img;
+    int ms = 0, fade = 2500;
+    gfx_surface *img, *pic;
     if (f) {
         while (fgets(line, sizeof(line), f)) {
             char *v = strchr(line, '=');
@@ -1068,19 +1085,36 @@ static void show_splash(void)
             v[strcspn(v, "\r\n")] = '\0';
             if (!strcmp(line, "splash")) snprintf(path, sizeof(path), "%s", v);
             else if (!strcmp(line, "splash_ms")) ms = atoi(v);
+            else if (!strcmp(line, "splash_fade_ms")) fade = atoi(v);
         }
         fclose(f);
     }
-    if (!path[0] || ms <= 0 || !(img = gfx_load_image(path))) return;
+    if (!path[0] || !(img = gfx_load_image(path))) return;
     {
-        int dw = W, dh = (int)((long)img->h * W / img->w);
+        int dw = W, dh = (int)((long)img->h * W / img->w), x, y;
+        long t0, el;
         if (dh > H) { dh = H; dw = (int)((long)img->w * H / img->h); }
+        x = (W - dw) / 2;
+        y = (H - dh) / 2;
         gfx_fill_rect(S, 0, 0, W, H, 0x000000);
-        gfx_blit_scaled(S, (W - dw) / 2, (H - dh) / 2, dw, dh, img);
-        gfx_present();
+        gfx_present();                                /* আগে পুরো কালো পর্দা */
+        pic = gfx_surface_new(dw, dh);                /* একবারই পর্দার মাপে */
+        if (pic) gfx_blit_scaled(pic, 0, 0, dw, dh, img);
         gfx_surface_free(img);
+        if (!pic) return;
+        t0 = gfx_ticks_ms();
+        if (fade > 0) {
+            while ((el = gfx_ticks_ms() - t0) < fade) {
+                double k = (double)el / fade;
+                k = k * k * (3.0 - 2.0 * k);          /* ধীরে শুরু, ধীরে শেষ */
+                splash_frame(pic, x, y, (unsigned)(k * 256.0));
+                gfx_sleep_ms(5);
+            }
+        }
+        splash_frame(pic, x, y, 256);                 /* শেষে পুরো উজ্জ্বল */
+        gfx_surface_free(pic);
+        splash_until = t0 + ms;
     }
-    splash_until = gfx_ticks_ms() + ms;
 }
 
 static void splash_wait(void)
