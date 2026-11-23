@@ -9,6 +9,8 @@
 #include <rozos/timer.h>
 #include <rozos/clock.h>
 #include <rozos/vmm.h>
+#include <rozos/heap.h>
+#include <rozos/pmm.h>
 #include <rozos/vfs.h>
 #include <rozos/errno.h>
 #include <rozos/string.h>
@@ -179,7 +181,7 @@ static int64_t sys_uname(struct interrupt_frame *f, uint64_t ubuf, uint64_t a2, 
                          uint64_t a4, uint64_t a5, uint64_t a6)
 {
     static const char *const fields[6] = {
-        "rozOS", "rozos", "0.19.5-phase19e", "phase19e", "x86_64", "(none)"
+        "rozOS", "rozos", "0.19.6-phase19f", "phase19f", "x86_64", "(none)"
     };
     char buf[6 * 65];
     int i;
@@ -262,6 +264,60 @@ static int kmon_thread(void *arg)
         sched_wake(kmon_waiter);
     }
     return 0;
+}
+
+/* ================= ধাপ ১৯চ: sysinfo (99) আর প্রসেস-তালিকা (509) — Settings-এর জন্য ================= */
+
+struct linux_sysinfo {                      /* Linux x86-64-এর বিন্যাস */
+    int64_t  uptime;
+    uint64_t loads[3];
+    uint64_t totalram, freeram, sharedram, bufferram, totalswap, freeswap;
+    uint16_t procs, pad;
+    uint64_t totalhigh, freehigh;
+    uint32_t mem_unit;
+    char     reserved[4];
+};
+
+static int64_t sys_sysinfo(struct interrupt_frame *f, uint64_t uinfo, uint64_t a2, uint64_t a3,
+                           uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    struct linux_sysinfo si;
+    struct pmm_stats st;
+    (void)f; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+    memset(&si, 0, sizeof(si));
+    pmm_get_stats(&st);
+    si.uptime = (int64_t)(timer_uptime_ms() / 1000);
+    si.totalram = st.usable_pages * PMM_PAGE_SIZE;
+    si.freeram = st.free_pages * PMM_PAGE_SIZE;
+    si.procs = (uint16_t)proc_count();
+    si.mem_unit = 1;
+    return copy_to_user((void *)(uintptr_t)uinfo, &si, sizeof(si)) < 0 ? -EFAULT : 0;
+}
+
+static int64_t sys_proclist(struct interrupt_frame *f, uint64_t ubuf, uint64_t len, uint64_t a3,
+                            uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    char *k;
+    size_t i, o = 0;
+    uint64_t hz = timer_frequency() ? timer_frequency() : 1000;
+    (void)f; (void)a3; (void)a4; (void)a5; (void)a6;
+    if (len == 0) return 0;
+    if (len > 32768) len = 32768;
+    k = (char *)kzalloc(len);
+    if (!k) return -ENOMEM;
+    for (i = 0; i < proc_count() && o + 1 < len; i++) {
+        struct process *p = proc_at(i);
+        const char *state = p->state == PROC_ZOMBIE ? "zombie" : p->thread ? sched_state_name(p->thread->state) : "?";
+        uint64_t ms = p->thread ? p->thread->cpu_ticks * 1000 / hz : 0;
+        uint64_t kib = p->state == PROC_ZOMBIE ? 0 : vmm_user_pages(p->space) * 4;
+        o += (size_t)ksnprintf(k + o, len - o, "%d %d %s %llu %d %llu %s\n", p->pid, p->ppid, state,
+                               (unsigned long long)ms, p->state == PROC_ZOMBIE ? 0 : p->nthreads,
+                               (unsigned long long)kib, p->name);
+    }
+    if (o >= len) o = len - 1;
+    if (copy_to_user((void *)(uintptr_t)ubuf, k, o + 1) < 0) o = (size_t)-EFAULT;
+    kfree(k);
+    return (int64_t)o;
 }
 
 static int64_t sys_rozos_kmon(struct interrupt_frame *f, uint64_t a1, uint64_t a2, uint64_t a3,
@@ -409,6 +465,8 @@ void sys_proc_register(void)
     syscall_register(SYS_reboot, sys_reboot, "reboot");
     syscall_register(SYS_getrandom, sys_getrandom, "getrandom");
     syscall_register(SYS_rozos_kmon, sys_rozos_kmon, "rozos_kmon");
+    syscall_register(SYS_sysinfo, sys_sysinfo, "sysinfo");              /* ধাপ ১৯চ */
+    syscall_register(SYS_rozos_proclist, sys_proclist, "proclist");
     syscall_register(SYS_getpid, sys_getpid, "getpid");
     syscall_register(SYS_getppid, sys_getppid, "getppid");
     syscall_register(SYS_fork, sys_fork, "fork");

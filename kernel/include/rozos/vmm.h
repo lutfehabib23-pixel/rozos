@@ -69,6 +69,7 @@ int vmm_clone_user(struct vmm_space *dst, struct vmm_space *src);
 void vmm_set_shared_hook(void (*fn)(uint64_t phys, int delta));
 
 /* পরিসংখ্যান */
+uint64_t vmm_user_pages(struct vmm_space *sp);   /* ধাপ ১৯চ: ইউজার-অর্ধেকের ম্যাপ করা পেজ */
 uint64_t vmm_table_pages(void);       /* কার্নেল পেজ-টেবিলে মোট কত পেজ */
 int      vmm_nx_enabled(void);
 

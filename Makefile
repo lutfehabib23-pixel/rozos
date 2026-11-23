@@ -32,6 +32,17 @@ ISO_ROOT   := $(BUILD)/iso_root
 LIMINE_DIR := limine
 SYSROOT    := sysroot
 INITRD     := $(BUILD)/initrd.tar
+# ধাপ ১৯চ: Windows থেকে কপি করলে আসা "...:Zone.Identifier" ফাইল নিজে থেকেই মোছা (কোনো কাজের নয়,
+# আর নামের ':' make-কে আটকে দেয়); sysroot-এ নামে ফাঁকা জায়গা বা ':' থাকলে পরিষ্কার বার্তা দিয়ে থামা
+ZONE_REMOVED := $(shell n=$$(find . -name '*:Zone.Identifier' -not -path './build/*' 2>/dev/null | wc -l); \
+                  [ "$$n" -gt 0 ] && find . -name '*:Zone.Identifier' -not -path './build/*' -delete 2>/dev/null; echo $$n)
+ifneq ($(strip $(ZONE_REMOVED)),0)
+$(info   CLEAN   removed $(strip $(ZONE_REMOVED)) Windows "Zone.Identifier" file(s))
+endif
+BAD_NAMES := $(shell find $(SYSROOT) \( -name '* *' -o -name '*:*' \) 2>/dev/null | head -n 5 | tr '\n' '|')
+ifneq ($(BAD_NAMES),)
+$(error sysroot has file names with a space or ':' - rename them (letters, digits, - _ . only): $(BAD_NAMES))
+endif
 SYSROOT_FILES := $(shell find $(SYSROOT) -type f -o -type d 2>/dev/null)
 DISK       := rozos-disk.img
 DISK_SIZE  ?= 64M          # ধাপ ৫-১১ক-এর পুরোনো ডিস্ক (partition ছাড়া) — শুধু তথ্য
@@ -896,7 +907,7 @@ CREF_COVER ?= stdio.h stdlib.h string.h strings.h ctype.h math.h time.h \
   netinet/in.h arpa/inet.h netdb.h dirent.h signal.h setjmp.h pthread.h semaphore.h sched.h poll.h \
   termios.h pty.h regex.h wchar.h wctype.h locale.h langinfo.h iconv.h getopt.h fnmatch.h glob.h libgen.h \
   pwd.h grp.h syslog.h search.h utime.h dlfcn.h err.h fenv.h inttypes.h \
-  rozgfx.h rozui.h rozgame.h rozhttp.h rozos.h rozcref.h
+  rozgfx.h rozui.h rozgame.h rozhttp.h rozos.h rozcref.h sys/statvfs.h sys/statfs.h sys/sysinfo.h
 # ধাপ ১৯গ: rozOS-এর লাইব্রেরি (rozgfx, rozui, rozgame, rozhttp, rozcref) আর Lua/zlib-এর পাতাও;
 # উদাহরণে যে হেডার আছে সেই অনুযায়ী লাইব্রেরি যোগ হয় (--autolib)
 CREF_INCLUDE := libc/include userland/lib $(if $(wildcard ports/lua/src/lua.h),ports/lua/src) $(if $(wildcard ports/zlib/src/zlib.h),ports/zlib/src)

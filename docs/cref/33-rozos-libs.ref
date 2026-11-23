@@ -255,6 +255,40 @@ int main(void)
 }
 @end
 
+@entry rozos_proc_list
+@header rozos.h
+@syntax long rozos_proc_list(char *buf, unsigned long len);
+@summary The list of running processes (what Settings > Processes shows).
+@desc
+Writes one line per process: "pid ppid state cpu_ms threads mem_kib
+name". state is running, ready, sleeping, blocked, zombie ...; cpu_ms is
+the CPU time used; mem_kib the memory mapped in the program. Read the
+lines with sscanf. To end a process use kill(pid, SIGTERM). (phase 19f)
+@returns
+Bytes written (the text ends with '\0'), or -1.
+@see kill sysinfo rozos_mounts
+@check compile
+@example
+#include <stdio.h>
+#include <string.h>
+#include <rozos.h>
+
+int main(void)
+{
+    char buf[8192], *line, *save, name[40], state[16];
+    int pid, ppid, thr;
+    unsigned long long ms, kib;
+    long n = rozos_proc_list(buf, sizeof buf - 1);
+    if (n < 0) return 1;
+    buf[n] = '\0';
+    printf("  PID  NAME             CPU ms   MEM KiB\n");
+    for (line = strtok_r(buf, "\n", &save); line; line = strtok_r(NULL, "\n", &save))
+        if (sscanf(line, "%d %d %15s %llu %d %llu %39s", &pid, &ppid, state, &ms, &thr, &kib, name) == 7)
+            printf("%5d  %-16s %7llu %9llu\n", pid, name, ms, kib);
+    return 0;
+}
+@end
+
 @entry rozos_kmon
 @header rozos.h
 @syntax int rozos_kmon(void);

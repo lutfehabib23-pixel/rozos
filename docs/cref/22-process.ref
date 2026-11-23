@@ -738,3 +738,32 @@ int main(void)
     return 0;
 }
 @end
+
+@entry sysinfo
+@also struct-sysinfo totalram freeram uptime procs mem_unit
+@header sys/sysinfo.h
+@syntax int sysinfo(struct sysinfo *info);
+@summary Memory (RAM) size and free, time since boot, number of processes.
+@desc
+Fields: uptime (seconds), totalram and freeram (multiply by mem_unit - 1
+in rozOS - for bytes), procs. sharedram, bufferram, swap and loads are 0
+in rozOS. Settings > System shows these (phase 19f).
+@returns
+0, or -1.
+@see times getrlimit rozos_proc_list
+@example
+#include <stdio.h>
+#include <sys/sysinfo.h>
+
+int main(void)
+{
+    struct sysinfo si;
+    if (sysinfo(&si) < 0) { perror("sysinfo"); return 1; }
+    printf("RAM: %lu MiB, free %lu MiB (%s)\n",
+           (unsigned long)((unsigned long long)si.totalram * si.mem_unit >> 20),
+           (unsigned long)((unsigned long long)si.freeram * si.mem_unit >> 20),
+           si.procs > 0 ? "processes running" : "?");
+    printf("up for %ld minutes\n", si.uptime / 60);
+    return 0;
+}
+@end

@@ -473,3 +473,36 @@ int main(void)
     return 0;
 }
 @end
+
+@entry statvfs
+@also statfs struct-statvfs f_blocks f_bfree f_bavail f_frsize ST_RDONLY disk-space
+@header sys/statvfs.h
+@syntax int statvfs(const char *path, struct statvfs *buf);     /* <sys/statvfs.h> (POSIX) */
+@syntax int statfs(const char *path, struct statfs *buf);       /* <sys/statfs.h> (Linux) */
+@summary How big a disk (file system) is and how much space is free.
+@desc
+path is any file or folder on that file system ("/", "/boot", "/mnt/usb").
+In struct statvfs: f_blocks (all blocks), f_bfree (free), f_bavail (free
+for normal users), each of f_frsize bytes; f_files / f_ffree (inodes);
+f_flag has ST_RDONLY for a read-only mount. Size in bytes = f_blocks *
+f_frsize. statfs is the Linux form (f_type tells the kind: 0xEF53 ext2,
+0x4d44 FAT, 0x01021994 tmpfs). Settings > Disks shows the same (phase 19f).
+@returns
+0, or -1 with errno.
+@see stat rozos_mounts
+@example
+#include <stdio.h>
+#include <sys/statvfs.h>
+
+int main(void)
+{
+    struct statvfs v;
+    unsigned long long total, freeb;
+    if (statvfs("/", &v) < 0) { perror("statvfs"); return 1; }
+    total = (unsigned long long)v.f_blocks * v.f_frsize;
+    freeb = (unsigned long long)v.f_bfree * v.f_frsize;
+    printf("/ : %llu MiB, %llu MiB free (%s)\n", total >> 20, freeb >> 20,
+           v.f_flag & ST_RDONLY ? "read-only" : "read-write");
+    return 0;
+}
+@end

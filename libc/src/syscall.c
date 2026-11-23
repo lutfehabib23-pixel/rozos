@@ -1,5 +1,8 @@
 /* rozlibc — syscall-এর মূল ও POSIX wrapper (Linux x86-64 নম্বর) */
 
+#include <sys/sysinfo.h>
+#include <sys/statfs.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -57,6 +60,9 @@
 #define SYS_umount2         166
 #define SYS_rozos_mounts    507
 #define SYS_rozos_usblist   508
+#define SYS_rozos_proclist  509     /* ধাপ ১৯চ */
+#define SYS_sysinfo         99
+#define SYS_statfs          137
 #define SYS_uname           63
 #define SYS_truncate        76
 #define SYS_ftruncate       77      /* ধাপ ১৩ */
@@ -180,6 +186,28 @@ int  rozos_delete_module(const char *name) { return (int)SC3(SYS_delete_module, 
 long rozos_module_list(char *buf, unsigned long len, int ks) { return SC3(SYS_rozos_modlist, buf, len, ks); }
 long rozos_mounts(char *buf, unsigned long len) { return SC3(SYS_rozos_mounts, buf, len, 0); }
 long rozos_usb_list(char *buf, unsigned long len) { return SC3(SYS_rozos_usblist, buf, len, 0); }
+
+/* ধাপ ১৯চ: প্রসেস-তালিকা, sysinfo, statfs/statvfs (Settings-এর System, Processes, Disks) */
+long rozos_proc_list(char *buf, unsigned long len) { return SC3(SYS_rozos_proclist, buf, len, 0); }
+int  sysinfo(struct sysinfo *info) { return (int)SC3(SYS_sysinfo, info, 0, 0); }
+int  statfs(const char *path, struct statfs *buf) { return (int)SC3(SYS_statfs, path, buf, 0); }
+
+int statvfs(const char *path, struct statvfs *v)
+{
+    struct statfs s;
+    if (statfs(path, &s) < 0) return -1;
+    v->f_bsize = (unsigned long)s.f_bsize;
+    v->f_frsize = (unsigned long)(s.f_frsize ? s.f_frsize : s.f_bsize);
+    v->f_blocks = s.f_blocks;
+    v->f_bfree = s.f_bfree;
+    v->f_bavail = s.f_bavail;
+    v->f_files = s.f_files;
+    v->f_ffree = v->f_favail = s.f_ffree;
+    v->f_fsid = (unsigned long)(unsigned)s.f_fsid.__val[0];
+    v->f_flag = (unsigned long)(s.f_flags & 1 ? ST_RDONLY : 0);
+    v->f_namemax = (unsigned long)s.f_namelen;
+    return 0;
+}
 int  mount(const char *src, const char *tgt, const char *type, unsigned long flags, const void *data)
 {
     return (int)__syscall_ret(__syscall6(SYS_mount, (long)src, (long)tgt, (long)type, (long)flags, (long)data, 0));

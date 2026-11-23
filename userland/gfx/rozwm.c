@@ -34,6 +34,7 @@
 #include <sys/wait.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/stat.h>
 #include <rozgfx.h>
 #include <rozui.h>
 #include <rozwm_proto.h>
@@ -635,6 +636,90 @@ static const struct dicon icons[] = {
 #define NICONS ((int)(sizeof(icons) / sizeof(icons[0])))
 static int icon_sel = -1;
 
+/* ধাপ ১৯চ: নিজের আইকন — /home/Desktop-এর ফাইল। .app = প্রোগ্রামের শর্টকাট (Start মেনুর মতো
+ * name/run/icon/window), ফোল্ডার → Files, ছবি → imgview, অন্য ফাইল → Code। আগের ৭টার পরে বসে। */
+#define DESKTOP_DIR "/home/Desktop"
+#define MAXUSER 48
+enum { UK_APP, UK_DIR, UK_IMAGE, UK_FILE };
+struct uicon { char label[40], path[200], run[200], image[64]; int kind, window; };
+static struct uicon uicons[MAXUSER];
+static int nuser;
+static unsigned long desk_sig;         /* ফোল্ডারের নামগুলোর ছাপ — বদলালে আবার পড়া */
+
+static int nicons_total(void) { return NICONS + nuser; }
+
+static int is_picture(const char *n)
+{
+    static const char *const ext[] = { ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tga", ".ppm" };
+    const char *dot = strrchr(n, '.');
+    size_t i;
+    if (!dot) return 0;
+    for (i = 0; i < sizeof(ext) / sizeof(ext[0]); i++) if (!strcasecmp(dot, ext[i])) return 1;
+    return 0;
+}
+
+static int cmp_uicon(const void *a, const void *b)
+{
+    return strcasecmp(((const struct uicon *)a)->label, ((const struct uicon *)b)->label);
+}
+
+static void read_app_file(struct uicon *u)
+{
+    FILE *f = fopen(u->path, "r");
+    char line[256];
+    if (!f) return;
+    while (fgets(line, sizeof(line), f)) {
+        char *v = strchr(line, ':');
+        if (line[0] == '#' || !v) continue;
+        *v++ = '\0';
+        while (*v == ' ') v++;
+        v[strcspn(v, "\r\n")] = '\0';
+        if (!strcmp(line, "name")) snprintf(u->label, sizeof(u->label), "%s", v);
+        else if (!strcmp(line, "run")) snprintf(u->run, sizeof(u->run), "%s", v);
+        else if (!strcmp(line, "icon")) snprintf(u->image, sizeof(u->image), "%s", v);
+        else if (!strcmp(line, "window")) u->window = !strcmp(v, "yes");
+    }
+    fclose(f);
+}
+
+/* /home/Desktop পড়া; বদলেছে কিনা ফেরত (তাহলে আইকন আবার আঁকা লাগে) */
+static int load_user_icons(void)
+{
+    DIR *d = opendir(DESKTOP_DIR);
+    struct dirent *e;
+    unsigned long sig = 5381;
+    int n = 0;
+    struct uicon tmp[MAXUSER];
+    if (d) {
+        while ((e = readdir(d)) && n < MAXUSER) {
+            struct uicon *u = &tmp[n];
+            const char *c;
+            if (e->d_name[0] == '.') continue;
+            for (c = e->d_name; *c; c++) sig = sig * 33 + (unsigned char)*c;
+            sig = sig * 33 + (unsigned long)e->d_type;
+            memset(u, 0, sizeof(*u));
+            snprintf(u->path, sizeof(u->path), "%s/%s", DESKTOP_DIR, e->d_name);
+            snprintf(u->label, sizeof(u->label), "%s", e->d_name);
+            if (e->d_type == DT_DIR) u->kind = UK_DIR;
+            else if (strlen(e->d_name) > 4 && !strcmp(e->d_name + strlen(e->d_name) - 4, ".app")) {
+                u->kind = UK_APP;
+                u->label[strlen(u->label) - 4] = '\0';
+                read_app_file(u);
+            } else if (is_picture(e->d_name)) u->kind = UK_IMAGE;
+            else u->kind = UK_FILE;
+            n++;
+        }
+        closedir(d);
+    }
+    if (sig == desk_sig && n == nuser) return 0;
+    desk_sig = sig;
+    qsort(tmp, (size_t)n, sizeof(tmp[0]), cmp_uicon);
+    memcpy(uicons, tmp, sizeof(tmp[0]) * (size_t)n);
+    nuser = n;
+    if (icon_sel >= nicons_total()) icon_sel = -1;
+    return 1;
+}
+
 static void icon_rect(int i, int *x, int *y, int *w, int *h)
 {
     int per = (H - TASK_H - PANEL_H - 12) / 72;       /* ধাপ ১৪খ: জায়গা না হলে পাশের কলামে */
@@ -645,24 +730,35 @@ static void icon_rect(int i, int *x, int *y, int *w, int *h)
     *h = 66;
 }
 
+static const char *icon_label(int i) { return i < NICONS ? icons[i].label : uicons[i - NICONS].label; }
+
 static void draw_icons(void)
 {
     int i;
-    for (i = 0; i < NICONS; i++) {
+    for (i = 0; i < nicons_total(); i++) {
         int x, y, w, h, tw;
+        char lbl[16];
         icon_rect(i, &x, &y, &w, &h);
         if (i == icon_sel) gfx_fill_round_rect(S, x, y, w, h, 6, T->select);
         /* ধাপ ১৪খ: ছবি থাকলে ৩২x৩২ ছবি, নইলে 3D বাক্সে আঁকা চিহ্ন */
-        ui_draw_icon(S, x + 20, y + 6, 32, icons[i].image, icons[i].kind);
-        tw = gfx_text_width(NULL, icons[i].label);
-        gfx_text(S, NULL, x + (w - tw) / 2, y + 44, icons[i].label, i == icon_sel ? GFX_WHITE : T->text);
+        if (i < NICONS) ui_draw_icon(S, x + 20, y + 6, 32, icons[i].image, icons[i].kind);
+        else {
+            const struct uicon *u = &uicons[i - NICONS];
+            char k = u->kind == UK_DIR ? 'f' : u->kind == UK_IMAGE ? 'i' : u->kind == UK_FILE ? 'd' : u->window ? 'g' : 't';
+            ui_draw_icon(S, x + 20, y + 6, 32, u->kind == UK_IMAGE ? u->path : u->image, k);
+        }
+        /* ধাপ ১৯চ: লম্বা নাম কেটে */
+        snprintf(lbl, sizeof(lbl), "%s", icon_label(i));
+        if (strlen(icon_label(i)) > 11) { lbl[9] = '.'; lbl[10] = '.'; lbl[11] = '\0'; }   /* আগের ৭টার নাম পুরো */
+        tw = gfx_text_width(NULL, lbl);
+        gfx_text(S, NULL, x + (w - tw) / 2, y + 44, lbl, i == icon_sel ? GFX_WHITE : T->text);
     }
 }
 
 static int icon_at(int px, int py)
 {
     int i;
-    for (i = 0; i < NICONS; i++) {
+    for (i = 0; i < nicons_total(); i++) {
         int x, y, w, h;
         icon_rect(i, &x, &y, &w, &h);
         if (px >= x && px < x + w && py >= y && py < y + h) return i;
@@ -672,8 +768,147 @@ static int icon_at(int px, int py)
 
 static void launch_icon(int i)
 {
-    if (icons[i].term) spawn_terminal(icons[i].cmd, 0);
-    else spawn(icons[i].cmd);
+    char cmd[480];
+    const struct uicon *u;
+    if (i < NICONS) {
+        if (icons[i].term) spawn_terminal(icons[i].cmd, 0);
+        else spawn(icons[i].cmd);
+        return;
+    }
+    u = &uicons[i - NICONS];
+    if (u->kind == UK_APP) {
+        if (!u->run[0]) return;
+        if (u->window) spawn(u->run);
+        else spawn_terminal(u->run, 1);
+        return;
+    }
+    snprintf(cmd, sizeof(cmd), "%s '%s'", u->kind == UK_DIR ? "files" : u->kind == UK_IMAGE ? "imgview" : "code", u->path);
+    spawn(cmd);
+}
+
+static void damage_icons(void) { damage(0, PANEL_H, W, H - PANEL_H - TASK_H); }
+
+/* ---------- ধাপ ১৯চ: ডেস্কটপের ডান-ক্লিক মেনু ---------- */
+enum { CX_NEWTEXT = 1, CX_NEWFOLDER, CX_ADDICON, CX_WALLPAPER, CX_SETTINGS, CX_REFRESH,
+       CX_OPEN, CX_REMOVE, CX_SHOWFILES };
+struct ctxitem { const char *label; int id; };
+static const struct ctxitem ctx_desktop[] = {
+    { "New text file", CX_NEWTEXT }, { "New folder", CX_NEWFOLDER }, { "-", 0 },
+    { "Add icon...", CX_ADDICON }, { "Change wallpaper...", CX_WALLPAPER }, { "Settings...", CX_SETTINGS },
+    { "-", 0 }, { "Refresh", CX_REFRESH }
+};
+static const struct ctxitem ctx_builtin[] = { { "Open", CX_OPEN } };
+static const struct ctxitem ctx_app[] = { { "Open", CX_OPEN }, { "Remove from desktop", CX_REMOVE } };
+static const struct ctxitem ctx_file[] = { { "Open", CX_OPEN }, { "Show in Files", CX_SHOWFILES } };
+#define CTX_W 190
+static const struct ctxitem *ctx_items;
+static int ctx_n, ctx_open, ctx_x, ctx_y, ctx_h, ctx_hover = -1, ctx_icon = -1;
+
+static int ctx_row_y(int r)
+{
+    int i, y = ctx_y + 4;
+    for (i = 0; i < r; i++) y += ctx_items[i].label[0] == '-' ? 8 : ITEM_H;
+    return y;
+}
+
+static void ctx_close(void)
+{
+    if (ctx_open) damage(ctx_x, ctx_y, CTX_W, ctx_h);
+    ctx_open = 0;
+}
+
+static void ctx_show(int x, int y, int icon)
+{
+    ctx_close();
+    ctx_icon = icon;
+    if (icon < 0) { ctx_items = ctx_desktop; ctx_n = (int)(sizeof(ctx_desktop) / sizeof(ctx_desktop[0])); }
+    else if (icon < NICONS) { ctx_items = ctx_builtin; ctx_n = 1; }
+    else if (uicons[icon - NICONS].kind == UK_APP) { ctx_items = ctx_app; ctx_n = 2; }
+    else { ctx_items = ctx_file; ctx_n = 2; }
+    ctx_open = 1;
+    ctx_hover = -1;
+    ctx_h = ctx_row_y(ctx_n) - ctx_y + 4;
+    ctx_x = x + CTX_W > W ? W - CTX_W : x;
+    ctx_y = y + ctx_h > H - TASK_H ? H - TASK_H - ctx_h : y;
+    damage(ctx_x, ctx_y, CTX_W, ctx_h);
+}
+
+static void draw_ctx(void)
+{
+    int i;
+    if (!ctx_open) return;
+    ui_panel(S, ctx_x, ctx_y, CTX_W, ctx_h, T->face, 1);
+    for (i = 0; i < ctx_n; i++) {
+        int y = ctx_row_y(i);
+        if (ctx_items[i].label[0] == '-') ui_separator(S, ctx_x + 6, y + 3, CTX_W - 12);
+        else ui_menu_item(S, ctx_x + 4, y, CTX_W - 8, ITEM_H, ctx_items[i].label, i == ctx_hover);
+    }
+}
+
+/* নতুন নাম যা আগে নেই: "New text file.txt", "New text file 2.txt" ... */
+static void unique_name(char *out, size_t size, const char *base, const char *ext)
+{
+    int n;
+    struct stat st;
+    for (n = 1; n < 1000; n++) {
+        if (n == 1) snprintf(out, size, "%s/%s%s", DESKTOP_DIR, base, ext);
+        else snprintf(out, size, "%s/%s %d%s", DESKTOP_DIR, base, n, ext);
+        if (stat(out, &st) < 0) return;
+    }
+}
+
+static void load_config(void);
+
+static void ctx_do(int id)
+{
+    char path[240], cmd[480];
+    int ic = ctx_icon;
+    mkdir("/home", 0755);
+    mkdir(DESKTOP_DIR, 0755);
+    switch (id) {
+    case CX_NEWTEXT: {
+        int fd;
+        unique_name(path, sizeof(path), "New text file", ".txt");
+        fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0644);
+        if (fd >= 0) close(fd);
+        snprintf(cmd, sizeof(cmd), "code '%s'", path);
+        spawn(cmd);
+        break;
+    }
+    case CX_NEWFOLDER:
+        unique_name(path, sizeof(path), "New folder", "");
+        mkdir(path, 0755);
+        break;
+    case CX_ADDICON: spawn("settings icons"); break;
+    case CX_WALLPAPER: spawn("settings wallpaper"); break;
+    case CX_SETTINGS: spawn("settings"); break;
+    case CX_REFRESH: desk_sig = 0; load_config(); damage(0, 0, W, H); break;
+    case CX_OPEN: if (ic >= 0) launch_icon(ic); break;
+    case CX_REMOVE:
+        if (ic >= NICONS && uicons[ic - NICONS].kind == UK_APP) unlink(uicons[ic - NICONS].path);
+        break;
+    case CX_SHOWFILES: spawn("files '" DESKTOP_DIR "'"); break;
+    }
+    if (load_user_icons()) damage_icons();
+}
+
+/* 1 = মেনুর ব্যাপার ছিল (ঘটনা শেষ) */
+static int ctx_mouse(int type, int x, int y)
+{
+    int in, r = -1, i;
+    if (!ctx_open) return 0;
+    in = x >= ctx_x && x < ctx_x + CTX_W && y >= ctx_y && y < ctx_y + ctx_h;
+    if (in)
+        for (i = 0; i < ctx_n; i++)
+            if (ctx_items[i].label[0] != '-' && y >= ctx_row_y(i) && y < ctx_row_y(i) + ITEM_H) r = i;
+    if (r != ctx_hover) { ctx_hover = r; damage(ctx_x, ctx_y, CTX_W, ctx_h); }
+    if (type == GFX_EV_MOUSE_DOWN && !in) { ctx_close(); return 0; }    /* বাইরে ক্লিক: বন্ধ, ক্লিক চলবে */
+    if (type == GFX_EV_MOUSE_UP && in && r >= 0) {
+        int id = ctx_items[r].id;
+        ctx_close();
+        ctx_do(id);
+    }
+    return in;
 }
 
 /* ---------- আঁকা ---------- */
@@ -814,6 +1049,7 @@ static void render_rect(int x, int y, int w, int h)
     if (y < PANEL_H) draw_panel();
     if (y + h > H - TASK_H) draw_taskbar();
     draw_menu();
+    draw_ctx();                                  /* ধাপ ১৯চ */
     draw_cursor();
     gfx_reset_clip(S);
     gfx_present_rect(x, y, w, h);
@@ -984,6 +1220,7 @@ static void mouse_event(const gfx_event *ev)
     }
 
     if (menu_mouse(ev->type, mx, my)) return;
+    if (ctx_mouse(ev->type, mx, my)) return;     /* ধাপ ১৯চ */
 
     if (ev->type == GFX_EV_MOUSE_DOWN) {
         int dbl = now_ms() - last_click_ms < 400 && abs(mx - last_click_x) < 6 && abs(my - last_click_y) < 6;
@@ -997,6 +1234,16 @@ static void mouse_event(const gfx_event *ev)
         idx = window_at(mx, my);
         if (idx < 0) {
             int ic = icon_at(mx, my);
+            if (ev->button == GFX_BUTTON_RIGHT) {        /* ধাপ ১৯চ: ডান-ক্লিক মেনু */
+                if (ic != icon_sel) {
+                    int x, y, w, h;
+                    if (icon_sel >= 0) { icon_rect(icon_sel, &x, &y, &w, &h); damage(x, y, w, h); }
+                    icon_sel = ic;
+                    if (ic >= 0) { icon_rect(ic, &x, &y, &w, &h); damage(x, y, w, h); }
+                }
+                ctx_show(mx, my, ic);
+                return;
+            }
             if (ic != icon_sel) {
                 int x, y, w, h;
                 if (icon_sel >= 0) { icon_rect(icon_sel, &x, &y, &w, &h); damage(x, y, w, h); }
@@ -1123,11 +1370,47 @@ static void splash_wait(void)
     if (splash_until && left > 0) gfx_sleep_ms((int)left);
 }
 
+/* ধাপ ১৯চ: wallpaper_style= stretch (পর্দা জুড়ে টেনে, আগের মতো) বা fill (অনুপাত ঠিক রেখে ভরানো,
+ * কিনারা কাটা); conf বদলালে (Settings) প্রতি সেকেন্ডের পরীক্ষায় আবার পড়া হয় */
+static time_t conf_mtime;
+static long conf_size = -1;
+
+static void set_wallpaper(const char *path, int fill)
+{
+    gfx_surface *img;
+    gfx_surface_free(wallpaper);
+    wallpaper = NULL;
+    if (!path[0] || !(img = gfx_load_image(path))) return;
+    wallpaper = gfx_surface_new(W, H);                 /* একবারই পর্দার মাপে বড়-ছোট করা */
+    if (wallpaper) {
+        if (fill && img->w > 0 && img->h > 0) {
+            int dw = W, dh = (int)((long)img->h * W / img->w);
+            if (dh < H) { dh = H; dw = (int)((long)img->w * H / img->h); }
+            gfx_blit_scaled(wallpaper, (W - dw) / 2, (H - dh) / 2, dw, dh, img);
+        } else {
+            gfx_blit_scaled(wallpaper, 0, 0, W, H, img);
+        }
+    }
+    gfx_surface_free(img);
+}
+
+static int conf_changed(void)
+{
+    struct stat st;
+    if (stat("/etc/rozos.conf", &st) < 0) return 0;
+    if (st.st_mtime == conf_mtime && (long)st.st_size == conf_size) return 0;
+    conf_mtime = st.st_mtime;
+    conf_size = (long)st.st_size;
+    return 1;
+}
+
 static void load_config(void)
 {
     FILE *f = fopen("/etc/rozos.conf", "r");
-    char line[256];
-    if (!f) return;
+    char line[256], wp[200] = "";
+    int fill = 0;
+    conf_changed();
+    if (!f) { set_wallpaper("", 0); return; }
     while (fgets(line, sizeof(line), f)) {
         char *v = strchr(line, '=');
         if (line[0] == '#' || !v) continue;
@@ -1138,16 +1421,14 @@ static void load_config(void)
             if (*v == '-') { sign = -1; v++; } else if (*v == '+') v++;
             sscanf(v, "%d:%d", &hh, &mm);
             utc_offset_min = sign * (hh * 60 + mm);
-        } else if (!strcmp(line, "wallpaper") && v[0]) {
-            gfx_surface *img = gfx_load_image(v);
-            if (img) {                               /* একবারই পর্দার মাপে বড়-ছোট করা */
-                wallpaper = gfx_surface_new(W, H);
-                if (wallpaper) gfx_blit_scaled(wallpaper, 0, 0, W, H, img);
-                gfx_surface_free(img);
-            }
+        } else if (!strcmp(line, "wallpaper")) {
+            snprintf(wp, sizeof(wp), "%s", v);
+        } else if (!strcmp(line, "wallpaper_style")) {
+            fill = !strcmp(v, "fill");
         }
     }
     fclose(f);
+    set_wallpaper(wp, fill);
 }
 
 static void accept_client(void)
@@ -1204,6 +1485,7 @@ int main(int argc, char **argv)
     signal(SIGPIPE, SIG_IGN);
     show_splash();
     load_config();
+    load_user_icons();                           /* ধাপ ১৯চ: /home/Desktop */
 
     listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     memset(&a, 0, sizeof(a));
@@ -1272,6 +1554,9 @@ int main(int argc, char **argv)
         if (t - last_clock > 1000) {
             last_clock = t;
             damage(W - 220, 0, 220, PANEL_H);
+            /* ধাপ ১৯চ: Settings-এ বদল (ওয়ালপেপার) আর /home/Desktop-এ নতুন/মোছা আইকন */
+            if (conf_changed()) { load_config(); damage(0, 0, W, H); }
+            if (load_user_icons()) damage_icons();
         }
         render();
     }

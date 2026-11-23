@@ -498,6 +498,49 @@ static int64_t sys_umount2(struct interrupt_frame *f, uint64_t utgt, uint64_t fl
     return err < 0 ? err : vfs_umount(tgt);
 }
 
+/* ================= ধাপ ১৯চ: statfs (137) — ডিস্কের মাপ/খালি জায়গা ================= */
+
+struct linux_statfs {
+    int64_t  f_type, f_bsize;
+    uint64_t f_blocks, f_bfree, f_bavail, f_files, f_ffree;
+    int32_t  f_fsid[2];
+    int64_t  f_namelen, f_frsize, f_flags, f_spare[4];
+};
+
+static int64_t sys_statfs(struct interrupt_frame *f, uint64_t upath, uint64_t ubuf, uint64_t a3,
+                          uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    char path[VFS_PATH_MAX];
+    struct vfs_statfs sf;
+    struct linux_statfs out;
+    const char *fsname = "";
+    size_t i, best = 0;
+    int err = user_path(upath, path);
+    (void)f; (void)a3; (void)a4; (void)a5; (void)a6;
+    if (err < 0) return err;
+    err = vfs_statfs(path, &sf);
+    if (err < 0) return err;
+    for (i = 0; i < vfs_mount_count(); i++) {          /* path যে mount-এ (সবচেয়ে লম্বা মিল) */
+        const struct mount *m = vfs_mount_at(i);
+        size_t l = strlen(m->path);
+        if (l >= best && !strncmp(path, m->path, l) && (l == 1 || path[l] == '/' || path[l] == '\0')) {
+            best = l;
+            fsname = m->fs->name;
+        }
+    }
+    memset(&out, 0, sizeof(out));
+    out.f_type = !strcmp(fsname, "ext2") ? 0xEF53 : !strcmp(fsname, "fat") ? 0x4d44 :
+                 !strcmp(fsname, "tmpfs") ? 0x01021994 : !strcmp(fsname, "devfs") ? 0x1373 : 0;
+    out.f_bsize = out.f_frsize = (int64_t)sf.block_size;
+    out.f_blocks = sf.total_blocks;
+    out.f_bfree = out.f_bavail = sf.free_blocks;
+    out.f_files = sf.total_inodes;
+    out.f_ffree = sf.free_inodes;
+    out.f_namelen = 255;
+    out.f_flags = sf.read_only ? 1 : 0;                /* ST_RDONLY */
+    return copy_to_user((void *)(uintptr_t)ubuf, &out, sizeof(out)) < 0 ? -EFAULT : 0;
+}
+
 static int64_t sys_mounts(struct interrupt_frame *f, uint64_t ubuf, uint64_t len, uint64_t a3,
                           uint64_t a4, uint64_t a5, uint64_t a6)
 {
@@ -1055,6 +1098,7 @@ void sys_fs_register(void)
     syscall_register(SYS_mount, sys_mount, "mount");
     syscall_register(SYS_umount2, sys_umount2, "umount2");
     syscall_register(SYS_rozos_mounts, sys_mounts, "mounts");
+    syscall_register(SYS_statfs, sys_statfs, "statfs");                 /* ধাপ ১৯চ */
     syscall_register(SYS_rozos_usblist, sys_usblist, "usblist");      /* ধাপ ১৫খ */
     syscall_register(SYS_readv, sys_readv, "readv");                  /* ধাপ ১৬ক */
     syscall_register(SYS_pread64, sys_pread64, "pread64");

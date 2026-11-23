@@ -10,6 +10,21 @@ rozOS starts in the desktop (use `make run` to see the QEMU window):
 Text programs from the menu open in a [[rozterm|terminal window]],
 graphics programs in their own window ([[graphics]]).
 
+== Right-click and your own icons (phase 19f) ==
+Right-click the empty desktop:
+  New text file        makes /home/Desktop/New text file.txt and opens it in Code
+  New folder           makes /home/Desktop/New folder
+  Add icon...          [[settings]] - put a program from the Start menu, or
+                       your own command, on the desktop
+  Change wallpaper...  [[settings]] - pick the background picture
+  Settings...          [[settings]] (memory, processes, disks, network ...)
+  Refresh
+Everything in /home/Desktop shows as an icon after the seven fixed ones:
+.app files are program shortcuts (name:, run:, icon:, window: yes),
+folders open in Files, pictures in Images, other files in Code.
+Right-click your own icon: Open, Remove from desktop (shortcuts) or Show
+in Files. The seven fixed icons always stay.
+
 == Windows ==
 Drag the title bar to move, drag the bottom-right corner to resize,
 double-click the title for full size. [_] minimises (the taskbar
@@ -28,6 +43,9 @@ it once; for always: `mode=text` in /etc/rozos.conf ([[boot-menu]]).
   mode=desktop        or text
   utc_offset=+06:00   the clock's time zone (Dhaka); +00:00 = UTC
   wallpaper=          a picture: /usr/share/images/x.jpg (.jpg .png .bmp)
+  wallpaper_style=    stretch (fill the screen, default) or fill (keep the
+                      shape, the edges may be cut) - phase 19f; the desktop
+                      notices changes to this file within a second
   splash=             picture shown while the desktop starts (phase 19b;
                       default /usr/share/images/rozos-boot.jpg, empty = none)
   splash_fade_ms=2500 it fades in from a black screen over this time (0 = at once)

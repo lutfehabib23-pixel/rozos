@@ -526,3 +526,31 @@ int vmm_clone_user(struct vmm_space *dst, struct vmm_space *src)
     }
     return 1;
 }
+
+/* ধাপ ১৯চ: প্রসেসের ইউজার-অর্ধেকে কয়টা পেজ ম্যাপ করা (Settings-এর প্রসেস তালিকার "memory") */
+uint64_t vmm_user_pages(struct vmm_space *sp)
+{
+    uint64_t *pml4, n = 0;
+    unsigned a, b, c, d;
+    if (!sp) return 0;
+    pml4 = table_virt(sp->pml4_phys);
+    for (a = 0; a < 256; a++) {
+        uint64_t *pdpt;
+        if (!(pml4[a] & PTE_PRESENT)) continue;
+        pdpt = table_virt(pml4[a] & PTE_ADDR_MASK);
+        for (b = 0; b < 512; b++) {
+            uint64_t *pd;
+            if (!(pdpt[b] & PTE_PRESENT)) continue;
+            if (pdpt[b] & PTE_HUGE) { n += 512 * 512; continue; }
+            pd = table_virt(pdpt[b] & PTE_ADDR_MASK);
+            for (c = 0; c < 512; c++) {
+                uint64_t *pt;
+                if (!(pd[c] & PTE_PRESENT)) continue;
+                if (pd[c] & PTE_HUGE) { n += 512; continue; }
+                pt = table_virt(pd[c] & PTE_ADDR_MASK);
+                for (d = 0; d < 512; d++) if (pt[d] & PTE_PRESENT) n++;
+            }
+        }
+    }
+    return n;
+}

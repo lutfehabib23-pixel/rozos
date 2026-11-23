@@ -43,6 +43,7 @@ Type [[help|how to use this viewer]] if you are new here.
 
 == Desktop (phase 14) ==
   [[desktop]]         the desktop: windows, Start menu, text mode and back
+  [[settings]]        wallpaper, desktop icons, memory, processes, disks, network
   [[rozterm]]         terminal windows    [[rozwm]] the window server
   [[signals]]         Ctrl+C, process groups    [[pty]] PTYs and Unix sockets
   [[rozui]]           widgets for your own programs: buttons, menus, dialogs

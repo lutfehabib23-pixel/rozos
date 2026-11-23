@@ -14,6 +14,8 @@
  * ধাপ ১৬খ-২: থ্রেড — pthread_create/join, mutex, cond, errno প্রতি থ্রেডে, TSD, once,
  * semaphore, barrier, detached, FPU, exit/pthread_exit/execve-এর সাথে থ্রেড। */
 
+#include <sys/sysinfo.h>
+#include <sys/statvfs.h>
 #include <stdio.h>
 #include <poll.h>
 #include <pty.h>
@@ -1913,6 +1915,27 @@ static void test_phase19d(void)
     check(bad == 0 && size > 0 && size < 120 * 80 * 3, "gfx_save_png writes a PNG that loads back exactly (and smaller than raw)");
 }
 
+/* ধাপ ১৯চ: Settings-এর তথ্যের syscall — sysinfo (99), statfs (137) / statvfs, rozos_proc_list (509) */
+static void test_phase19f(void)
+{
+    struct sysinfo si;
+    struct statvfs v;
+    static char buf[16384];
+    long n;
+    int ok;
+    ok = sysinfo(&si) == 0 && si.mem_unit == 1 && si.totalram > si.freeram && si.freeram > 0 && si.procs >= 1;
+    check(ok, "sysinfo: RAM total > free > 0, processes counted");
+    ok = statvfs("/", &v) == 0 && v.f_blocks > 0 && v.f_bfree <= v.f_blocks && v.f_frsize > 0;
+    check(ok, "statvfs(\"/\"): size and free blocks");
+    n = rozos_proc_list(buf, sizeof(buf) - 1);
+    ok = n > 0;
+    if (ok) {
+        buf[n] = '\0';
+        ok = strstr(buf, "systest") != NULL && strstr(buf, "init") != NULL;
+    }
+    check(ok, "rozos_proc_list lists init and systest");
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -1940,6 +1963,7 @@ int main(int argc, char **argv)
     test_phase19b();
     test_phase19c();
     test_phase19d();
+    test_phase19f();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

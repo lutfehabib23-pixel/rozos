@@ -87,6 +87,9 @@
 #define SYS_umount2         166     /* ধাপ ১৫ক: (target, flags) */
 #define SYS_rozos_usblist   508     /* ধাপ ১৫খ: (buf, len) lsusb */
 #define SYS_rozos_mounts    507     /* ধাপ ১৫ক: (buf, len) "source path fstype\n" সারি */
+#define SYS_rozos_proclist  509     /* ধাপ ১৯চ: (buf, len) "pid ppid state cpu_ms threads mem_kib name\n" */
+#define SYS_sysinfo         99      /* ধাপ ১৯চ: Linux struct sysinfo */
+#define SYS_statfs          137     /* ধাপ ১৯চ: (path, Linux struct statfs) */
 #define SYS_ftruncate       77      /* ধাপ ১৩ */
 #define SYS_rozos_netconfig 502     /* ধাপ ৯: হাতে IP বসানো / আবার DHCP */
 /* ধাপ ১৬ক: libc সামঞ্জস্য */

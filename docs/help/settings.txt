@@ -1,0 +1,21 @@
+# settings - desktop settings and system information (phase 19f)
+  `settings`             (Start > System > Settings, or right-click the desktop)
+  `settings wallpaper`   open at a page: wallpaper icons system processes disks network
+Pages (the list on the left):
+  Wallpaper      click a picture of /usr/share/images to use it at once;
+                 Browse... (any picture), None (plain colour); style
+                 Stretch or Fill; the rozOS logo before the desktop on/off.
+                 Saved in /etc/rozos.conf - the desktop changes within a second.
+  Desktop icons  add a Start-menu program to the desktop, or your own
+                 (name + command, own window or terminal); Remove.
+                 They are .app files in /home/Desktop.
+  System         rozOS version, date, running time, memory (RAM) used and
+                 free, number of processes.
+  Processes      every running program: pid, name, state, CPU time,
+                 threads, memory - refreshed every second. End process
+                 sends it SIGTERM (asks first; init cannot be ended).
+  Disks          every mounted file system: size, used, free.
+  Network        the network card: address, gateway, DNS, MAC, packets.
+q or Esc closes. In C the same information comes from sysinfo(),
+statvfs() and rozos_proc_list() - see [[cref]].
+See [[desktop]], [[mount]], [[kmon]].
