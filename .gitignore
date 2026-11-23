@@ -17,3 +17,5 @@ ports/pdpmake/src/
 ports/lua/src/
 ports/zlib/src/
 __pycache__/
+ports/sbase/src/
+ports/sqlite/src/

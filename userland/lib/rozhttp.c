@@ -24,6 +24,10 @@
 
 #define CA_FILE    "/etc/ssl/certs.pem"
 #define HDR_MAX    (32 * 1024)
+/* ধাপ ১৯ছ বাগ-ফিক্স: হেডারের সাথে শরীরের যতটা আগেই এসেছে (HDR_MAX পর্যন্ত) সব শরীরের বাফারে
+ * আঁটতে হবে — আগে বাফার ১৬ KiB ছিল, rozOS-এ এক read()-এ ২২ KiB এলে উপচে পাশের সংযোগ-তথ্য
+ * (fd, tls) নষ্ট করত (বড় http ডাউনলোডে segfault বা আটকে যাওয়া) */
+#define BODY_BUF   (HDR_MAX + 16384)
 
 /* ---------- সংযোগ (সাধারণ TCP বা TLS) ---------- */
 
@@ -404,7 +408,7 @@ static int one_request(const struct url *u, int out_fd, const struct rozhttp_opt
                        struct rozhttp_result *r, char *next_url)
 {
     struct conn *c;
-    char *hdr = (char *)malloc(HDR_MAX + 1), *buf = (char *)malloc(16384), val[ROZHTTP_URL_MAX];
+    char *hdr = (char *)malloc(HDR_MAX + 1), *buf = (char *)malloc(BODY_BUF), val[ROZHTTP_URL_MAX];
     size_t hl = 0;
     long n, left = -1;
     int chunked = 0, ret = -1;
@@ -507,8 +511,8 @@ static int one_request(const struct url *u, int out_fd, const struct rozhttp_opt
                     memmove(buf, buf + pos, have - pos);
                     have -= pos;
                     pos = 0;
-                    if (have >= 16000) { snprintf(r->error, sizeof(r->error), "bad chunk header"); goto out; }
-                    n = conn_read(c, buf + have, 16384 - have, r->error, sizeof(r->error));
+                    if (have >= BODY_BUF - 384) { snprintf(r->error, sizeof(r->error), "bad chunk header"); goto out; }
+                    n = conn_read(c, buf + have, BODY_BUF - have, r->error, sizeof(r->error));
                     if (n <= 0) { if (n == 0) snprintf(r->error, sizeof(r->error), "connection closed inside a chunk"); goto out; }
                     have += (size_t)n;
                 }

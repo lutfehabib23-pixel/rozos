@@ -37,6 +37,9 @@
 #include <arpa/inet.h>
 #include <sys/random.h>
 #include <rozos.h>
+#include <rozlock.h>          /* ধাপ ১৯ছ */
+#include <dirent.h>
+#include <ctype.h>
 #include "rozhttp.h"
 #include "rozui.h"
 #include "rozgame.h"
@@ -1936,6 +1939,105 @@ static void test_phase19f(void)
     check(ok, "rozos_proc_list lists init and systest");
 }
 
+/* ধাপ ১৯ছ: immutable flag, ফোল্ডার লক/আনলক, .hidden, *at() ফাংশন, sbase */
+static int write_text(const char *p, const char *t)
+{
+    int fd = open(p, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return -1;
+    if (write(fd, t, strlen(t)) != (ssize_t)strlen(t)) { close(fd); return -1; }
+    return close(fd);
+}
+
+static int text_is(const char *p, const char *t)
+{
+    char b[256];
+    int fd = open(p, O_RDONLY);
+    ssize_t n;
+    if (fd < 0) return 0;
+    n = read(fd, b, sizeof(b) - 1);
+    close(fd);
+    if (n < 0) return 0;
+    b[n] = '\0';
+    return !strcmp(b, t);
+}
+
+static int immutable_works(const char *p)
+{
+    int fd, fl = 0, ok;
+    if (write_text(p, "x") < 0 || (fd = open(p, O_RDONLY)) < 0) return 0;
+    ok = ioctl(fd, FS_IOC_GETFLAGS, &fl) == 0;
+    fl |= FS_IMMUTABLE_FL;
+    ok = ok && ioctl(fd, FS_IOC_SETFLAGS, &fl) == 0;
+    ok = ok && unlink(p) < 0 && errno == EPERM;
+    ok = ok && open(p, O_WRONLY) < 0 && errno == EPERM;
+    ok = ok && rename(p, "/tmp/st19g-moved") < 0 && errno == EPERM;
+    ok = ok && truncate(p, 0) < 0;
+    fl = 0;
+    ioctl(fd, FS_IOC_GETFLAGS, &fl);
+    ok = ok && (fl & FS_IMMUTABLE_FL);
+    fl &= ~FS_IMMUTABLE_FL;
+    ok = ok && ioctl(fd, FS_IOC_SETFLAGS, &fl) == 0;
+    close(fd);
+    return ok && unlink(p) == 0;
+}
+
+static void test_phase19g(void)
+{
+    const char *base = "/home/.st19g";
+    char out[1100];
+    int ok, r;
+    DIR *d;
+    check(immutable_works("/tmp/st19g-imm"), "immutable flag on tmpfs: unlink/write/rename/truncate EPERM, then cleared");
+    check(immutable_works("/home/.st19g-imm"), "immutable flag on ext2 (kept in the inode)");
+    /* ফোল্ডার লক */
+    mkdir(base, 0755);
+    mkdir("/home/.st19g/data", 0755);
+    mkdir("/home/.st19g/data/sub", 0755);
+    write_text("/home/.st19g/data/a.txt", "alpha\n");
+    write_text("/home/.st19g/data/sub/b.txt", "beta beta\n");
+    r = rozlock_lock("/home/.st19g/data", "s3cret words", NULL, NULL, out, sizeof(out));
+    ok = r == 0 && !strcmp(out, "/home/.st19g/data.rozlock") && access("/home/.st19g/data", F_OK) != 0 &&
+         rozlock_is_lockfile(out) && rozlock_is_protected(out);
+    check(ok, "rozlock_lock: folder -> data.rozlock (encrypted, originals gone, immutable)");
+    ok = unlink("/home/.st19g/data.rozlock") < 0 && errno == EPERM;
+    check(ok, "a locked folder cannot be deleted (EPERM)");
+    ok = rozlock_check("/home/.st19g/data", "wrong") == ROZLOCK_EWRONG &&
+         rozlock_unlock("/home/.st19g/data.rozlock", "nope", NULL, NULL, out, sizeof(out)) == ROZLOCK_EWRONG &&
+         access("/home/.st19g/data.rozlock", F_OK) == 0;
+    check(ok, "wrong secret: refused, lock file kept");
+    r = rozlock_unlock("/home/.st19g/data", "s3cret words", NULL, NULL, out, sizeof(out));
+    ok = r == 0 && !strcmp(out, "/home/.st19g/data") && text_is("/home/.st19g/data/a.txt", "alpha\n") &&
+         text_is("/home/.st19g/data/sub/b.txt", "beta beta\n") && access("/home/.st19g/data.rozlock", F_OK) != 0;
+    check(ok, "rozlock_unlock: folder back exactly, lock file gone");
+    check(rozlock_lock("/home", "x1234", NULL, NULL, out, sizeof(out)) == ROZLOCK_ESYSTEM, "system folders cannot be locked");
+    /* লুকানো */
+    ok = rozhide_set("/home/.st19g/data", 1) == 0 && rozhide_is_hidden("/home/.st19g/data") &&
+         text_is("/home/.st19g/.hidden", "data\n") && rozhide_set("/home/.st19g/data", 0) == 0 &&
+         !rozhide_is_hidden("/home/.st19g/data") && access("/home/.st19g/.hidden", F_OK) != 0;
+    check(ok, "rozhide_set: .hidden list add and remove (name unchanged)");
+    /* *at() ফাংশন আর fdopendir */
+    ok = faccessat(AT_FDCWD, "/home/.st19g/data/a.txt", R_OK, 0) == 0 &&
+         unlinkat(AT_FDCWD, "/home/.st19g/data/sub/b.txt", 0) == 0 &&
+         unlinkat(AT_FDCWD, "/home/.st19g/data/sub", AT_REMOVEDIR) == 0;
+    d = fdopendir(open("/home/.st19g/data", O_RDONLY | O_DIRECTORY));
+    ok = ok && d != NULL && isascii('a') && !isascii(200);
+    if (d) closedir(d);
+    check(ok, "faccessat, unlinkat (AT_REMOVEDIR), fdopendir, isascii");
+    unlink("/home/.st19g/data/a.txt");
+    rmdir("/home/.st19g/data");
+    rmdir(base);
+    /* sbase */
+    ok = access("/bin/grep", X_OK) == 0 && access("/bin/sed", X_OK) == 0 && access("/bin/sort", X_OK) == 0;
+    if (ok) {
+        r = system("printf 'pear\\napple\\nfig\\n' | sort | head -n 1 > /tmp/st19g.out");
+        ok = r == 0 && text_is("/tmp/st19g.out", "apple\n");
+        r = system("echo hello rozos | sed s/hello/hi/ | grep -c rozos > /tmp/st19g.out");
+        ok = ok && r == 0 && text_is("/tmp/st19g.out", "1\n");
+        unlink("/tmp/st19g.out");
+    }
+    check(ok, "sbase: sort | head, sed | grep in a pipe");
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -1964,6 +2066,7 @@ int main(int argc, char **argv)
     test_phase19c();
     test_phase19d();
     test_phase19f();
+    test_phase19g();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

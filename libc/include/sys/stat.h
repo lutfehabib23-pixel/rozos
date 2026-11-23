@@ -67,6 +67,7 @@ int mknod(const char *path, mode_t mode, dev_t dev);
 int futimens(int fd, const struct timespec times[2]);
 int fstatat(int dirfd, const char *path, struct stat *st, int flags);
 int mkdirat(int dirfd, const char *path, mode_t mode);
+int fchmodat(int dirfd, const char *path, mode_t mode, int flags);   /* ধাপ ১৯ছ */
 
 int stat(const char *path, struct stat *st);
 int fstat(int fd, struct stat *st);

@@ -1,0 +1,240 @@
+# rozOS C reference - a short guide to SQLite 3 (phase 19g)
+# #include <sqlite3.h>   build: tcc prog.c -lsqlite3 -o prog
+# SQLite is a package: rozpkg install sqlite  (the shell is sqlite3 FILE.db).
+# The most used calls; the full manual is at sqlite.org/c3ref and in sqlite3.h.
+
+@entry sqlite3_open
+@also sqlite3_close sqlite3_open_v2 sqlite3 sqlite SQLITE_OK libsqlite3 sqlite3_libversion
+@header sqlite3.h
+@syntax int sqlite3_open(const char *filename, sqlite3 **db);
+@syntax int sqlite3_open_v2(const char *filename, sqlite3 **db, int flags, const char *vfs);
+@syntax int sqlite3_close(sqlite3 *db);
+@syntax const char *sqlite3_libversion(void);
+@summary Open (or create) a database file, and close it.
+@desc
+The whole database is one ordinary file. ":memory:" makes a database that
+lives only in memory. Even when open fails, *db is set: read the reason with
+sqlite3_errmsg, then sqlite3_close it. The rozOS build is for one thread at
+a time, uses the normal rollback journal (no WAL) and cannot load extensions.
+@returns
+SQLITE_OK (0) or an error code.
+@see sqlite3_exec sqlite3_prepare_v2 sqlite3_errmsg
+@example
+#include <stdio.h>
+#include <sqlite3.h>
+
+int main(void)
+{
+    sqlite3 *db;
+    if (sqlite3_open(":memory:", &db) != SQLITE_OK) {
+        printf("cannot open: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return 1;
+    }
+    printf("SQLite %s is ready\n", sqlite3_libversion());
+    sqlite3_close(db);
+    return 0;
+}
+@end
+
+@entry sqlite3_exec
+@also sqlite3_free sqlite3_callback
+@header sqlite3.h
+@syntax int sqlite3_exec(sqlite3 *db, const char *sql, int (*cb)(void *ctx, int ncol, char **values, char **names), void *ctx, char **errmsg);
+@syntax void sqlite3_free(void *p);
+@summary Run one or more SQL statements; rows (if any) go to a callback.
+@desc
+Good for CREATE, INSERT with fixed text, and quick queries. The callback
+gets each row as strings (NULL for SQL NULL) and returns 0 to go on. If
+errmsg is not NULL it may get a message that you free with sqlite3_free.
+Never paste user input into the SQL text - use sqlite3_prepare_v2 and bind.
+@returns
+SQLITE_OK or an error code (SQLITE_ABORT if the callback returned non-zero).
+@see sqlite3_prepare_v2 sqlite3_open
+@example
+#include <stdio.h>
+#include <sqlite3.h>
+
+static int row(void *ctx, int n, char **v, char **name)
+{
+    int i;
+    (void)ctx;
+    for (i = 0; i < n; i++) printf("%s=%s ", name[i], v[i] ? v[i] : "NULL");
+    printf("\n");
+    return 0;
+}
+
+int main(void)
+{
+    sqlite3 *db;
+    char *err = NULL;
+    sqlite3_open(":memory:", &db);
+    if (sqlite3_exec(db, "CREATE TABLE t(name TEXT, n INT);"
+                         "INSERT INTO t VALUES('apple', 3), ('pear', 5);"
+                         "SELECT name, n * 2 AS twice FROM t;", row, NULL, &err) != SQLITE_OK) {
+        printf("error: %s\n", err);
+        sqlite3_free(err);
+    }
+    sqlite3_close(db);
+    return 0;
+}
+@end
+
+@entry sqlite3_prepare_v2
+@also sqlite3_step sqlite3_finalize sqlite3_reset sqlite3_stmt SQLITE_ROW SQLITE_DONE
+@header sqlite3.h
+@syntax int sqlite3_prepare_v2(sqlite3 *db, const char *sql, int nbytes, sqlite3_stmt **st, const char **tail);
+@syntax int sqlite3_step(sqlite3_stmt *st);
+@syntax int sqlite3_reset(sqlite3_stmt *st);
+@syntax int sqlite3_finalize(sqlite3_stmt *st);
+@summary Compile one SQL statement, run it step by step, then free it.
+@desc
+nbytes -1 means "up to the 0 byte". Each sqlite3_step gives SQLITE_ROW
+while there are result rows (read them with sqlite3_column_*) and
+SQLITE_DONE at the end. sqlite3_reset lets the same statement run again
+(bound values stay); sqlite3_finalize frees it. Use ? in the SQL for
+values and fill them with sqlite3_bind_*.
+@returns
+prepare: SQLITE_OK or an error. step: SQLITE_ROW, SQLITE_DONE or an error.
+@see sqlite3_bind_int sqlite3_column_int sqlite3_exec
+@example
+#include <stdio.h>
+#include <sqlite3.h>
+
+int main(void)
+{
+    sqlite3 *db;
+    sqlite3_stmt *st;
+    sqlite3_open(":memory:", &db);
+    sqlite3_prepare_v2(db, "SELECT 6 * 7, upper('rozos')", -1, &st, NULL);
+    while (sqlite3_step(st) == SQLITE_ROW)
+        printf("%d %s\n", sqlite3_column_int(st, 0), (const char *)sqlite3_column_text(st, 1));
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    return 0;
+}
+@end
+
+@entry sqlite3_bind_int
+@also sqlite3_bind_int64 sqlite3_bind_double sqlite3_bind_text sqlite3_bind_blob sqlite3_bind_null SQLITE_STATIC SQLITE_TRANSIENT sqlite3_clear_bindings
+@header sqlite3.h
+@syntax int sqlite3_bind_int(sqlite3_stmt *st, int i, int v);
+@syntax int sqlite3_bind_int64(sqlite3_stmt *st, int i, sqlite3_int64 v);
+@syntax int sqlite3_bind_double(sqlite3_stmt *st, int i, double v);
+@syntax int sqlite3_bind_text(sqlite3_stmt *st, int i, const char *s, int n, void (*del)(void *));
+@syntax int sqlite3_bind_blob(sqlite3_stmt *st, int i, const void *p, int n, void (*del)(void *));
+@syntax int sqlite3_bind_null(sqlite3_stmt *st, int i);
+@summary Put values into the ? places of a prepared statement (counting from 1).
+@desc
+Binding keeps data apart from SQL, so quotes in names cannot break the
+query. For text n = -1 means "up to the 0 byte". SQLITE_STATIC: the string
+stays valid until the statement is done; SQLITE_TRANSIENT: SQLite copies it.
+Bind after prepare or reset, before step.
+@returns
+SQLITE_OK or SQLITE_RANGE (no such ?).
+@see sqlite3_prepare_v2 sqlite3_column_int
+@example
+#include <stdio.h>
+#include <sqlite3.h>
+
+int main(void)
+{
+    sqlite3 *db;
+    sqlite3_stmt *st;
+    const char *who[] = { "O'Brien", "Rahim", "Lee" };
+    int i;
+    sqlite3_open(":memory:", &db);
+    sqlite3_exec(db, "CREATE TABLE p(name TEXT, age INT)", NULL, NULL, NULL);
+    sqlite3_prepare_v2(db, "INSERT INTO p VALUES(?, ?)", -1, &st, NULL);
+    for (i = 0; i < 3; i++) {
+        sqlite3_bind_text(st, 1, who[i], -1, SQLITE_STATIC);
+        sqlite3_bind_int(st, 2, 30 + i * 5);
+        sqlite3_step(st);
+        sqlite3_reset(st);
+    }
+    sqlite3_finalize(st);
+    sqlite3_prepare_v2(db, "SELECT count(*), avg(age) FROM p", -1, &st, NULL);
+    if (sqlite3_step(st) == SQLITE_ROW)
+        printf("%d people, average age %.1f\n", sqlite3_column_int(st, 0), sqlite3_column_double(st, 1));
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    return 0;
+}
+@end
+
+@entry sqlite3_column_int
+@also sqlite3_column_int64 sqlite3_column_double sqlite3_column_text sqlite3_column_blob sqlite3_column_bytes sqlite3_column_type sqlite3_column_count sqlite3_column_name SQLITE_INTEGER SQLITE_FLOAT SQLITE_TEXT SQLITE_BLOB SQLITE_NULL
+@header sqlite3.h
+@syntax int sqlite3_column_int(sqlite3_stmt *st, int col);
+@syntax sqlite3_int64 sqlite3_column_int64(sqlite3_stmt *st, int col);
+@syntax double sqlite3_column_double(sqlite3_stmt *st, int col);
+@syntax const unsigned char *sqlite3_column_text(sqlite3_stmt *st, int col);
+@syntax const void *sqlite3_column_blob(sqlite3_stmt *st, int col);
+@syntax int sqlite3_column_bytes(sqlite3_stmt *st, int col);
+@syntax int sqlite3_column_type(sqlite3_stmt *st, int col);
+@syntax int sqlite3_column_count(sqlite3_stmt *st);
+@syntax const char *sqlite3_column_name(sqlite3_stmt *st, int col);
+@summary Read one column of the current row (columns count from 0).
+@desc
+Call after sqlite3_step returned SQLITE_ROW. SQLite converts between types
+if asked (text "12" read as int gives 12). Text and blob pointers stay
+valid only until the next step, reset or finalize - copy what you keep.
+column_type tells what is really stored: SQLITE_INTEGER, SQLITE_FLOAT,
+SQLITE_TEXT, SQLITE_BLOB or SQLITE_NULL.
+@returns
+The value (0 / 0.0 / NULL for SQL NULL).
+@see sqlite3_prepare_v2 sqlite3_bind_int
+@example
+#include <stdio.h>
+#include <sqlite3.h>
+
+int main(void)
+{
+    sqlite3 *db;
+    sqlite3_stmt *st;
+    int i;
+    sqlite3_open(":memory:", &db);
+    sqlite3_prepare_v2(db, "SELECT 1 AS id, 2.5 AS price, 'tea' AS item, NULL AS note", -1, &st, NULL);
+    if (sqlite3_step(st) == SQLITE_ROW)
+        for (i = 0; i < sqlite3_column_count(st); i++)
+            printf("%-6s type %d  text %s\n", sqlite3_column_name(st, i), sqlite3_column_type(st, i),
+                   sqlite3_column_text(st, i) ? (const char *)sqlite3_column_text(st, i) : "(null)");
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    return 0;
+}
+@end
+
+@entry sqlite3_errmsg
+@also sqlite3_errcode sqlite3_errstr sqlite3_changes sqlite3_last_insert_rowid SQLITE_ERROR SQLITE_BUSY SQLITE_CONSTRAINT
+@header sqlite3.h
+@syntax const char *sqlite3_errmsg(sqlite3 *db);
+@syntax int sqlite3_errcode(sqlite3 *db);
+@syntax const char *sqlite3_errstr(int code);
+@syntax int sqlite3_changes(sqlite3 *db);
+@syntax sqlite3_int64 sqlite3_last_insert_rowid(sqlite3 *db);
+@summary Why the last call failed; how many rows it changed; the new row's id.
+@desc
+errmsg and errcode describe the last failed call on this connection.
+changes counts rows touched by the last INSERT, UPDATE or DELETE;
+last_insert_rowid is the INTEGER PRIMARY KEY of the last inserted row.
+@returns
+Message text, code, count or row id.
+@see sqlite3_exec sqlite3_open
+@example
+#include <stdio.h>
+#include <sqlite3.h>
+
+int main(void)
+{
+    sqlite3 *db;
+    sqlite3_open(":memory:", &db);
+    sqlite3_exec(db, "CREATE TABLE u(id INTEGER PRIMARY KEY, mail TEXT UNIQUE)", NULL, NULL, NULL);
+    sqlite3_exec(db, "INSERT INTO u(mail) VALUES('a@x'), ('b@x')", NULL, NULL, NULL);
+    printf("added %d, last id %lld\n", sqlite3_changes(db), (long long)sqlite3_last_insert_rowid(db));
+    if (sqlite3_exec(db, "INSERT INTO u(mail) VALUES('a@x')", NULL, NULL, NULL) != SQLITE_OK)
+        printf("refused: %s (code %d)\n", sqlite3_errmsg(db), sqlite3_errcode(db));
+    sqlite3_close(db);
+    return 0;
+}
+@end

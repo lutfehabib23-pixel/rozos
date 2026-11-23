@@ -8,7 +8,10 @@
  * নতুন ফোল্ডার/ফাইল, নাম বদল (F2), মোছা (Delete — আগে জিজ্ঞেস করে), কপি/কাট/পেস্ট
  * (Ctrl+C/X/V — ফোল্ডারও, ভেতরের সবসহ), F5 আবার পড়া, "Terminal here"।
  * আইকনে ছবি দেওয়া যায়: /usr/share/icons/folder.png, file.png, c-file.png, image-file.png,
- * program.png (help icons)। */
+ * program.png (help icons)।
+ * ধাপ ১৯ছ: ডান-ক্লিক মেনু (Open, Copy, Cut, Paste, Rename, Delete, Lock/Unlock, Hide/Unhide,
+ * Properties)। লক করা ফোল্ডার (NAME.rozlock) তালার আইকনে "NAME" নামে দেখায়; খুললে secret
+ * চায় (lockdlg), মোছা/নাম বদল/কাট যায় না। লুকানো = ফোল্ডারের .hidden তালিকা (নাম বদলায় না)। */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +24,9 @@
 #include <sys/stat.h>
 #include <rozgfx.h>
 #include <rozui.h>
+#include <rozlock.h>
+#include <signal.h>
+#include <sys/wait.h>
 
 #define MAXENT   2048
 #define ROW_H    22
@@ -37,6 +43,9 @@ struct ent {
     char kind;                  /* ui_icon চিহ্ন */
     const char *image;          /* /usr/share/icons/<image> */
     const char *type;
+    int locked;                 /* ধাপ ১৯ছ: NAME.rozlock */
+    int hidden;                 /* .hidden তালিকায় (Hidden files চালু থাকলে দেখায়, ঝাপসা) */
+    char *disp;                 /* দেখানো নাম (লক করা: ".rozlock" ছাড়া) */
 };
 
 static struct ent E[MAXENT];
@@ -49,6 +58,8 @@ static char clip_path[512];
 static int clip_cut;
 static char status_msg[200];
 static ui_ctx U;
+static pid_t child_pid;                         /* ধাপ ১৯ছ: চলমান lockdlg */
+static char child_keep[256];                    /* শেষ হলে কোন নাম বাছাই থাকবে */
 
 /* ---------- পথ ---------- */
 static void join(char *out, size_t size, const char *dir, const char *name)
@@ -75,6 +86,7 @@ static void classify(struct ent *e)
 {
     const char *n = e->name;
     if (e->isdir) { e->kind = 'f'; e->image = "folder"; e->type = "Folder"; return; }
+    if (e->locked) { e->kind = 'l'; e->image = "locked-folder"; e->type = "Locked folder"; return; }
     if (has_ext(n, ".c") || has_ext(n, ".h") || has_ext(n, ".cpp") || has_ext(n, ".cc")) {
         e->kind = 'c'; e->image = "c-file"; e->type = "C source"; return;
     }
@@ -93,21 +105,23 @@ static void classify(struct ent *e)
 static void free_ents(void)
 {
     int i;
-    for (i = 0; i < ne; i++) free(E[i].name);
+    for (i = 0; i < ne; i++) { free(E[i].name); free(E[i].disp); }
     ne = 0;
 }
 
 static int ent_cmp(const void *a, const void *b)
 {
     const struct ent *x = (const struct ent *)a, *y = (const struct ent *)b;
-    if (x->isdir != y->isdir) return y->isdir - x->isdir;
-    return strcasecmp(x->name, y->name);
+    int fx = x->isdir || x->locked, fy = y->isdir || y->locked;   /* লক করা ফোল্ডারও ফোল্ডারের সাথে */
+    if (fx != fy) return fy - fx;
+    return strcasecmp(x->disp ? x->disp : x->name, y->disp ? y->disp : y->name);
 }
 
 static void read_dir(const char *keep)
 {
     DIR *d = opendir(cwd);
     struct dirent *de;
+    struct rozhide hid;
     int i;
     free_ents();
     sel = -1;
@@ -115,24 +129,37 @@ static void read_dir(const char *keep)
         snprintf(status_msg, sizeof(status_msg), "Cannot open %s: %s", cwd, strerror(errno));
         return;
     }
+    rozhide_load(&hid, cwd);
     while ((de = readdir(d)) && ne < MAXENT) {
         char p[700];
         struct stat st;
         if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..") || !de->d_name[0]) continue;
         if (de->d_name[0] == '.' && !show_hidden) continue;
+        if (!strcmp(de->d_name, ".hidden")) continue;          /* ধাপ ১৯ছ: তালিকাটা নিজে নয় */
+        if (rozhide_has(&hid, de->d_name) && !show_hidden) continue;
         join(p, sizeof(p), cwd, de->d_name);
         memset(&E[ne], 0, sizeof(E[ne]));
         E[ne].name = strdup(de->d_name);
         if (!E[ne].name) break;
+        E[ne].hidden = de->d_name[0] == '.' || rozhide_has(&hid, de->d_name);
         if (stat(p, &st) == 0) {
             E[ne].isdir = S_ISDIR(st.st_mode);
             E[ne].size = (long)st.st_size;
             E[ne].mode = (unsigned)st.st_mode;
         }
+        {
+            size_t L = strlen(de->d_name), X = strlen(ROZLOCK_EXT);
+            if (!E[ne].isdir && L > X && !strcmp(de->d_name + L - X, ROZLOCK_EXT) && rozlock_is_lockfile(p)) {
+                E[ne].locked = 1;
+                E[ne].disp = strdup(de->d_name);
+                if (E[ne].disp) E[ne].disp[L - X] = '\0';
+            }
+        }
         classify(&E[ne]);
         ne++;
     }
     closedir(d);
+    rozhide_free(&hid);
     qsort(E, (size_t)ne, sizeof(E[0]), ent_cmp);
     if (keep)
         for (i = 0; i < ne; i++) if (!strcmp(E[i].name, keep)) sel = i;
@@ -216,11 +243,48 @@ static void run_in_terminal(const char *p)
     snprintf(status_msg, sizeof(status_msg), "Running %s", p);
 }
 
+/* ধাপ ১৯ছ: lockdlg চালানো — Files চলতে থাকে, শেষ হলে তালিকা আবার পড়া (frame()-এ দেখা হয়) */
+static void run_lockdlg(const char *mode, const char *path, const char *keep)
+{
+    pid_t pid;
+    if (child_pid > 0) { snprintf(status_msg, sizeof(status_msg), "Please finish the other lock window first"); return; }
+    pid = fork();
+    if (pid < 0) { snprintf(status_msg, sizeof(status_msg), "Cannot start lockdlg"); return; }
+    if (pid == 0) {
+        int fd;
+        for (fd = 3; fd < 64; fd++) close(fd);
+        execlp("lockdlg", "lockdlg", mode, path, (char *)NULL);
+        _exit(127);
+    }
+    child_pid = pid;
+    snprintf(child_keep, sizeof(child_keep), "%s", keep ? keep : "");
+    U.tick_ms = 300;
+    snprintf(status_msg, sizeof(status_msg), "%s ...", mode[0] == 'l' ? "Locking" : "Unlocking");
+}
+
+static void check_child(void)
+{
+    int st;
+    char keep[300];
+    if (child_pid <= 0 || waitpid(child_pid, &st, WNOHANG) != child_pid) return;
+    child_pid = 0;
+    U.tick_ms = 0;
+    status_msg[0] = '\0';
+    snprintf(keep, sizeof(keep), "%s", child_keep);
+    read_dir(NULL);
+    {   /* আগের নাম (ফোল্ডার) বা NAME.rozlock — যেটা এখন আছে সেটা বাছাই */
+        int i;
+        for (i = 0; i < ne; i++)
+            if (!strcmp(E[i].name, keep) || (E[i].disp && !strcmp(E[i].disp, keep))) sel = i;
+    }
+}
+
 static void open_entry(int i, int with_code)
 {
     char p[700];
     if (i < 0 || i >= ne) return;
     join(p, sizeof(p), cwd, E[i].name);
+    if (E[i].locked) { run_lockdlg("unlock", p, E[i].disp); return; }      /* ধাপ ১৯ছ */
     if (E[i].isdir && !with_code) { go(E[i].name, 1); return; }
     if (with_code || E[i].kind == 'c' || E[i].kind == 'd') launch2("code", p);
     else if (E[i].kind == 'i') launch2("imgview", p);
@@ -272,6 +336,7 @@ static int copy_file(const char *src, const char *dst)
         if (write(out, buf, (size_t)n) != n) { n = -1; break; }
     close(in);
     close(out);
+    if (n >= 0 && rozlock_is_protected(src)) rozlock_protect(dst, 1);   /* ধাপ ১৯ছ: লক-ফাইলের কপিও মোছা-রোধী */
     return n < 0 ? -1 : 0;
 }
 
@@ -332,6 +397,10 @@ static void do_rename(void)
 {
     char name[256], a[700], b[700];
     if (sel < 0) return;
+    if (E[sel].locked) {                         /* ধাপ ১৯ছ */
+        ui_msgbox("Rename", "A locked folder cannot be renamed.\nUnlock it first.", UI_MB_OK | UI_MB_WARN);
+        return;
+    }
     snprintf(name, sizeof(name), "%s", E[sel].name);
     if (!ui_inputbox("Rename", "New name:", name, sizeof(name)) || !name[0] || !strcmp(name, E[sel].name)) return;
     join(a, sizeof(a), cwd, E[sel].name);
@@ -350,12 +419,17 @@ static void do_delete(void)
 {
     char m[600], p[700];
     if (sel < 0) return;
+    if (E[sel].locked) {                         /* ধাপ ১৯ছ */
+        ui_msgbox("Delete", "A locked folder cannot be deleted.\nUnlock it first.", UI_MB_OK | UI_MB_WARN);
+        return;
+    }
     snprintf(m, sizeof(m), E[sel].isdir ? "Delete the folder \"%s\"\nand everything in it?" : "Delete \"%s\"?",
              E[sel].name);
     if (ui_msgbox("Delete", m, UI_MB_YESNO | UI_MB_WARN) != UI_YES) return;
     join(p, sizeof(p), cwd, E[sel].name);
     if (remove_tree(p) != 0) {
-        snprintf(m, sizeof(m), "Cannot delete:\n%s", strerror(errno));
+        if (errno == EPERM) snprintf(m, sizeof(m), "Cannot delete everything:\nthere is a locked folder inside.\nUnlock it first.");
+        else snprintf(m, sizeof(m), "Cannot delete:\n%s", strerror(errno));
         ui_msgbox("Delete", m, UI_MB_OK | UI_MB_ERROR);
     } else {
         snprintf(status_msg, sizeof(status_msg), "Deleted %s", E[sel].name);
@@ -370,6 +444,10 @@ static void do_delete(void)
 static void do_copy(int cut)
 {
     if (sel < 0) return;
+    if (cut && E[sel].locked) {                  /* ধাপ ১৯ছ: সরানো নয় (কপি চলে — কপিও লক থাকে) */
+        ui_msgbox("Cut", "A locked folder cannot be moved.\nUnlock it first, or use Copy.", UI_MB_OK | UI_MB_WARN);
+        return;
+    }
     join(clip_path, sizeof(clip_path), cwd, E[sel].name);
     clip_cut = cut;
     snprintf(status_msg, sizeof(status_msg), "%s %s - now Paste (Ctrl+V) in another folder",
@@ -421,9 +499,47 @@ static void do_props(void)
     char m[900], sz[32];
     if (sel < 0) return;
     size_text(sz, sizeof(sz), &E[sel]);
-    snprintf(m, sizeof(m), "Name:   %s\nFolder: %s\nType:   %s\nSize:   %s (%ld bytes)\nMode:   %03o",
-             E[sel].name, cwd, E[sel].type, sz, E[sel].size, E[sel].mode & 0777);
+    snprintf(m, sizeof(m), "Name:   %s\nFolder: %s\nType:   %s\nSize:   %s (%ld bytes)\nMode:   %03o\nHidden: %s%s",
+             E[sel].name, cwd, E[sel].type, sz, E[sel].size, E[sel].mode & 0777, E[sel].hidden ? "yes" : "no",
+             E[sel].locked ? "\nLocked: yes (encrypted, cannot be deleted)" : "");
     ui_msgbox("Properties", m, UI_MB_OK | UI_MB_INFO);
+}
+
+/* ধাপ ১৯ছ */
+static void do_lock(void)
+{
+    char p[700];
+    if (sel < 0) return;
+    join(p, sizeof(p), cwd, E[sel].name);
+    if (E[sel].locked) run_lockdlg("unlock", p, E[sel].disp);
+    else if (E[sel].isdir) run_lockdlg("lock", p, E[sel].name);
+    else ui_msgbox("Lock", "Only folders can be locked.\nPut the file in a folder, then lock the folder.", UI_MB_OK | UI_MB_INFO);
+}
+
+static void do_hide(void)
+{
+    char p[700];
+    int r;
+    if (sel < 0) return;
+    if (E[sel].name[0] == '.') {
+        ui_msgbox("Hide", "Names starting with a dot are always hidden.\nRename it to show it.", UI_MB_OK | UI_MB_INFO);
+        return;
+    }
+    join(p, sizeof(p), cwd, E[sel].name);
+    r = rozhide_set(p, !E[sel].hidden);
+    if (r < 0) {
+        char m[300];
+        snprintf(m, sizeof(m), "Cannot change:\n%s", rozlock_strerror(r));
+        ui_msgbox("Hide", m, UI_MB_OK | UI_MB_ERROR);
+        return;
+    }
+    snprintf(status_msg, sizeof(status_msg), "%s %s%s", E[sel].hidden ? "Showing" : "Hidden:",
+             E[sel].disp ? E[sel].disp : E[sel].name, E[sel].hidden || show_hidden ? "" : "  (View > Hidden files shows it)");
+    {
+        char keep[256];
+        snprintf(keep, sizeof(keep), "%s", E[sel].name);
+        read_dir(keep);
+    }
 }
 
 static void terminal_here(void)
@@ -437,12 +553,14 @@ static void terminal_here(void)
 /* ---------- মেনু ---------- */
 enum {
     A_OPEN = 1, A_CODE, A_RUN, A_NEWDIR, A_NEWFILE, A_RENAME, A_DELETE, A_PROPS, A_QUIT,
-    A_COPY, A_CUT, A_PASTE, A_REFRESH, A_HIDDEN, A_BACK, A_UP, A_HOME, A_ROOT, A_TERM, A_ABOUT
+    A_COPY, A_CUT, A_PASTE, A_REFRESH, A_HIDDEN, A_BACK, A_UP, A_HOME, A_ROOT, A_TERM, A_ABOUT,
+    A_LOCK, A_HIDE                               /* ধাপ ১৯ছ */
 };
 static const struct ui_menuitem file_items[] = {
     { "Open", NULL, A_OPEN }, { "Open with Code", NULL, A_CODE }, { "Run in terminal", NULL, A_RUN },
     { "-", NULL, 0 }, { "New folder...", "Ctrl+N", A_NEWDIR }, { "New file...", NULL, A_NEWFILE },
     { "Rename...", "F2", A_RENAME }, { "Delete", "Del", A_DELETE }, { "Properties", NULL, A_PROPS },
+    { "Lock / Unlock...", "Ctrl+L", A_LOCK }, { "Hide / Unhide", NULL, A_HIDE },
     { "-", NULL, 0 }, { "Terminal here", "Ctrl+T", A_TERM }, { "Close", "Ctrl+Q", A_QUIT }
 };
 static const struct ui_menuitem edit_items[] = {
@@ -456,7 +574,7 @@ static const struct ui_menuitem go_items[] = {
 };
 static const struct ui_menuitem help_items[] = { { "About Files", "F1", A_ABOUT } };
 static const struct ui_menu menus[] = {
-    { "File", file_items, 12 }, { "Edit", edit_items, 3 }, { "View", view_items, 2 },
+    { "File", file_items, 14 }, { "Edit", edit_items, 3 }, { "View", view_items, 2 },
     { "Go", go_items, 4 }, { "Help", help_items, 1 }
 };
 
@@ -484,12 +602,15 @@ static void action(int a)
     case A_HOME: go(getenv("HOME") ? getenv("HOME") : "/home", 1); break;
     case A_ROOT: go("/", 1); break;
     case A_TERM: terminal_here(); break;
+    case A_LOCK: do_lock(); break;
+    case A_HIDE: do_hide(); break;
     case A_ABOUT:
         ui_msgbox("About Files",
                   "Files - the rozOS file manager (phase 14b)\n\n"
                   "Double-click or Enter: open   Backspace: up\n"
                   "F2 rename   Del delete   Ctrl+C/X/V copy/cut/paste\n"
                   "Ctrl+N new folder   Ctrl+T terminal here   F5 refresh\n"
+                  "Right-click: menu (Lock/Unlock, Hide/Unhide ...)   Ctrl+L lock/unlock\n"
                   "Source: /usr/src/gfx/files.c",
                   UI_MB_OK | UI_MB_INFO);
         break;
@@ -580,10 +701,36 @@ static void frame(void)
             U.focus = 0;                         /* লেখার ঘর থেকে ফোকাস সরানো */
             if (U.dclick && sel >= 0) open_entry(sel, 0);
         }
-        if (U.rpressed) {
-            int r = (U.my - ly - 2) / ROW_H + top;
-            if (r < ne) sel = r;
-            if (sel >= 0) do_props();
+        if (U.rpressed) {                        /* ধাপ ১৯ছ: ডান-ক্লিক মেনু (আগে সরাসরি Properties) */
+            int r = (U.my - ly - 2) / ROW_H + top, a;
+            sel = r >= 0 && r < ne ? r : -1;
+            if (sel >= 0) {
+                struct ui_menuitem m[16];
+                int n = 0, lk = E[sel].locked, dir = E[sel].isdir;
+                m[n].label = lk ? "Unlock..." : "Open"; m[n].shortcut = "Enter"; m[n++].id = A_OPEN;
+                if (!dir && !lk) { m[n].label = "Open with Code"; m[n].shortcut = NULL; m[n++].id = A_CODE; }
+                m[n].label = "-"; m[n].shortcut = NULL; m[n++].id = 0;
+                m[n].label = "Copy"; m[n].shortcut = "Ctrl+C"; m[n++].id = A_COPY;
+                m[n].label = "Cut"; m[n].shortcut = "Ctrl+X"; m[n++].id = lk ? -1 : A_CUT;
+                m[n].label = "Paste"; m[n].shortcut = "Ctrl+V"; m[n++].id = clip_path[0] ? A_PASTE : -1;
+                m[n].label = "-"; m[n].shortcut = NULL; m[n++].id = 0;
+                m[n].label = "Rename..."; m[n].shortcut = "F2"; m[n++].id = lk ? -1 : A_RENAME;
+                m[n].label = "Delete"; m[n].shortcut = "Del"; m[n++].id = lk ? -1 : A_DELETE;
+                m[n].label = "-"; m[n].shortcut = NULL; m[n++].id = 0;
+                if (dir) { m[n].label = "Lock..."; m[n].shortcut = NULL; m[n++].id = A_LOCK; }
+                if (lk) { m[n].label = "Unlock..."; m[n].shortcut = NULL; m[n++].id = A_LOCK; }
+                m[n].label = E[sel].hidden ? "Unhide" : "Hide"; m[n].shortcut = NULL; m[n++].id = A_HIDE;
+                m[n].label = "Properties"; m[n].shortcut = NULL; m[n++].id = A_PROPS;
+                a = ui_popup_menu(m, n, U.mx, U.my);
+            } else {
+                static const struct ui_menuitem bg[] = {
+                    { "New folder...", "Ctrl+N", A_NEWDIR }, { "New file...", NULL, A_NEWFILE },
+                    { "Paste", "Ctrl+V", A_PASTE }, { "-", NULL, 0 }, { "Refresh", "F5", A_REFRESH },
+                    { "Hidden files (show/hide)", NULL, A_HIDDEN }, { "Terminal here", "Ctrl+T", A_TERM }
+                };
+                a = ui_popup_menu(bg, 7, U.mx, U.my);
+            }
+            if (a > 0) action(a);
         }
     }
     /* কী (লেখার ঘরে ফোকাস না থাকলে) */
@@ -622,7 +769,8 @@ static void frame(void)
         if (top + i == sel) gfx_fill_rect(s, lx + 2, ry, lw - 4, ROW_H, t->select);
         ui_draw_icon(s, lx + 8, ry + 3, 16, e->image, e->kind);
         gfx_set_clip(s, lx + 2, ly + 2, lw - 220, lh - 4);
-        gfx_text(s, NULL, lx + 30, ry + 3, e->name, top + i == sel ? GFX_WHITE : t->field_text);
+        gfx_text(s, NULL, lx + 30, ry + 3, e->disp ? e->disp : e->name,
+                 top + i == sel ? GFX_WHITE : e->hidden ? t->text_dim : t->field_text);   /* ধাপ ১৯ছ */
         gfx_set_clip(s, lx + 2, ly + 2, lw - 4, lh - 4);
         size_text(sz, sizeof(sz), e);
         gfx_text(s, NULL, lx + lw - 210, ry + 3, sz, t->text_dim);
@@ -637,7 +785,8 @@ static void frame(void)
         if (status_msg[0]) snprintf(st, sizeof(st), "%s", status_msg);
         else if (sel >= 0 && sel < ne) {
             size_text(sz, sizeof(sz), &E[sel]);
-            snprintf(st, sizeof(st), "%d items  |  %s  -  %s  %s", ne, E[sel].name, E[sel].type, E[sel].isdir ? "" : sz);
+            snprintf(st, sizeof(st), "%d items  |  %s  -  %s  %s", ne, E[sel].disp ? E[sel].disp : E[sel].name, E[sel].type,
+                     E[sel].isdir ? "" : sz);
         } else snprintf(st, sizeof(st), "%d items", ne);
         ui_statusbar(s, 0, H - STATUS_H, W, STATUS_H, st);
     }
@@ -656,6 +805,7 @@ int main(int argc, char **argv)
     ui_init(&U);
     go(start, 0);
     while (ui_run(&U)) {
+        check_child();                           /* ধাপ ১৯ছ */
         frame();
         snprintf(title, sizeof(title), "%s - Files", cwd);
         {

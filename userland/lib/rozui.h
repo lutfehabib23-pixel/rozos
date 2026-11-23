@@ -85,7 +85,8 @@ void ui_separator(gfx_surface *s, int x, int y, int w);
 /* ছোট ছবির-চিহ্ন (16x16): 't' টার্মিনাল, 'g' গ্রাফিক্স, 'f' ফোল্ডার, 'p' প্রোগ্রাম,
  * 'x' বন্ধ, '_' ছোট করা, 'o' বড় করা, 'r' আগের মাপ, 's' সিস্টেম, 'n' নেটওয়ার্ক, 'e' এডিটর;
  * ধাপ ১৪খ: 'd' কাগজ (ফাইল), 'c' C সোর্স, 'i' ছবি, 'u' ওপরে (↑), 'b' পেছনে (←),
- * 'h' বাড়ি, 'k' নতুন ফোল্ডার, 'm' মুছুন, 'v' সেভ, 'y' চালাও (▶), 'w' কম্পাইল */
+ * 'h' বাড়ি, 'k' নতুন ফোল্ডার, 'm' মুছুন, 'v' সেভ, 'y' চালাও (▶), 'w' কম্পাইল;
+ * ধাপ ১৯ছ: 'l' লক করা ফোল্ডার (তালা) */
 void ui_icon(gfx_surface *s, int x, int y, char kind, uint32_t color);
 /* ধাপ ১৪খ: আইকন — ছবি (/usr/share/icons/<image>.png ইত্যাদি) থাকলে ছবি, না থাকলে
  * size ≥ 24 হলে 3D বাক্সে আঁকা চিহ্ন, ছোট হলে শুধু চিহ্ন। image NULL/"" = সরাসরি চিহ্ন */
@@ -154,6 +155,8 @@ int ui_do_check(ui_ctx *u, int x, int y, const char *label, int *value);        
 int ui_do_radio(ui_ctx *u, int x, int y, const char *label, int *value, int mine);
 /* এক লাইনের লেখার ঘর (উচ্চতা UI_TEXTBOX_H): 1 = বদলেছে, 2 = Enter চাপা হয়েছে */
 int ui_do_textbox(ui_ctx *u, int x, int y, int w, char *buf, int size);
+/* ধাপ ১৯ছ: secret-এর ঘর — লেখা দেখায় * , Ctrl+C কাজ করে না; ফেরত ui_do_textbox-এর মতো */
+int ui_do_password(ui_ctx *u, int x, int y, int w, char *buf, int size);
 void ui_focus_next(ui_ctx *u);           /* পরের লেখার ঘর/তালিকায় ফোকাস */
 /* তালিকা: 1 = নির্বাচন বদলেছে, 2 = ডাবল-ক্লিক বা Enter */
 int ui_do_list(ui_ctx *u, int x, int y, int w, int h, const char *const *items, int n, int *sel, int *top);
@@ -177,6 +180,11 @@ int ui_shortcut_key(const char *shortcut);   /* "Ctrl+S" → 19, "F5" → GFX_KE
 enum { UI_CANCEL = 0, UI_OK = 1, UI_YES = 2, UI_NO = 3 };
 int ui_msgbox(const char *title, const char *text, int type);
 int ui_inputbox(const char *title, const char *prompt, char *buf, int size);   /* 1 = OK */
+/* ধাপ ১৯ছ: secret চাওয়া (* দেখায়); confirm = 1 হলে দুবার লিখতে হয়। 1 = OK (buf-এ secret) */
+int ui_passwordbox(const char *title, const char *prompt, char *buf, int size, int confirm);
+/* ধাপ ১৯ছ: ডান-ক্লিকের মেনু (x, y-তে) — বাছাই করা id, বাইরে ক্লিক/Esc = 0।
+ * id < 0 = ধূসর আইটেম (দেখায়, চাপা যায় না); label "-" = রেখা */
+int ui_popup_menu(const struct ui_menuitem *items, int n, int x, int y);
 /* ফাইল বাছাই: path-এ শুরুর ফোল্ডার বা ফাইল; ফেরত 1 হলে path = বাছাই করা ফাইল।
  * save = 1: নতুন নাম লেখা যায়, আগে থাকলে "Replace?" জিজ্ঞেস করে */
 int ui_filedlg(const char *title, char *path, int size, int save);

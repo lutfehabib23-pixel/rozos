@@ -114,6 +114,29 @@ int main(void)
 }
 @end
 
+@entry isascii
+@also toascii
+@header ctype.h
+@syntax int isascii(int c);
+@syntax int toascii(int c);
+@summary Is c a 7-bit ASCII value (0-127)? / keep only the low 7 bits.
+@desc
+Old (XSI) helpers that some Unix programs still use, like sed in sbase.
+For text that may be UTF-8, test bytes with (c & 0x80) instead.
+@returns
+isascii: non-zero or 0. toascii: c & 0x7f.
+@see isblank
+@example
+#include <stdio.h>
+#include <ctype.h>
+
+int main(void)
+{
+    printf("A %d, 200 %d, toascii(200) = %d\n", isascii('A') != 0, isascii(200) != 0, toascii(200));
+    return 0;
+}
+@end
+
 @entry isupper
 @also islower
 @header ctype.h

@@ -46,6 +46,7 @@
 #define NL_TEXTMAX 2048
 #define RE_DUP_MAX 255
 #define _POSIX_PATH_MAX 256
+#define _POSIX_ARG_MAX 4096    /* ধাপ ১৯ছ */
 #define _POSIX_NAME_MAX 14
 #define _POSIX2_RE_DUP_MAX 255
 #define CHARCLASS_NAME_MAX 14

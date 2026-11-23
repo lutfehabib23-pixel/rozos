@@ -9,6 +9,7 @@
 #   make libc       rozlibc (ধাপ ৭): build/libc/libc.a + crt0.o (+ crti/crtn, ধাপ ৮)
 #   ./toolchain/get-tcc.sh   TCC সোর্স আনা (ধাপ ৮) — তারপর make userland-এ /bin/tcc
 #   ./toolchain/get-lua.sh, get-zlib.sh   ধাপ ১৬খ-১: Lua ও zlib সোর্স — /bin/lua, gzip, liblua.a, libz.a
+#   ./toolchain/get-sbase.sh   ধাপ ১৯ছ: sbase সোর্স — grep, sed, sort, head, tail, find, xargs ...
 #   make userland   ইউজার প্রোগ্রাম (ধাপ ৬-৭): build/userland/bin/* (init, rozsh, edit, ls ...)
 #   make disk-update ডিস্কের /bin, /usr/lib, /usr/include-এ শুধু নতুন বিল্ড বসায় (বাকি ডেটা অক্ষত)
 #   make self-iso    ধাপ ১১: rozOS-এর ভেতরে বানানো kernel (ডিস্ক থেকে) দিয়ে rozos-self.iso
@@ -136,7 +137,11 @@ ROZGAME_A    := $(USER_BUILD)/lib/librozgame.a
 ROZCREF_SRCS := userland/lib/rozcref.c
 ROZCREF_OBJS := $(patsubst userland/lib/%.c,$(USER_BUILD)/lib/%.o,$(ROZCREF_SRCS))
 ROZCREF_A    := $(USER_BUILD)/lib/librozcref.a
-USER_LIBS    := $(ROZHTTP_A) $(ROZUI_A) $(ROZGAME_A) $(ROZCREF_A) $(ROZGFX_A)
+# ধাপ ১৯ছ: librozlock (ফোল্ডার লক = ChaCha20-Poly1305, লুকানো = .hidden) — BearSSL-এর ওপর
+ROZLOCK_SRCS := userland/lib/rozlock.c
+ROZLOCK_OBJS := $(patsubst userland/lib/%.c,$(USER_BUILD)/lib/%.o,$(ROZLOCK_SRCS))
+ROZLOCK_A    := $(USER_BUILD)/lib/librozlock.a
+USER_LIBS    := $(ROZHTTP_A) $(ROZUI_A) $(ROZGAME_A) $(ROZCREF_A) $(ROZLOCK_A) $(ROZGFX_A)
 ifeq ($(HAVE_BEARSSL),1)
   USER_CFLAGS += -DROZOS_HAVE_BEARSSL -I$(BEARSSL_SRC)/inc
   USER_LIBS += $(BEARSSL_A)
@@ -149,9 +154,9 @@ CA_EXTRA     ?=
 CA_PEM       := $(BUILD)/ssl/certs.pem
 # TCC দিয়ে rozOS-এর ভেতরে https প্রোগ্রাম লেখার জন্য: /usr/lib + /usr/include-এ বসে
 # (debug তথ্য ছাড়া কপি — libbearssl.a 4.5 MB থেকে অনেক ছোট হয়)
-DEV_LIBS     := $(BUILD)/devlib/librozhttp.a $(BUILD)/devlib/librozgfx.a $(BUILD)/devlib/librozui.a $(BUILD)/devlib/librozgame.a $(BUILD)/devlib/librozcref.a $(if $(HAVE_BEARSSL),$(BUILD)/devlib/libbearssl.a) \
+DEV_LIBS     := $(BUILD)/devlib/librozhttp.a $(BUILD)/devlib/librozgfx.a $(BUILD)/devlib/librozui.a $(BUILD)/devlib/librozgame.a $(BUILD)/devlib/librozcref.a $(BUILD)/devlib/librozlock.a $(if $(HAVE_BEARSSL),$(BUILD)/devlib/libbearssl.a) \
                 $(if $(wildcard ports/lua/src/lua.h),$(BUILD)/devlib/liblua.a) $(if $(wildcard ports/zlib/src/zlib.h),$(BUILD)/devlib/libz.a)
-DEV_HEADERS  := userland/lib/rozhttp.h userland/lib/rozgfx.h userland/lib/rozui.h userland/lib/rozgame.h userland/lib/rozcref.h userland/lib/rozwm_proto.h $(if $(HAVE_BEARSSL),$(wildcard $(BEARSSL_SRC)/inc/*.h))
+DEV_HEADERS  := userland/lib/rozhttp.h userland/lib/rozgfx.h userland/lib/rozui.h userland/lib/rozgame.h userland/lib/rozcref.h userland/lib/rozlock.h userland/lib/rozwm_proto.h $(if $(HAVE_BEARSSL),$(wildcard $(BEARSSL_SRC)/inc/*.h))
 
 # ধাপ ১১: kernel-এর সোর্স rozOS-এর /usr/src/rozos-এ — ভেতরে `make` (pdpmake + tcc) দিয়ে বিল্ড।
 # সেখানকার Makefile হোস্টে toolchain/gen-kernel-mk.sh বানায় (ফাইলের তালিকা এখানের সাথে মেলে)।
@@ -233,6 +238,25 @@ ifeq ($(HAVE_ZLIB),1)
   USER_PROGS += gzip gunzip
   USER_BINS += $(USER_BUILD)/bin/gzip $(USER_BUILD)/bin/gunzip
   USER_STRIPPED += $(USER_BUILD)/stripped/gzip $(USER_BUILD)/stripped/gunzip
+endif
+# ---------- sbase (ধাপ ১৯ছ): suckless-এর Unix টুল — grep, sed, sort, head, tail, find ... ----------
+# সোর্স: ./toolchain/get-sbase.sh → ports/sbase/src। না থাকলে এগুলো বাদ (সতর্কবার্তা সহ)।
+# rozOS-এর নিজের যেগুলো আছে আর যেগুলোর rozOS-এ মানে নেই (chown, chroot, ln ...) — SBASE_SKIP।
+SBASE_SRC    := ports/sbase/src
+SBASE_BUILD  := $(BUILD)/sbase
+HAVE_SBASE   := $(if $(wildcard $(SBASE_SRC)/util.h),1,)
+SBASE_SKIP   := cat cp date echo ls mkdir mv rm rmdir sleep touch uname wc \
+                chgrp chown chroot cron getconf logger tftp mknod mkfifo nice renice setsid flock \
+                ln link readlink xinstall hostname logname
+SBASE_TOOLS  := $(filter-out $(SBASE_SKIP),$(notdir $(basename $(wildcard $(SBASE_SRC)/*.c))))
+SBASE_LIB_SRCS := $(wildcard $(SBASE_SRC)/libutil/*.c $(SBASE_SRC)/libutf/*.c)
+SBASE_LIB_OBJS := $(patsubst $(SBASE_SRC)/%.c,$(SBASE_BUILD)/%.o,$(SBASE_LIB_SRCS))
+SBASE_A      := $(SBASE_BUILD)/libsbase.a
+SBASE_BINS   := $(addprefix $(USER_BUILD)/bin/,$(SBASE_TOOLS))
+ifeq ($(HAVE_SBASE),1)
+  USER_PROGS += $(SBASE_TOOLS)
+  USER_BINS += $(SBASE_BINS)
+  USER_STRIPPED += $(addprefix $(USER_BUILD)/stripped/,$(SBASE_TOOLS))
 endif
 # /bin/sh = rozsh-এর কপি (system(), make-এর রেসিপি `sh -c` দিয়ে চলে)
 USER_PROGS += sh
@@ -402,6 +426,11 @@ $(ROZCREF_A): $(ROZCREF_OBJS)
 	@rm -f $@
 	@$(USER_AR) rcs $@ $(ROZCREF_OBJS)
 
+$(ROZLOCK_A): $(ROZLOCK_OBJS)
+	@echo "  AR      $@"
+	@rm -f $@
+	@$(USER_AR) rcs $@ $(ROZLOCK_OBJS)
+
 $(ROZHTTP_A): $(ROZHTTP_OBJS)
 	@echo "  AR      $@"
 	@rm -f $@
@@ -434,6 +463,29 @@ $(USER_BUILD)/bin/make: $(PDPMAKE_OBJS) $(LIBC_A) $(LIBC_CRT0)
 
 $(USER_BUILD)/bin/sh: $(USER_BUILD)/bin/rozsh
 	@cp $< $@
+
+# ---------- sbase (ধাপ ১৯ছ) ----------
+$(SBASE_BUILD)/%.o: $(SBASE_SRC)/%.c config.mk
+	@mkdir -p $(dir $@)
+	@echo "  CC      $< (sbase)"
+	@$(CC) $(USER_CFLAGS) -w -c $< -o $@
+
+# rozlibc-তেও reallocarray আছে — sbase-এর নিজেরটার নাম বদলে দুটো একসাথে থাকে
+$(SBASE_BUILD)/libutil/reallocarray.o: $(SBASE_SRC)/libutil/reallocarray.c config.mk
+	@mkdir -p $(dir $@)
+	@echo "  CC      $< (sbase)"
+	@$(CC) $(USER_CFLAGS) -w -c $< -o $@
+	@$(CROSS)objcopy --redefine-sym reallocarray=sbase_reallocarray $@
+
+$(SBASE_A): $(SBASE_LIB_OBJS)
+	@echo "  AR      $@"
+	@rm -f $@
+	@$(USER_AR) rcs $@ $(SBASE_LIB_OBJS)
+
+$(SBASE_BINS): $(USER_BUILD)/bin/%: $(SBASE_BUILD)/%.o $(SBASE_A) $(LIBC_A) $(LIBC_CRT0)
+	@mkdir -p $(dir $@)
+	@echo "  LD      $@ (sbase)"
+	@$(CC) $(USER_LDFLAGS) $(LIBC_CRT0) $< $(SBASE_A) $(LIBC_A) -lgcc -o $@
 
 # ---------- Lua ও zlib (ধাপ ১৬খ-১) ----------
 $(LUA_BUILD)/%.o: $(LUA_SRC)/%.c config.mk
@@ -529,11 +581,12 @@ tcc-check:
 	@test -n "$(HAVE_TCC)" || echo "  NOTE    TCC সোর্স নেই — /bin/tcc বাদ। আনতে: ./toolchain/get-tcc.sh"
 	@test -n "$(HAVE_PDPMAKE)" || echo "  NOTE    pdpmake সোর্স নেই — /bin/make বাদ। আনতে: ./toolchain/get-pdpmake.sh"
 	@test -n "$(HAVE_BEARSSL)" || echo "  NOTE    BearSSL সোর্স নেই — https ও rozpkg চলবে না। আনতে: ./toolchain/get-bearssl.sh"
+	@test -n "$(HAVE_SBASE)" || echo "  NOTE    sbase সোর্স নেই — grep, sed, sort, head, tail ... বাদ। আনতে: ./toolchain/get-sbase.sh"
 	@test -n "$(HAVE_LUA)" || echo "  NOTE    Lua সোর্স নেই — /bin/lua বাদ। আনতে: ./toolchain/get-lua.sh"
 	@test -n "$(HAVE_ZLIB)" || echo "  NOTE    zlib সোর্স নেই — libz ও gzip বাদ। আনতে: ./toolchain/get-zlib.sh"
 
 # মধ্যবর্তী .o ফাইল make যেন মুছে না ফেলে (নইলে প্রতিবার আবার বিল্ড)
-.SECONDARY: $(LUA_OBJS) $(LUA_BUILD)/lua.o $(ZLIB_OBJS) $(ZLIB_BUILD)/minigzip.o $(PDPMAKE_OBJS) $(BEARSSL_OBJS) $(ROZHTTP_OBJS) $(ROZGFX_OBJS) $(ROZUI_OBJS) $(ROZGAME_OBJS) $(ROZCREF_OBJS) $(LIBC_OBJS) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_LIB1_OBJS) $(TCC_RUNMAIN) $(TCC_BUILD)/tcc.o $(patsubst %,$(USER_BUILD)/obj/%.o,$(USER_PROGS)) $(USER_BINS)
+.SECONDARY: $(LUA_OBJS) $(LUA_BUILD)/lua.o $(ZLIB_OBJS) $(ZLIB_BUILD)/minigzip.o $(PDPMAKE_OBJS) $(BEARSSL_OBJS) $(ROZHTTP_OBJS) $(ROZGFX_OBJS) $(ROZUI_OBJS) $(ROZGAME_OBJS) $(ROZCREF_OBJS) $(ROZLOCK_OBJS) $(SBASE_LIB_OBJS) $(patsubst %,$(SBASE_BUILD)/%.o,$(SBASE_TOOLS)) $(LIBC_OBJS) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_LIB1_OBJS) $(TCC_RUNMAIN) $(TCC_BUILD)/tcc.o $(patsubst %,$(USER_BUILD)/obj/%.o,$(USER_PROGS)) $(USER_BINS)
 
 # sysroot + /bin-এর প্রোগ্রাম + rozlibc (/usr/include, /usr/lib — ধাপ ৮-এর TCC-র জন্য)
 $(BUILD)/modules/%.ko: modules/%.c kernel/include/rozos/module.h
@@ -580,6 +633,10 @@ $(BUILD)/devlib/librozgame.a: $(ROZGAME_A)
 	@strip --strip-debug -o $@ $<
 
 $(BUILD)/devlib/librozcref.a: $(ROZCREF_A)
+	@mkdir -p $(dir $@)
+	@strip --strip-debug -o $@ $<
+
+$(BUILD)/devlib/librozlock.a: $(ROZLOCK_A)
 	@mkdir -p $(dir $@)
 	@strip --strip-debug -o $@ $<
 
@@ -907,18 +964,24 @@ CREF_COVER ?= stdio.h stdlib.h string.h strings.h ctype.h math.h time.h \
   netinet/in.h arpa/inet.h netdb.h dirent.h signal.h setjmp.h pthread.h semaphore.h sched.h poll.h \
   termios.h pty.h regex.h wchar.h wctype.h locale.h langinfo.h iconv.h getopt.h fnmatch.h glob.h libgen.h \
   pwd.h grp.h syslog.h search.h utime.h dlfcn.h err.h fenv.h inttypes.h \
-  rozgfx.h rozui.h rozgame.h rozhttp.h rozos.h rozcref.h sys/statvfs.h sys/statfs.h sys/sysinfo.h
+  rozgfx.h rozui.h rozgame.h rozhttp.h rozos.h rozcref.h sys/statvfs.h sys/statfs.h sys/sysinfo.h \
+  rozlock.h sys/sysmacros.h memory.h
 # ধাপ ১৯গ: rozOS-এর লাইব্রেরি (rozgfx, rozui, rozgame, rozhttp, rozcref) আর Lua/zlib-এর পাতাও;
 # উদাহরণে যে হেডার আছে সেই অনুযায়ী লাইব্রেরি যোগ হয় (--autolib)
-CREF_INCLUDE := libc/include userland/lib $(if $(wildcard ports/lua/src/lua.h),ports/lua/src) $(if $(wildcard ports/zlib/src/zlib.h),ports/zlib/src)
+# ধাপ ১৯ছ: SQLite প্যাকেজ (./ports/packages/build-sqlite.sh) বানানো থাকলে তার পাতার উদাহরণও চলে
+SQLITE_PKG   := $(BUILD)/packages/sqlite/root
+CREF_INCLUDE := libc/include userland/lib $(if $(wildcard ports/lua/src/lua.h),ports/lua/src) $(if $(wildcard ports/zlib/src/zlib.h),ports/zlib/src) \
+  $(if $(wildcard $(SQLITE_PKG)/usr/include/sqlite3.h),$(SQLITE_PKG)/usr/include)
 DL := $(BUILD)/devlib
 CREF_AUTOLIB := rozui.h=$(DL)/librozui.a,$(DL)/librozgame.a,$(DL)/librozgfx.a \
   rozgame.h=$(DL)/librozgame.a,$(DL)/librozgfx.a rozgfx.h=$(DL)/librozgfx.a rozcref.h=$(DL)/librozcref.a \
   rozhttp.h=$(DL)/librozhttp.a$(if $(HAVE_BEARSSL),$(comma)$(DL)/libbearssl.a) \
-  lua.h=$(DL)/liblua.a lauxlib.h=$(DL)/liblua.a zlib.h=$(DL)/libz.a
+  lua.h=$(DL)/liblua.a lauxlib.h=$(DL)/liblua.a zlib.h=$(DL)/libz.a \
+  rozlock.h=$(DL)/librozlock.a$(if $(HAVE_BEARSSL),$(comma)$(DL)/libbearssl.a) sqlite3.h=$(SQLITE_PKG)/usr/lib/libsqlite3.a
 cref-check: $(LIBC_A) $(LIBC_CRT0) $(DEV_LIBS)
 	@python3 toolchain/cref-check.py --dir docs/cref --include "$(CREF_INCLUDE)" --cover "$(CREF_COVER)" \
 	  --cc "$(CC)" --cflags "$(USER_CFLAGS)" --ldflags "$(USER_LDFLAGS) $(LIBC_CRT0)" --libs "$(LIBC_A) -lgcc" \
 	  --autolib "$(CREF_AUTOLIB)" \
+	  $(if $(wildcard $(SQLITE_PKG)/usr/include/sqlite3.h),,--skip-header sqlite3.h) \
 	  $(if $(CREF_TCC),--tcc "$(CREF_TCC)") $(if $(CREF_ONLY),--only "$(CREF_ONLY)")
 .PHONY: cref-check

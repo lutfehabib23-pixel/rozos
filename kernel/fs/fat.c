@@ -1096,7 +1096,7 @@ static void fat_release(struct vnode *vn)
 static const struct vnode_ops fat_ops = {
     fat_read, fat_write, fat_truncate, fat_lookup, fat_create,
     fat_unlink, fat_readdir, fat_release, NULL,
-    fat_rename                                           /* ধাপ ১৫ক */
+    fat_rename                                           /* ধাপ ১৫ক */, NULL /* setflags (ধাপ ১৯ছ) */
 };
 
 /* ---------- mount / statfs / info ---------- */

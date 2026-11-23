@@ -724,5 +724,5 @@ static const struct vnode_ops sock_ops = {
     sock_vn_write,
     NULL, NULL, NULL, NULL, NULL,
     sock_vn_release,
-    sock_vn_poll, NULL /* rename (ধাপ ১৫ক) */
+    sock_vn_poll, NULL /* rename (ধাপ ১৫ক) */, NULL /* setflags (ধাপ ১৯ছ) */
 };

@@ -1,0 +1,46 @@
+# Lock and hide folders (phase 19g)
+== Lock a folder (encrypted) ==
+In [[filemanager|Files]] or on the [[desktop]]: right-click a folder >
+Lock... Write a secret twice and press Lock. The folder becomes one
+encrypted file NAME.rozlock, shown as a folder with a padlock under its
+old name. Nobody can read it without the secret - not other programs,
+not a terminal, not even the disk opened on another computer.
+  !!  If you forget the secret, the files can NEVER be recovered.  !!
+A locked folder cannot be deleted, renamed or moved (Files greys those
+out; rm says "Operation not permitted"). Copy works - the copy is locked
+too.
+
+== Unlock ==
+Double-click the locked folder (or right-click > Unlock...), write the
+secret. A wrong secret only says "Wrong secret" - try again. With the right
+one the folder comes back exactly as it was (as "NAME 2" if NAME is used)
+and the .rozlock file is gone. To lock it again, use Lock... again.
+
+== Hide and show ==
+Right-click > Hide. The name is NOT changed: it goes into the folder's
+.hidden list (one name per line, like GNOME and macOS). Files, the desktop
+and ls leave it out. To see hidden things: Files > View > Hidden files,
+desktop right-click > Show hidden icons, or `ls -a`. Then right-click >
+Unhide. Hiding is only out of sight - lock what must stay secret.
+
+== In the terminal ==
+  `rozlock lock Photos`        asks the secret twice (not shown)
+  `rozlock unlock Photos`      or Photos.rozlock
+  `rozlock check Photos`       only test the secret
+  `rozlock status Photos.rozlock`   locked? hidden? undeletable?
+  `rozlock hide notes.txt`     `rozlock unhide notes.txt`
+  `chattr +i FILE` / `chattr -i FILE` / `lsattr FILE`   the undeletable flag
+If stdin is not a terminal the first line is the secret:
+  `echo "my words" | rozlock unlock Photos`
+
+== How it works ==
+Key: PBKDF2-HMAC-SHA256 of the secret with a random 16-byte salt, 100000
+rounds. Data: ChaCha20-Poly1305 (BearSSL) in 64 KiB pieces, each with its
+own tag - a wrong secret, a changed byte or a cut file are all found. The
+encrypted file is written and checked first; only then are the original
+files overwritten with zeros and removed. The .rozlock file carries the
+immutable flag (FS_IOC_SETFLAGS) on ext2; on FAT disks it is still locked
+but can be deleted. System folders (/, /bin, /home, Desktop, mounted
+disks) cannot be locked.
+For your own programs: `cref rozlock_lock` (librozlock, -lrozlock -lbearssl).
+Source: /usr/src/gfx/lockdlg.c and userland/lib/rozlock.c.

@@ -1,0 +1,26 @@
+# sqlite - an SQL database in one file (package, phase 19g)
+SQLite 3.54 (public domain, sqlite.org) as a [[rozpkg]] package:
+  `rozpkg install sqlite`
+  `sqlite3 /home/shop.db`        the SQL shell (.help, .tables, .quit)
+  `tcc prog.c -lsqlite3 -o prog`  use it from C: #include <sqlite3.h>
+Example: `tcc /usr/share/doc/sqlite/example.c -lsqlite3 -o /tmp/s && /tmp/s`
+
+== In the shell ==
+  CREATE TABLE item(id INTEGER PRIMARY KEY, name TEXT, price REAL);
+  INSERT INTO item(name, price) VALUES('tea', 2.5), ('rice', 4);
+  SELECT name, price FROM item WHERE price > 3;
+  .tables   .schema   .mode column   .headers on   .quit
+Every statement ends with ; - the database is saved in the file at once.
+
+== In C ==
+`cref sqlite3_open` and the pages after it: sqlite3_exec,
+sqlite3_prepare_v2, sqlite3_bind_int, sqlite3_column_int, sqlite3_errmsg.
+Code and edit add -lsqlite3 by themselves when the file includes
+<sqlite3.h>.
+
+== rozOS notes ==
+Built for one thread at a time (THREADSAFE=0), with the normal rollback
+journal (no WAL) and no extension loading. Full-text search (FTS5) and the
+math functions are in.
+Making the package: ./ports/packages/build-sqlite.sh on the PC (needs
+tclsh: sudo apt install tcl), then upload as in [[packages]].

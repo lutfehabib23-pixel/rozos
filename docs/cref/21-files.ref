@@ -45,16 +45,25 @@ int main(void)
 @end
 
 @entry openat
-@also AT_FDCWD mkdirat fstatat
+@also AT_FDCWD mkdirat fstatat unlinkat faccessat fchmodat fchownat linkat symlinkat readlinkat AT_REMOVEDIR AT_SYMLINK_NOFOLLOW AT_SYMLINK_FOLLOW AT_EACCESS
 @header fcntl.h
 @syntax int openat(int dirfd, const char *path, int flags, ... /* mode */);
 @syntax int mkdirat(int dirfd, const char *path, mode_t mode);   /* sys/stat.h */
 @syntax int fstatat(int dirfd, const char *path, struct stat *st, int flags);
-@summary open / mkdir / stat relative to a directory descriptor.
+@syntax int unlinkat(int dirfd, const char *path, int flags);   /* unistd.h; AT_REMOVEDIR = rmdir */
+@syntax int faccessat(int dirfd, const char *path, int mode, int flags);
+@syntax int fchmodat(int dirfd, const char *path, mode_t mode, int flags);   /* sys/stat.h */
+@syntax int fchownat(int dirfd, const char *path, uid_t uid, gid_t gid, int flags);
+@syntax int linkat(int olddirfd, const char *old, int newdirfd, const char *new, int flags);
+@syntax int symlinkat(const char *target, int newdirfd, const char *linkpath);
+@syntax ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t size);
+@summary open / mkdir / stat / unlink ... relative to a directory descriptor.
 @desc
 rozOS supports these with dirfd = AT_FDCWD (the current directory) or an
 absolute path; a real directory descriptor with a relative path gives
-ENOSYS. Plain open, mkdir and stat do the same job.
+ENOSYS. Plain open, mkdir, stat, unlink, access, chmod, chown and readlink
+do the same job. unlinkat with AT_REMOVEDIR removes a directory; linkat and
+symlinkat fail like link and symlink (no links in rozOS).
 @returns
 As open, mkdir and stat.
 @see open mkdir stat
@@ -296,9 +305,10 @@ int main(void)
 @end
 
 @entry opendir
-@also readdir closedir rewinddir dirfd DIR dirent d_name d_type DT_DIR DT_REG
+@also readdir closedir rewinddir dirfd fdopendir DIR dirent d_name d_type DT_DIR DT_REG
 @header dirent.h
 @syntax DIR *opendir(const char *path);
+@syntax DIR *fdopendir(int fd);   /* an already open directory; closedir closes fd too */
 @syntax struct dirent *readdir(DIR *dir);
 @syntax int closedir(DIR *dir);
 @syntax void rewinddir(DIR *dir);
@@ -503,6 +513,44 @@ int main(void)
     freeb = (unsigned long long)v.f_bfree * v.f_frsize;
     printf("/ : %llu MiB, %llu MiB free (%s)\n", total >> 20, freeb >> 20,
            v.f_flag & ST_RDONLY ? "read-only" : "read-write");
+    return 0;
+}
+@end
+
+@entry FS_IOC_SETFLAGS
+@also FS_IOC_GETFLAGS FS_IMMUTABLE_FL chattr lsattr immutable
+@header sys/ioctl.h
+@syntax ioctl(fd, FS_IOC_GETFLAGS, &flags);   /* int flags */
+@syntax ioctl(fd, FS_IOC_SETFLAGS, &flags);
+@summary Read or set file flags - FS_IMMUTABLE_FL makes a file undeletable.
+@desc
+An immutable file cannot be deleted, renamed, written or truncated (EPERM)
+until the flag is taken off again. rozOS has only this flag. It works on
+ext2 (kept on disk) and tmpfs; FAT gives EOPNOTSUPP. Locked folders
+(NAME.rozlock, see rozlock_lock) are kept immutable this way. From the
+shell: chattr +i FILE, chattr -i FILE, lsattr FILE.
+@returns
+0, or -1 with errno (ENOTTY for devices, EOPNOTSUPP on FAT).
+@see rozlock_lock unlink ioctl
+@example
+#include <stdio.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+
+int main(void)
+{
+    int fd = open("/tmp/keep.txt", O_RDWR | O_CREAT, 0644), fl = 0;
+    if (fd < 0) return 1;
+    if (ioctl(fd, FS_IOC_GETFLAGS, &fl) < 0) { printf("no flags on this file system\n"); return 0; }
+    fl |= FS_IMMUTABLE_FL;
+    if (ioctl(fd, FS_IOC_SETFLAGS, &fl) == 0) {
+        printf("delete while immutable: %s\n", unlink("/tmp/keep.txt") == 0 ? "done" : "refused");
+        fl &= ~FS_IMMUTABLE_FL;
+        ioctl(fd, FS_IOC_SETFLAGS, &fl);
+    }
+    close(fd);
+    unlink("/tmp/keep.txt");
     return 0;
 }
 @end

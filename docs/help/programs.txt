@@ -5,6 +5,8 @@
   [[rm]]       delete files or trees     [[mkdir]]   make directories
   [[rmdir]]    delete an empty directory [[touch]]   create an empty file
   [[wc]]       count lines, words, bytes  ([[redirect|ls | wc -l]])
+  [[rozlock]]  lock/unlock, hide/unhide  chattr, lsattr  the undeletable flag
+  [[sbase]]    grep sed sort head tail find xargs cut tr uniq ... (70 more)
 
 == Text and development ==
   [[edit]]     the text editor           [[tcc]]     the C compiler

@@ -11,7 +11,7 @@ Help pages, Icons, Temp). Right: the folder - name, size, type.
 
 == Mouse and keys ==
   click             select              double-click / Enter   open
-  right click       properties          Backspace              up a folder
+  right click       menu (below)        Backspace              up a folder
   F2                rename              Del                    delete (asks)
   Ctrl+C / Ctrl+X   copy / cut          Ctrl+V                 paste here
   Ctrl+N            new folder          Ctrl+T                 terminal here
@@ -23,5 +23,10 @@ Folders are copied, moved and deleted with everything inside (delete
 asks first). Renaming and moving are instant on the same file system
 (phase 15a rename); between disks they copy, then delete ([[mv]]).
 "Disks /mnt" on the left shows [[mount|mounted disks]].
-View > Hidden files shows names starting with a dot.
+View > Hidden files shows names starting with a dot and names in the
+folder's .hidden list.
+Right-click a name: Open, Copy, Cut, Paste, Rename, Delete, Lock... /
+Unlock..., Hide / Unhide, Properties. Right-click empty space: New folder,
+New file, Paste, Refresh, Hidden files, Terminal here. Ctrl+L locks or
+unlocks the selected folder. Locked folders show a padlock: [[rozlock]].
 Icons can be pictures: [[icons]]. Source: /usr/src/gfx/files.c

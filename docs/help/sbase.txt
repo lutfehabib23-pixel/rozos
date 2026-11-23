@@ -1,0 +1,27 @@
+# sbase - the classic Unix tools (phase 19g)
+sbase is a small set of Unix programs from suckless.org (MIT license),
+built for rozOS. They work in pipes like on Linux:
+  `grep -n main *.c`              `ls /bin | sort | head -5`
+  `find /usr/src -name '*.h' | wc -l`
+  `sed 's/old/new/g' a.txt > b.txt`    `cut -d: -f1 /etc/passwd`
+  `tail -n 20 /tmp/kb.log`        `sha256sum /bin/tcc`
+
+== Text ==
+  grep  sed  sort  uniq  cut  tr  head  tail  tee  paste  join  comm
+  fold  nl  expand  unexpand  rev  cols  strings  od  printf  seq  ed
+== Files ==
+  find  xargs  du  dd  cmp  split  sponge  mktemp  basename  dirname
+  unlink  chmod  tar  pathchk  sync  which
+== Checksums ==
+  md5sum  sha1sum  sha224sum  sha256sum  sha384sum  sha512sum ...
+  cksum  uuencode  uudecode
+== Other ==
+  env  printenv  pwd  test  true  false  yes  expr  kill  time  cal
+  tty  whoami  nohup  tsort
+rozOS's own ls, cat, cp, mv, rm, mkdir, rmdir, touch, echo, date, sleep,
+uname and wc stay as they are. Left out because rozOS has no use for them
+yet: chown, chgrp, chroot, ln, link, readlink, mknod, mkfifo, nice,
+renice, setsid, flock, cron, logger, tftp, hostname, logname, getconf.
+Most tools take --help-style errors only; see the sbase manual pages on
+the web (man.suckless.org) for every option.
+Built from ports/sbase/src (./toolchain/get-sbase.sh). See [[programs]].

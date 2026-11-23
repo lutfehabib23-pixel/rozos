@@ -105,7 +105,34 @@ static void load_conf(void)
     while (strlen(repo) > 1 && repo[strlen(repo) - 1] == '/') repo[strlen(repo) - 1] = '\0';
 }
 
-/* "OWNER/REPO" বা "OWNER/REPO@TAG" → GitHub Releases URL; পূর্ণ URL হলে যেমন আছে */
+/* ধাপ ১৯ছ: repo একটা ফোল্ডার হলে ("/mnt/usb/packages") ইন্টারনেট ছাড়াই সেখান থেকে —
+ * rozhttp_get-এর মতোই out_fd-তে লেখে আর on_data ডাকে */
+static int repo_get(const char *url, int out_fd, const struct rozhttp_opts *o, struct rozhttp_result *r)
+{
+    char buf[8192];
+    ssize_t n;
+    int fd;
+    if (url[0] != '/') return rozhttp_get(url, out_fd, o, r);
+    memset(r, 0, sizeof(*r));
+    fd = open(url, O_RDONLY);
+    if (fd < 0) {
+        r->status = 404;
+        snprintf(r->error, sizeof(r->error), "%s: %s", url, strerror(errno));
+        return -1;
+    }
+    while ((n = read(fd, buf, sizeof(buf))) > 0) {
+        if (out_fd >= 0 && write(out_fd, buf, (size_t)n) != n) { n = -1; break; }
+        if (o->on_data) o->on_data(o->on_data_ctx, buf, (size_t)n);
+        r->bytes += n;
+    }
+    close(fd);
+    if (n < 0) { snprintf(r->error, sizeof(r->error), "read error: %s", strerror(errno)); return -1; }
+    r->status = 200;
+    return 0;
+}
+
+/* "OWNER/REPO" বা "OWNER/REPO@TAG" → GitHub Releases URL; পূর্ণ URL হলে যেমন আছে;
+ * ধাপ ১৯ছ: "/" দিয়ে শুরু = rozOS-এর একটা ফোল্ডার (পেন ড্রাইভ ইত্যাদি) */
 static int cmd_repo(int argc, char **argv)
 {
     char url[1024];
@@ -114,7 +141,7 @@ static int cmd_repo(int argc, char **argv)
         printf("%s\n", repo);
         return 0;
     }
-    if (!strncmp(argv[0], "http://", 7) || !strncmp(argv[0], "https://", 8)) {
+    if (!strncmp(argv[0], "http://", 7) || !strncmp(argv[0], "https://", 8) || argv[0][0] == '/') {
         snprintf(url, sizeof(url), "%s", argv[0]);
     } else {
         char tmp[512], *at;
@@ -240,7 +267,7 @@ static int cmd_update(void)
     o.header_fd = -1;
     o.on_data = mem_append;
     o.on_data_ctx = &m;
-    if (rozhttp_get(url, -1, &o, &r) < 0) {
+    if (repo_get(url, -1, &o, &r) < 0) {
         fprintf(stderr, "rozpkg: update failed: %s\n", r.error);
         if (r.status == 404) fprintf(stderr, "rozpkg: is the repo right? (rozpkg repo — see `help rozpkg`)\n");
         free(m.p);
@@ -510,7 +537,7 @@ static int fetch_pkg(const struct pkg *p, char *path, size_t size)
     o.progress = 1;
     o.on_data = sha_cb;
     o.on_data_ctx = &s;
-    if (rozhttp_get(url, fd, &o, &r) < 0) {
+    if (repo_get(url, fd, &o, &r) < 0) {
         close(fd);
         unlink(path);
         fprintf(stderr, "rozpkg: download failed: %s\n", r.error);
@@ -656,7 +683,7 @@ static void usage(void)
             "  remove NAME...      delete a package's files\n"
             "  upgrade             install newer versions of installed packages\n"
             "  installed           list installed packages\n"
-            "  repo [URL|OWNER/REPO[@TAG]]   show or set the package source\n"
+            "  repo [URL|OWNER/REPO[@TAG]|/FOLDER]   show or set the package source\n"
             "see: help rozpkg\n");
 }
 

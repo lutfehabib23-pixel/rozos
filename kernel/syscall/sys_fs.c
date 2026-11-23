@@ -960,6 +960,19 @@ static int64_t sys_ioctl(struct interrupt_frame *f, uint64_t fd, uint64_t req, u
     if (err < 0) {
         return err;
     }
+    /* ধাপ ১৯ছ: chattr/lsattr — Linux-এর FS_IOC_GETFLAGS/SETFLAGS (মান int*), এখন শুধু
+     * FS_IMMUTABLE_FL (0x10)। লক করা ফোল্ডারের .rozlock ফাইল এভাবে মোছা-রোধী হয় */
+    if (req == 0x80086601UL || req == 0x40086602UL) {
+        uint32_t v = 0;
+        if (st.type != VNODE_FILE && st.type != VNODE_DIR) return -ENOTTY;
+        if (req == 0x80086601UL) {
+            err = vfs_getflags((int)fd, &v);
+            if (err < 0) return err;
+            return copy_to_user((void *)(uintptr_t)arg, &v, sizeof(v)) < 0 ? -EFAULT : 0;
+        }
+        if (copy_from_user(&v, (const void *)(uintptr_t)arg, sizeof(v)) < 0) return -EFAULT;
+        return vfs_setflags((int)fd, v);
+    }
     if (st.type != VNODE_CHARDEV) {
         return -ENOTTY;
     }

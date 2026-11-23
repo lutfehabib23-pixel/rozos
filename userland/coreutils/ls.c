@@ -1,6 +1,7 @@
 /* rozOS — ls [-l] [-a] [-1] [path...]: ডিরেক্টরির তালিকা (ডিরেক্টরি নীল, প্রোগ্রাম সবুজ)
  * ধাপ ১৩: -1 = প্রতি লাইনে একটা নাম; আউটপুট টার্মিনাল না হলে (pipe/ফাইল) নিজে থেকেই তাই,
- * শুধু নাম (রং বা '/' ছাড়া) — যেমন ls /bin | wc -l */
+ * শুধু নাম (রং বা '/' ছাড়া) — যেমন ls /bin | wc -l
+ * ধাপ ১৯ছ: ফোল্ডারের .hidden তালিকার নামও লুকানো থাকে (-a দিলে দেখায়) */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +12,7 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <rozlock.h>       /* ধাপ ১৯ছ: rozhide_* */
 
 static int opt_long, opt_all, opt_one, color;
 
@@ -56,6 +58,7 @@ static int list(const char *path, int header)
     DIR *d;
     struct dirent *e;
     char **names = NULL;
+    struct rozhide hid = { NULL, NULL, 0 };   /* ধাপ ১৯ছ */
     int n = 0, cap = 0, i;
 
     if (stat(path, &st) < 0) {
@@ -76,8 +79,10 @@ static int list(const char *path, int header)
         fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
         return 1;
     }
+    if (!opt_all) rozhide_load(&hid, path);
     while ((e = readdir(d))) {
         if (!opt_all && e->d_name[0] == '.') continue;
+        if (!opt_all && rozhide_has(&hid, e->d_name)) continue;
         if (n == cap) {
             cap = cap ? cap * 2 : 32;
             names = (char **)realloc(names, sizeof(char *) * (size_t)cap);
@@ -85,6 +90,7 @@ static int list(const char *path, int header)
         names[n++] = strdup(e->d_name);
     }
     closedir(d);
+    rozhide_free(&hid);
     qsort(names, (size_t)n, sizeof(char *), cmp_name);
     if (header) printf("%s:\n", path);
     for (i = 0; i < n; i++) {

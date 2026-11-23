@@ -10,6 +10,7 @@
 #include <time.h>
 #include <rozos.h>
 #include <limits.h>
+#include <sys/stat.h>   /* ধাপ ১৯ছ: fdopendir */
 #include <inttypes.h>
 #include <sys/stat.h>
 
@@ -124,6 +125,20 @@ DIR *opendir(const char *path)
     if (fd < 0) return NULL;
     d = (DIR *)malloc(sizeof(*d));
     if (!d) { close(fd); errno = ENOMEM; return NULL; }
+    d->fd = fd;
+    d->pos = d->len = 0;
+    return d;
+}
+
+/* ধাপ ১৯ছ: fd থেকে DIR — closedir() fd-ও বন্ধ করে (POSIX) */
+DIR *fdopendir(int fd)
+{
+    DIR *d;
+    struct stat st;
+    if (fstat(fd, &st) != 0) return NULL;
+    if (!S_ISDIR(st.st_mode)) { errno = ENOTDIR; return NULL; }
+    d = (DIR *)malloc(sizeof(*d));
+    if (!d) { errno = ENOMEM; return NULL; }
     d->fd = fd;
     d->pos = d->len = 0;
     return d;

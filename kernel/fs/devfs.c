@@ -92,12 +92,12 @@ static int root_readdir(struct vnode *dir, uint64_t index, struct vfs_dirent *ou
 }
 
 static const struct vnode_ops dev_ops = {
-    dev_read, dev_write, NULL, NULL, NULL, NULL, NULL, NULL, dev_poll, NULL /* rename (ধাপ ১৫ক) */
+    dev_read, dev_write, NULL, NULL, NULL, NULL, NULL, NULL, dev_poll, NULL /* rename (ধাপ ১৫ক) */, NULL /* setflags (ধাপ ১৯ছ) */
 };
 
 /* create/unlink নেই — devfs-এ ফাইল বানানো বা মোছা যায় না */
 static const struct vnode_ops root_ops = {
-    NULL, NULL, NULL, root_lookup, NULL, NULL, root_readdir, NULL, NULL, NULL /* rename (ধাপ ১৫ক) */
+    NULL, NULL, NULL, root_lookup, NULL, NULL, root_readdir, NULL, NULL, NULL /* rename (ধাপ ১৫ক) */, NULL /* setflags (ধাপ ১৯ছ) */
 };
 
 int devfs_register(const char *name, devfs_read_fn read, devfs_write_fn write, void *ctx)

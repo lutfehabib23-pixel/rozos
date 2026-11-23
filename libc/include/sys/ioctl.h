@@ -30,4 +30,11 @@ struct winsize {
 
 int ioctl(int fd, unsigned long req, ...);
 
+/* ধাপ ১৯ছ: ফাইলের flag (Linux-এর <linux/fs.h>-এর একই মান) — chattr/lsattr।
+ * rozOS-এ শুধু FS_IMMUTABLE_FL: মোছা, নাম বদল, লেখা সব EPERM (ext2 আর tmpfs-এ; FAT-এ নেই)।
+ *   int fl; ioctl(fd, FS_IOC_GETFLAGS, &fl); fl |= FS_IMMUTABLE_FL; ioctl(fd, FS_IOC_SETFLAGS, &fl); */
+#define FS_IOC_GETFLAGS 0x80086601UL
+#define FS_IOC_SETFLAGS 0x40086602UL
+#define FS_IMMUTABLE_FL 0x00000010
+
 #endif

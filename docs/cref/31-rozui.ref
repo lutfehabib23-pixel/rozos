@@ -336,6 +336,82 @@ int main(void)
 }
 @end
 
+@entry ui_passwordbox
+@also ui_do_password password secret
+@header rozui.h
+@syntax int ui_passwordbox(const char *title, const char *prompt, char *buf, int size, int confirm);
+@syntax int ui_do_password(ui_ctx *u, int x, int y, int w, char *buf, int size);
+@summary Ask for a secret (shown as *); confirm = 1 asks twice.
+@desc
+ui_passwordbox is a dialog like ui_inputbox, but the letters show as * and
+Ctrl+C does not copy them. With confirm = 1 there are two boxes that must
+match ("The two are not the same." otherwise). buf starts empty and is
+cleared on Cancel. ui_do_password is the same box as a widget for your own
+window (returns like ui_do_textbox). Clear the buffer with memset when done.
+@returns
+passwordbox: 1 = OK (secret in buf), 0 = Cancel.
+@see ui_msgbox rozlock_lock
+@check compile
+@example
+#include <stdio.h>
+#include <string.h>
+#include <rozui.h>
+
+int main(void)
+{
+    char secret[64];
+    if (gfx_init_window("Secret", 200, 80) < 0) return 1;
+    if (ui_passwordbox("New secret", "Choose a secret:", secret, sizeof secret, 1))
+        ui_msgbox("Secret", strlen(secret) < 4 ? "That is short." : "Saved.", UI_MB_OK | UI_MB_INFO);
+    memset(secret, 0, sizeof secret);
+    gfx_quit();
+    return 0;
+}
+@end
+
+@entry ui_popup_menu
+@also popup right-click context-menu
+@header rozui.h
+@syntax int ui_popup_menu(const struct ui_menuitem *items, int n, int x, int y);
+@summary A right-click menu at (x, y); returns the chosen id.
+@desc
+Use it when u.rpressed is set, at u.mx, u.my. The menu waits for a choice:
+a click on an item returns its id, a click outside or Esc returns 0. Arrow
+keys and Enter work too. Items are struct ui_menuitem like ui_menubar
+uses: label "-" draws a line, an id below 0 shows the item grey (it cannot
+be chosen), shortcut text is shown on the right.
+@returns
+The id of the chosen item, or 0.
+@see ui_menubar ui_run
+@check compile
+@example
+#include <stdio.h>
+#include <rozui.h>
+
+int main(void)
+{
+    static const struct ui_menuitem menu[] = {
+        { "Copy", "Ctrl+C", 1 }, { "Paste", "Ctrl+V", -2 }, { "-", NULL, 0 }, { "Quit", NULL, 3 }
+    };
+    ui_ctx ui;
+    char msg[40] = "Right-click anywhere";
+    if (gfx_init_window("Popup", 300, 120) < 0) return 1;
+    ui_init(&ui);
+    while (ui_run(&ui)) {
+        gfx_clear(ui.s, ui_theme_get()->window_bg);
+        ui_label(ui.s, 20, 50, msg, ui_theme_get()->text);
+        if (ui.rpressed) {
+            int id = ui_popup_menu(menu, 4, ui.mx, ui.my);
+            if (id == 3) ui_quit(&ui);
+            else snprintf(msg, sizeof msg, "chose %d", id);
+            ui_redraw(&ui);
+        }
+    }
+    gfx_quit();
+    return 0;
+}
+@end
+
 @entry ui_filedlg
 @header rozui.h
 @syntax int ui_filedlg(const char *title, char *path, int size, int save);

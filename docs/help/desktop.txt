@@ -18,12 +18,15 @@ Right-click the empty desktop:
                        your own command, on the desktop
   Change wallpaper...  [[settings]] - pick the background picture
   Settings...          [[settings]] (memory, processes, disks, network ...)
+  Show hidden icons    also show what was hidden (dimmed) - phase 19g
   Refresh
 Everything in /home/Desktop shows as an icon after the seven fixed ones:
 .app files are program shortcuts (name:, run:, icon:, window: yes),
 folders open in Files, pictures in Images, other files in Code.
 Right-click your own icon: Open, Remove from desktop (shortcuts) or Show
 in Files. The seven fixed icons always stay.
+Phase 19g: folders also have Lock..., locked folders (padlock) Unlock...,
+and every own icon Hide / Unhide - see [[rozlock]].
 
 == Windows ==
 Drag the title bar to move, drag the bottom-right corner to resize,

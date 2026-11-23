@@ -38,6 +38,7 @@
 #define EXT2_RO_LARGE_FILE      0x0002
 #define EXT2_RO_BTREE_DIR       0x0004
 #define EXT2_INDEX_FL           0x00001000
+#define EXT2_IMMUTABLE_FL       0x00000010   /* ধাপ ১৯ছ: chattr +i (Linux-এর মতো) */
 
 #define S_IFMT   0xF000
 #define S_IFDIR  0x4000
@@ -174,6 +175,7 @@ static void sync_vnode_fields(struct ext2_vnode *ev)
     }
     vn->mtime = ev->inode.mtime;
     vn->nlink = ev->inode.links;
+    vn->flags = ev->inode.flags & EXT2_IMMUTABLE_FL;   /* ধাপ ১৯ছ */
 }
 
 /* ---------- bitmap বরাদ্দ ---------- */
@@ -1027,10 +1029,20 @@ static void ext2_release(struct vnode *vn)
     }
 }
 
+/* ধাপ ১৯ছ: immutable flag inode-এ লেখা (Linux-এ chattr +i যা করে) */
+static int ext2_setflags(struct vnode *vn, uint32_t flags)
+{
+    struct ext2_vnode *ev = (struct ext2_vnode *)vn;
+    ev->inode.flags = (ev->inode.flags & ~EXT2_IMMUTABLE_FL) | (flags & EXT2_IMMUTABLE_FL);
+    vn->flags = flags & VN_IMMUTABLE;
+    return write_inode(ev);
+}
+
 static const struct vnode_ops ext2_ops = {
     ext2_read, ext2_write, ext2_truncate, ext2_lookup, ext2_create,
     ext2_unlink, ext2_readdir, ext2_release, NULL,
-    ext2_rename                                         /* ধাপ ১৫ক */
+    ext2_rename,                                        /* ধাপ ১৫ক */
+    ext2_setflags                                       /* ধাপ ১৯ছ */
 };
 
 /* ---------- mount / statfs ---------- */

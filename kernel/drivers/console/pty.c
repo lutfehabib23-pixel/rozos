@@ -217,11 +217,11 @@ static void slave_release(struct vnode *vn)
 }
 
 static const struct vnode_ops master_ops = {
-    master_read, master_write, NULL, NULL, NULL, NULL, NULL, master_release, master_poll, NULL /* rename (ধাপ ১৫ক) */
+    master_read, master_write, NULL, NULL, NULL, NULL, NULL, master_release, master_poll, NULL /* rename (ধাপ ১৫ক) */, NULL /* setflags (ধাপ ১৯ছ) */
 };
 
 static const struct vnode_ops slave_ops = {
-    slave_read, slave_write, NULL, NULL, NULL, NULL, NULL, slave_release, slave_poll, NULL /* rename (ধাপ ১৫ক) */
+    slave_read, slave_write, NULL, NULL, NULL, NULL, NULL, slave_release, slave_poll, NULL /* rename (ধাপ ১৫ক) */, NULL /* setflags (ধাপ ১৯ছ) */
 };
 
 static void init_end(struct pty *p, struct vnode *vn, const struct vnode_ops *ops, uint64_t ino)

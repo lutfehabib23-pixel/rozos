@@ -653,6 +653,43 @@ int mkdirat(int dirfd, const char *path, mode_t mode)
     return mkdir(path, mode);
 }
 
+/* ধাপ ১৯ছ: বাকি *at() ফাংশন (sbase-এর cp/rm/find/test এগুলো ডাকে) */
+#define AT_OK(fd, p) ((fd) == AT_FDCWD || (p)[0] == '/')
+int unlinkat(int dirfd, const char *path, int flags)
+{
+    if (!AT_OK(dirfd, path)) { errno = ENOSYS; return -1; }
+    return (flags & AT_REMOVEDIR) ? rmdir(path) : unlink(path);
+}
+int faccessat(int dirfd, const char *path, int mode, int flags)
+{
+    (void)flags;                                 /* এক ব্যবহারকারী: আসল আর কার্যকর id একই */
+    if (!AT_OK(dirfd, path)) { errno = ENOSYS; return -1; }
+    return access(path, mode);
+}
+int fchmodat(int dirfd, const char *path, mode_t mode, int flags)
+{
+    (void)flags;
+    if (!AT_OK(dirfd, path)) { errno = ENOSYS; return -1; }
+    return chmod(path, mode);
+}
+int fchownat(int dirfd, const char *path, uid_t uid, gid_t gid, int flags)
+{
+    (void)flags;
+    if (!AT_OK(dirfd, path)) { errno = ENOSYS; return -1; }
+    return chown(path, uid, gid);
+}
+int linkat(int od, const char *o, int nd, const char *n, int flags)
+{
+    (void)od; (void)nd; (void)flags;
+    return link(o, n);
+}
+int symlinkat(const char *t, int nd, const char *l) { (void)nd; return symlink(t, l); }
+ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t size)
+{
+    if (!AT_OK(dirfd, path)) { errno = ENOSYS; return -1; }
+    return readlink(path, buf, size);
+}
+
 int fchmod(int fd, mode_t mode) { (void)mode; return fcntl(fd, F_GETFD) < 0 ? -1 : 0; }
 int mkfifo(const char *path, mode_t mode) { (void)path; (void)mode; errno = ENOSYS; return -1; }
 int mknod(const char *path, mode_t mode, dev_t dev) { (void)path; (void)mode; (void)dev; errno = EPERM; return -1; }

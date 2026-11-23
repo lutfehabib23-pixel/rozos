@@ -93,6 +93,8 @@ def main():
     ap.add_argument("--libs", default="")
     ap.add_argument("--tcc", default="", help="tcc command too (examples must build with tcc in rozOS)")
     ap.add_argument("--only", default="", help="check only these entry names (comma list)")
+    # ধাপ ১৯ছ: প্যাকেজের হেডার (যেমন sqlite3.h) বানানো না থাকলে সেই পাতার উদাহরণ বাদ
+    ap.add_argument("--skip-header", default="", help="do not build examples of entries with these @header names")
     # ধাপ ১৯গ: "rozgfx.h=a.a,b.a lua.h=liblua.a" — উদাহরণে সেই হেডার থাকলে এই লাইব্রেরিগুলো যোগ
     ap.add_argument("--autolib", default="", help="header=lib,lib ... libraries added for examples that include header")
     a = ap.parse_args()
@@ -133,11 +135,14 @@ def main():
     if a.cc:
         only = set(x for x in a.only.split(",") if x)
         tmp = tempfile.mkdtemp(prefix="cref-")
-        built = ran = 0
+        built = ran = skipped = 0
         for i, e in enumerate(ents):
             if only and e["name"] not in only:
                 continue
             if not e["example"] or e["check"] == "none":
+                continue
+            if e["header"] in a.skip_header.split():
+                skipped += 1
                 continue
             src = os.path.join(tmp, f"ex{i}.c")
             exe = os.path.join(tmp, f"ex{i}")
@@ -178,7 +183,7 @@ def main():
             if r.returncode != 0:
                 print(f"{e['file']}: {e['name']}: example exited with {r.returncode}\n{(r.stdout + r.stderr)[-800:]}")
                 errors += 1
-        print(f"cref-check: {built} examples compiled, {ran} run")
+        print(f"cref-check: {built} examples compiled, {ran} run" + (f", {skipped} skipped ({a.skip_header})" if skipped else ""))
     if errors:
         print(f"cref-check: {errors} problem(s)")
         sys.exit(1)

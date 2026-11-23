@@ -38,6 +38,7 @@
 #include <rozgfx.h>
 #include <rozui.h>
 #include <rozwm_proto.h>
+#include <rozlock.h>          /* ধাপ ১৯ছ: লক করা ফোল্ডার, .hidden */
 
 #define MAXWIN    32
 #define MAXCLI    32
@@ -640,11 +641,12 @@ static int icon_sel = -1;
  * name/run/icon/window), ফোল্ডার → Files, ছবি → imgview, অন্য ফাইল → Code। আগের ৭টার পরে বসে। */
 #define DESKTOP_DIR "/home/Desktop"
 #define MAXUSER 48
-enum { UK_APP, UK_DIR, UK_IMAGE, UK_FILE };
-struct uicon { char label[40], path[200], run[200], image[64]; int kind, window; };
+enum { UK_APP, UK_DIR, UK_IMAGE, UK_FILE, UK_LOCKED };   /* ধাপ ১৯ছ: UK_LOCKED = NAME.rozlock */
+struct uicon { char label[40], path[200], run[200], image[64]; int kind, window, hidden; };
 static struct uicon uicons[MAXUSER];
 static int nuser;
 static unsigned long desk_sig;         /* ফোল্ডারের নামগুলোর ছাপ — বদলালে আবার পড়া */
+static int desk_show_hidden;           /* ধাপ ১৯ছ: ডান-ক্লিক > Show hidden icons */
 
 static int nicons_total(void) { return NICONS + nuser; }
 
@@ -688,19 +690,35 @@ static int load_user_icons(void)
     DIR *d = opendir(DESKTOP_DIR);
     struct dirent *e;
     unsigned long sig = 5381;
-    int n = 0;
+    int n = 0, i;
     struct uicon tmp[MAXUSER];
+    struct rozhide hid;
+    rozhide_load(&hid, DESKTOP_DIR);             /* ধাপ ১৯ছ: লুকানো নামের তালিকা */
+    for (i = 0; i < hid.n; i++) {
+        const char *c;
+        for (c = hid.names[i]; *c; c++) sig = sig * 31 + (unsigned char)*c;
+    }
+    sig = sig * 7 + (unsigned long)desk_show_hidden;
     if (d) {
         while ((e = readdir(d)) && n < MAXUSER) {
             struct uicon *u = &tmp[n];
             const char *c;
+            size_t L = strlen(e->d_name);
+            int hidden = rozhide_has(&hid, e->d_name);
             if (e->d_name[0] == '.') continue;
+            if (hidden && !desk_show_hidden) continue;
             for (c = e->d_name; *c; c++) sig = sig * 33 + (unsigned char)*c;
             sig = sig * 33 + (unsigned long)e->d_type;
             memset(u, 0, sizeof(*u));
+            u->hidden = hidden;
             snprintf(u->path, sizeof(u->path), "%s/%s", DESKTOP_DIR, e->d_name);
             snprintf(u->label, sizeof(u->label), "%s", e->d_name);
             if (e->d_type == DT_DIR) u->kind = UK_DIR;
+            else if (L > strlen(ROZLOCK_EXT) && !strcmp(e->d_name + L - strlen(ROZLOCK_EXT), ROZLOCK_EXT) &&
+                     rozlock_is_lockfile(u->path)) {
+                u->kind = UK_LOCKED;
+                rozlock_display_name(e->d_name, u->label, sizeof(u->label));
+            }
             else if (strlen(e->d_name) > 4 && !strcmp(e->d_name + strlen(e->d_name) - 4, ".app")) {
                 u->kind = UK_APP;
                 u->label[strlen(u->label) - 4] = '\0';
@@ -711,6 +729,7 @@ static int load_user_icons(void)
         }
         closedir(d);
     }
+    rozhide_free(&hid);
     if (sig == desk_sig && n == nuser) return 0;
     desk_sig = sig;
     qsort(tmp, (size_t)n, sizeof(tmp[0]), cmp_uicon);
@@ -744,14 +763,16 @@ static void draw_icons(void)
         if (i < NICONS) ui_draw_icon(S, x + 20, y + 6, 32, icons[i].image, icons[i].kind);
         else {
             const struct uicon *u = &uicons[i - NICONS];
-            char k = u->kind == UK_DIR ? 'f' : u->kind == UK_IMAGE ? 'i' : u->kind == UK_FILE ? 'd' : u->window ? 'g' : 't';
-            ui_draw_icon(S, x + 20, y + 6, 32, u->kind == UK_IMAGE ? u->path : u->image, k);
+            char k = u->kind == UK_DIR ? 'f' : u->kind == UK_IMAGE ? 'i' : u->kind == UK_FILE ? 'd' :
+                     u->kind == UK_LOCKED ? 'l' : u->window ? 'g' : 't';
+            ui_draw_icon(S, x + 20, y + 6, 32, u->kind == UK_IMAGE ? u->path : u->kind == UK_LOCKED ? "locked-folder" : u->image, k);
         }
         /* ধাপ ১৯চ: লম্বা নাম কেটে */
         snprintf(lbl, sizeof(lbl), "%s", icon_label(i));
         if (strlen(icon_label(i)) > 11) { lbl[9] = '.'; lbl[10] = '.'; lbl[11] = '\0'; }   /* আগের ৭টার নাম পুরো */
         tw = gfx_text_width(NULL, lbl);
-        gfx_text(S, NULL, x + (w - tw) / 2, y + 44, lbl, i == icon_sel ? GFX_WHITE : T->text);
+        gfx_text(S, NULL, x + (w - tw) / 2, y + 44, lbl, i == icon_sel ? GFX_WHITE :
+                 (i >= NICONS && uicons[i - NICONS].hidden) ? T->text_dim : T->text);   /* ধাপ ১৯ছ: লুকানো = ঝাপসা */
     }
 }
 
@@ -782,6 +803,11 @@ static void launch_icon(int i)
         else spawn_terminal(u->run, 1);
         return;
     }
+    if (u->kind == UK_LOCKED) {                  /* ধাপ ১৯ছ: secret চেয়ে খোলা, তারপর Files-এ */
+        snprintf(cmd, sizeof(cmd), "lockdlg unlock '%s' -o", u->path);
+        spawn(cmd);
+        return;
+    }
     snprintf(cmd, sizeof(cmd), "%s '%s'", u->kind == UK_DIR ? "files" : u->kind == UK_IMAGE ? "imgview" : "code", u->path);
     spawn(cmd);
 }
@@ -790,16 +816,22 @@ static void damage_icons(void) { damage(0, PANEL_H, W, H - PANEL_H - TASK_H); }
 
 /* ---------- ধাপ ১৯চ: ডেস্কটপের ডান-ক্লিক মেনু ---------- */
 enum { CX_NEWTEXT = 1, CX_NEWFOLDER, CX_ADDICON, CX_WALLPAPER, CX_SETTINGS, CX_REFRESH,
-       CX_OPEN, CX_REMOVE, CX_SHOWFILES };
+       CX_OPEN, CX_REMOVE, CX_SHOWFILES,
+       CX_LOCK, CX_UNLOCK, CX_HIDE, CX_SHOWHIDDEN };                 /* ধাপ ১৯ছ */
 struct ctxitem { const char *label; int id; };
 static const struct ctxitem ctx_desktop[] = {
     { "New text file", CX_NEWTEXT }, { "New folder", CX_NEWFOLDER }, { "-", 0 },
     { "Add icon...", CX_ADDICON }, { "Change wallpaper...", CX_WALLPAPER }, { "Settings...", CX_SETTINGS },
-    { "-", 0 }, { "Refresh", CX_REFRESH }
+    { "-", 0 }, { "Show hidden icons", CX_SHOWHIDDEN }, { "Refresh", CX_REFRESH }
 };
 static const struct ctxitem ctx_builtin[] = { { "Open", CX_OPEN } };
 static const struct ctxitem ctx_app[] = { { "Open", CX_OPEN }, { "Remove from desktop", CX_REMOVE } };
 static const struct ctxitem ctx_file[] = { { "Open", CX_OPEN }, { "Show in Files", CX_SHOWFILES } };
+/* ধাপ ১৯ছ: ফোল্ডার আর লক করা ফোল্ডার; সবশেষে Hide/Unhide যোগ হয় (ctx_show) */
+static const struct ctxitem ctx_dir[] = { { "Open", CX_OPEN }, { "Show in Files", CX_SHOWFILES }, { "-", 0 },
+                                          { "Lock...", CX_LOCK } };
+static const struct ctxitem ctx_locked[] = { { "Unlock...", CX_UNLOCK }, { "Show in Files", CX_SHOWFILES }, { "-", 0 } };
+static struct ctxitem ctx_dyn[12];
 #define CTX_W 190
 static const struct ctxitem *ctx_items;
 static int ctx_n, ctx_open, ctx_x, ctx_y, ctx_h, ctx_hover = -1, ctx_icon = -1;
@@ -821,10 +853,25 @@ static void ctx_show(int x, int y, int icon)
 {
     ctx_close();
     ctx_icon = icon;
-    if (icon < 0) { ctx_items = ctx_desktop; ctx_n = (int)(sizeof(ctx_desktop) / sizeof(ctx_desktop[0])); }
+    if (icon < 0) {
+        ctx_n = (int)(sizeof(ctx_desktop) / sizeof(ctx_desktop[0]));
+        memcpy(ctx_dyn, ctx_desktop, sizeof(ctx_desktop));
+        if (desk_show_hidden) ctx_dyn[7].label = "Hide hidden icons";
+        ctx_items = ctx_dyn;
+    }
     else if (icon < NICONS) { ctx_items = ctx_builtin; ctx_n = 1; }
-    else if (uicons[icon - NICONS].kind == UK_APP) { ctx_items = ctx_app; ctx_n = 2; }
-    else { ctx_items = ctx_file; ctx_n = 2; }
+    else {                                       /* ধাপ ১৯ছ: নিজের আইকন — ধরন অনুযায়ী, শেষে Hide/Unhide */
+        const struct uicon *u = &uicons[icon - NICONS];
+        const struct ctxitem *src = u->kind == UK_APP ? ctx_app : u->kind == UK_DIR ? ctx_dir :
+                                    u->kind == UK_LOCKED ? ctx_locked : ctx_file;
+        int n = u->kind == UK_APP ? 2 : u->kind == UK_DIR ? 4 : u->kind == UK_LOCKED ? 3 : 2;
+        memcpy(ctx_dyn, src, sizeof(ctx_dyn[0]) * (size_t)n);
+        if (src[n - 1].label[0] != '-') { ctx_dyn[n].label = "-"; ctx_dyn[n++].id = 0; }
+        ctx_dyn[n].label = u->hidden ? "Unhide" : "Hide";
+        ctx_dyn[n++].id = CX_HIDE;
+        ctx_items = ctx_dyn;
+        ctx_n = n;
+    }
     ctx_open = 1;
     ctx_hover = -1;
     ctx_h = ctx_row_y(ctx_n) - ctx_y + 4;
@@ -888,6 +935,18 @@ static void ctx_do(int id)
         if (ic >= NICONS && uicons[ic - NICONS].kind == UK_APP) unlink(uicons[ic - NICONS].path);
         break;
     case CX_SHOWFILES: spawn("files '" DESKTOP_DIR "'"); break;
+    case CX_LOCK:                                /* ধাপ ১৯ছ */
+    case CX_UNLOCK:
+        if (ic >= NICONS) {
+            snprintf(cmd, sizeof(cmd), "lockdlg %s '%s'%s", id == CX_LOCK ? "lock" : "unlock",
+                     uicons[ic - NICONS].path, id == CX_LOCK ? "" : " -o");
+            spawn(cmd);
+        }
+        break;
+    case CX_HIDE:
+        if (ic >= NICONS) rozhide_set(uicons[ic - NICONS].path, !uicons[ic - NICONS].hidden);
+        break;
+    case CX_SHOWHIDDEN: desk_show_hidden = !desk_show_hidden; break;
     }
     if (load_user_icons()) damage_icons();
 }

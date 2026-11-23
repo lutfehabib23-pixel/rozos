@@ -74,7 +74,13 @@ struct vnode_ops {
      * থাকলে ফাইল হলে বদলে যায়, ডিরেক্টরি হলে -EEXIST। NULL হলে vfs_rename -EXDEV দেয়
      * (mv তখন কপি করে) */
     int     (*rename)(struct vnode *olddir, const char *oldname, struct vnode *newdir, const char *newname);
+    /* ধাপ ১৯ছ (ঐচ্ছিক): inode-এর flag বদলানো (এখন শুধু VN_IMMUTABLE) — ডিস্কে রাখে আর
+     * vn->flags হালনাগাদ করে। NULL হলে ioctl FS_IOC_SETFLAGS -EOPNOTSUPP দেয় */
+    int     (*setflags)(struct vnode *vn, uint32_t flags);
 };
+
+/* ধাপ ১৯ছ: vnode->flags (Linux-এর FS_*_FL-এর একই মান) */
+#define VN_IMMUTABLE 0x00000010u   /* মোছা, নাম বদল, লেখা, truncate — সব -EPERM */
 
 struct mount;
 
@@ -91,6 +97,7 @@ struct vnode {
     struct vnode *parent;        /* ".." — ডিরেক্টরির জন্য */
     struct mount *mount;         /* এই vnode কোন mount-এর */
     struct mount *covered_by;    /* এই ডিরেক্টরির ওপর কিছু mount করা থাকলে */
+    uint32_t flags;              /* ধাপ ১৯ছ: VN_IMMUTABLE ইত্যাদি (ফাইলসিস্টেম ভরে) */
 };
 
 struct vfs_dirent {
@@ -181,6 +188,9 @@ uint64_t vfs_lock_contended(void);
 int  vfs_install_vnode(struct vnode *vn, int flags);
 /* fd-এর vnode (ref বাড়িয়ে; শেষে vnode_unref) — না থাকলে NULL */
 struct vnode *vfs_fd_vnode(int fd);
+/* ধাপ ১৯ছ: VN_IMMUTABLE পড়া/বসানো (ফাইলসিস্টেম সমর্থন না করলে -EOPNOTSUPP) */
+int vfs_getflags(int fd, uint32_t *out);
+int vfs_setflags(int fd, uint32_t flags);
 /* ধাপ ১৩: fd-এর খোলার ফ্ল্যাগ (O_ACCMODE ইত্যাদি) — না থাকলে -EBADF */
 int  vfs_fd_flags(int fd);
 /* ধাপ ১৩: pipe — fds[0] পড়ার মুখ, fds[1] লেখার মুখ (kernel/fs/pipe.c) */

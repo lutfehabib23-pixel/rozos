@@ -575,6 +575,7 @@ static int extra_libs(const char *file, const char **libs, int max)
     static const struct { const char *inc, *lib1, *lib2; } t[] = {
         { "<rozhttp.h>", "-lrozhttp", "-lbearssl" }, { "<lua.h>", "-llua", NULL },
         { "<lauxlib.h>", "-llua", NULL }, { "<zlib.h>", "-lz", NULL }, { "<rozcref.h>", "-lrozcref", NULL },
+        { "<rozlock.h>", "-lrozlock", "-lbearssl" }, { "<sqlite3.h>", "-lsqlite3", NULL },   /* ধাপ ১৯ছ */
     };
     char line[512];
     int n = 0, i, j, k;

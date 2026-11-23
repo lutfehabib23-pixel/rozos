@@ -28,6 +28,8 @@ files. SOURCE can be:
   `OWNER/REPO`        GitHub, newest release: .../releases/latest/download
   `OWNER/REPO@TAG`    GitHub, one release tag
   `https://host/dir`  any web folder (e.g. a test server on the PC)
+A folder works too, without the internet (phase 19g):
+`rozpkg repo /mnt/usb/packages` - copy index.txt and the .tar files there.
 It is saved in /etc/rozpkg.conf. Making your own repo: [[packages]].
 
 == Safety ==

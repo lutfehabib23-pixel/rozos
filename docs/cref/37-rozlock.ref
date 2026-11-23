@@ -1,0 +1,117 @@
+# rozOS C reference - librozlock: lock (encrypt) and hide folders (phase 19g)
+# #include <rozlock.h>   build: tcc prog.c -lrozlock -lbearssl -o prog
+# The same library is behind Files, the desktop menu, lockdlg and the rozlock command.
+
+@entry rozlock_lock
+@also rozlock_unlock rozlock_check rozlock_progress_fn ROZLOCK_EXT ROZLOCK_EWRONG ROZLOCK_EFORMAT ROZLOCK_ENOCRYPTO ROZLOCK_ESYSTEM ROZLOCK_EPARTIAL rozlock librozlock
+@header rozlock.h
+@syntax int rozlock_lock(const char *dir, const char *secret, rozlock_progress_fn cb, void *ctx, char *out, size_t outlen);
+@syntax int rozlock_unlock(const char *lockfile, const char *secret, rozlock_progress_fn cb, void *ctx, char *out, size_t outlen);
+@syntax int rozlock_check(const char *lockfile, const char *secret);
+@syntax typedef void (*rozlock_progress_fn)(void *ctx, uint64_t done, uint64_t total, const char *name);
+@summary Lock a folder into one encrypted file, and get it back with the secret.
+@desc
+rozlock_lock packs the whole folder (names and all) into DIR.rozlock next
+to it, encrypted with ChaCha20-Poly1305 under a key made from the secret
+(PBKDF2-SHA256, 100000 rounds). The file is checked, made immutable (cannot
+be deleted), and only then are the original files overwritten with zeros
+and removed. rozlock_unlock checks the secret, rebuilds the folder (as
+"NAME 2" if NAME is taken), then deletes the lock file. rozlock_check only
+tests the secret. cb (may be NULL) is called as the work goes on. out gets
+the new path. There is no way back without the secret.
+@returns
+0; ROZLOCK_EWRONG (wrong secret), ROZLOCK_EFORMAT (not a lock file or
+damaged), ROZLOCK_ESYSTEM (/, /bin, /home, a mounted disk ...),
+ROZLOCK_EPARTIAL (locked, some originals left) or -errno. rozlock_strerror
+turns any of them into text.
+@see rozlock_is_lockfile rozhide_set FS_IOC_SETFLAGS
+@example
+#include <stdio.h>
+#include <sys/stat.h>
+#include <rozlock.h>
+
+int main(void)
+{
+    char out[1100];
+    FILE *f;
+    int r;
+    mkdir("/tmp/rl-demo", 0755);
+    f = fopen("/tmp/rl-demo/note.txt", "w");
+    if (!f) return 1;
+    fputs("meet at nine\n", f);
+    fclose(f);
+    r = rozlock_lock("/tmp/rl-demo", "open sesame", NULL, NULL, out, sizeof out);
+    printf("lock: %s -> %s\n", rozlock_strerror(r), out);
+    printf("wrong secret: %s\n", rozlock_strerror(rozlock_check(out, "guess")));
+    r = rozlock_unlock(out, "open sesame", NULL, NULL, out, sizeof out);
+    printf("unlock: %s -> %s\n", rozlock_strerror(r), out);
+    return r != 0;
+}
+@end
+
+@entry rozlock_is_lockfile
+@also rozlock_display_name rozlock_protect rozlock_is_protected rozlock_strerror
+@header rozlock.h
+@syntax int rozlock_is_lockfile(const char *path);
+@syntax void rozlock_display_name(const char *path, char *out, size_t outlen);
+@syntax int rozlock_protect(const char *path, int on);
+@syntax int rozlock_is_protected(const char *path);
+@syntax const char *rozlock_strerror(int err);
+@summary Helpers: is it a lock file, its folder name, the undeletable flag, error text.
+@desc
+rozlock_is_lockfile reads the first 8 bytes ("ROZLOCK1"). rozlock_display_name
+turns "a/Photos.rozlock" into "Photos". rozlock_protect sets or clears
+FS_IMMUTABLE_FL (ext2 and tmpfs; FAT says EOPNOTSUPP).
+@returns
+is_lockfile / is_protected: 1 or 0. protect: 0 or -errno.
+@see rozlock_lock FS_IOC_SETFLAGS
+@example
+#include <stdio.h>
+#include <rozlock.h>
+
+int main(void)
+{
+    char name[64];
+    rozlock_display_name("/home/Desktop/Photos.rozlock", name, sizeof name);
+    printf("shown as \"%s\"; /bin/ls is %sa lock file\n", name, rozlock_is_lockfile("/bin/ls") ? "" : "not ");
+    printf("%s\n", rozlock_strerror(ROZLOCK_EWRONG));
+    return 0;
+}
+@end
+
+@entry rozhide_set
+@also rozhide_is_hidden rozhide_load rozhide_has rozhide_free rozhide .hidden hidden
+@header rozlock.h
+@syntax int rozhide_set(const char *path, int hidden);
+@syntax int rozhide_is_hidden(const char *path);
+@syntax int rozhide_load(struct rozhide *h, const char *dir);
+@syntax int rozhide_has(const struct rozhide *h, const char *name);
+@syntax void rozhide_free(struct rozhide *h);
+@summary Hide a file or folder without renaming it (the folder's .hidden list).
+@desc
+Each folder may have a ".hidden" text file with one name per line (the same
+rule as GNOME and macOS). Files, the desktop and ls leave those names out;
+ls -a and View > Hidden files show them. rozhide_load reads a list once so
+a program can test many names with rozhide_has. Hiding is not protection -
+use rozlock_lock for that.
+@returns
+rozhide_set: 0 or -errno. is_hidden / has: 1 or 0.
+@see rozlock_lock opendir
+@example
+#include <stdio.h>
+#include <sys/stat.h>
+#include <rozlock.h>
+
+int main(void)
+{
+    FILE *f;
+    mkdir("/tmp/hide-demo", 0755);
+    f = fopen("/tmp/hide-demo/plan.txt", "w");
+    if (f) fclose(f);
+    rozhide_set("/tmp/hide-demo/plan.txt", 1);
+    printf("hidden now: %d\n", rozhide_is_hidden("/tmp/hide-demo/plan.txt"));
+    rozhide_set("/tmp/hide-demo/plan.txt", 0);
+    printf("hidden now: %d\n", rozhide_is_hidden("/tmp/hide-demo/plan.txt"));
+    return 0;
+}
+@end

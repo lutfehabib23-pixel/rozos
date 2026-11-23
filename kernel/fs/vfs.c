@@ -591,6 +591,11 @@ static int do_vfs_open(const char *path, int flags)
         vnode_unref(vn);
         return -EISDIR;
     }
+    /* ধাপ ১৯ছ: immutable ফাইলে লেখা বা খালি করা নয় (পড়া চলে) */
+    if ((vn->flags & VN_IMMUTABLE) && (acc != O_RDONLY || (flags & O_TRUNC))) {
+        vnode_unref(vn);
+        return -EPERM;
+    }
     if ((flags & O_TRUNC) && vn->type == VNODE_FILE && acc != O_RDONLY) {
         if (!vn->ops->truncate) {
             vnode_unref(vn);
@@ -643,6 +648,7 @@ static int64_t do_rw(int fd, void *rbuf, const void *wbuf, size_t len)
     } else {
         if ((f->flags & O_ACCMODE) == O_RDONLY) { UNLOCK(); return -EBADF; }
         if (!vn->ops->write)                    { UNLOCK(); return -EROFS; }
+        if (vn->flags & VN_IMMUTABLE)           { UNLOCK(); return -EPERM; }   /* ধাপ ১৯ছ */
         if ((f->flags & O_APPEND) && vn->type == VNODE_FILE) {
             f->offset = vn->size;
         }
@@ -850,6 +856,8 @@ static int remove_entry(const char *path, int want_dir)
     }
     if (child->covered_by || (child->mount && child == child->mount->root)) {
         err = -EBUSY;
+    } else if (child->flags & VN_IMMUTABLE) {
+        err = -EPERM;                            /* ধাপ ১৯ছ: লক করা ফাইল মোছা যায় না */
     } else if (want_dir && child->type != VNODE_DIR) {
         err = -ENOTDIR;
     } else if (!want_dir && child->type == VNODE_DIR) {
@@ -898,8 +906,17 @@ static int do_vfs_rename(const char *oldpath, const char *newpath)
     } else {
         if (child->covered_by || (child->mount && child == child->mount->root)) {
             err = -EBUSY;
+        } else if (child->flags & VN_IMMUTABLE) {
+            err = -EPERM;                        /* ধাপ ১৯ছ */
         }
         vnode_unref(child);
+        if (!err && nd->ops->lookup) {           /* ধাপ ১৯ছ: immutable-এর ওপর বসানোও নয় */
+            struct vnode *old;
+            if (nd->ops->lookup(nd, nn, &old) == 0) {
+                if (old->flags & VN_IMMUTABLE) err = -EPERM;
+                vnode_unref(old);
+            }
+        }
         if (!err) {
             if (od->mount != nd->mount) {
                 err = -EXDEV;                    /* অন্য ফাইলসিস্টেম: কপি করতে হবে */
@@ -961,6 +978,8 @@ static int do_vfs_truncate(const char *path, uint64_t size)
     }
     if (vn->type != VNODE_FILE) {
         err = vn->type == VNODE_DIR ? -EISDIR : -EINVAL;
+    } else if (vn->flags & VN_IMMUTABLE) {
+        err = -EPERM;                            /* ধাপ ১৯ছ */
     } else {
         err = vn->ops->truncate ? vn->ops->truncate(vn, size) : -EROFS;
     }
@@ -1058,6 +1077,7 @@ int vfs_ftruncate(int fd, uint64_t size)
     if (!f) r = -EBADF;
     else if ((f->flags & O_ACCMODE) == O_RDONLY) r = -EBADF;
     else if (f->vn->type != VNODE_FILE) r = -EINVAL;
+    else if (f->vn->flags & VN_IMMUTABLE) r = -EPERM;   /* ধাপ ১৯ছ */
     else if (!f->vn->ops->truncate) r = -EROFS;
     else r = f->vn->ops->truncate(f->vn, size);
     UNLOCK();
@@ -1113,4 +1133,32 @@ struct vnode *vfs_fd_vnode(int fd)
     }
     UNLOCK();
     return vn;
+}
+
+/* ধাপ ১৯ছ: ফাইলের flag (ioctl FS_IOC_GETFLAGS/SETFLAGS) — এখন শুধু VN_IMMUTABLE */
+int vfs_getflags(int fd, uint32_t *out)
+{
+    struct file *f;
+    int r = 0;
+    LOCK();
+    f = get_file(fd);
+    if (!f) r = -EBADF;
+    else *out = f->vn->flags;
+    UNLOCK();
+    return r;
+}
+
+int vfs_setflags(int fd, uint32_t flags)
+{
+    struct file *f;
+    int r;
+    LOCK();
+    f = get_file(fd);
+    if (!f) r = -EBADF;
+    else if (flags & ~VN_IMMUTABLE) r = -EOPNOTSUPP;
+    else if (f->vn->type != VNODE_FILE && f->vn->type != VNODE_DIR) r = -ENOTTY;
+    else if (!f->vn->ops->setflags) r = -EOPNOTSUPP;
+    else r = f->vn->ops->setflags(f->vn, flags);
+    UNLOCK();
+    return r;
 }

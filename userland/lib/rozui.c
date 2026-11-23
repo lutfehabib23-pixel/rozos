@@ -185,6 +185,13 @@ void ui_icon(gfx_surface *s, int x, int y, char k, uint32_t c)
         gfx_fill_rect(s, x + 3, y + 8, 10, 7, c);
         gfx_fill_rect(s, x + 7, y + 10, 3, 5, t->face);
         break;
+    case 'l':                                    /* ধাপ ১৯ছ: লক করা ফোল্ডার — ফোল্ডার + তালা */
+        gfx_fill_rect(s, x + 1, y + 3, 6, 3, GFX_RGB(230, 180, 70));
+        gfx_fill_rect(s, x + 1, y + 5, 14, 9, GFX_RGB(240, 196, 90));
+        gfx_circle(s, x + 11, y + 7, 2, GFX_RGB(60, 60, 60));
+        gfx_fill_rect(s, x + 8, y + 8, 7, 6, GFX_RGB(60, 60, 60));
+        gfx_fill_rect(s, x + 11, y + 10, 1, 2, GFX_RGB(240, 196, 90));
+        break;
     case 'k':                                    /* নতুন ফোল্ডার: ফোল্ডার + সবুজ যোগ */
         gfx_fill_rect(s, x + 1, y + 3, 6, 3, GFX_RGB(230, 180, 70));
         gfx_fill_rect(s, x + 1, y + 5, 14, 9, GFX_RGB(240, 196, 90));
@@ -577,6 +584,8 @@ static int take_focus(ui_ctx *u, int id, int over)
     return 0;
 }
 
+static int pw_mask;                      /* ধাপ ১৯ছ: ui_do_password চলার সময় 1 */
+
 int ui_do_textbox(ui_ctx *u, int x, int y, int w, char *buf, int size)
 {
     int id = ++u->id, h = UI_TEXTBOX_H, over = ui_hover(u, x, y, w, h), len = (int)strlen(buf);
@@ -612,7 +621,7 @@ int ui_do_textbox(ui_ctx *u, int x, int y, int w, char *buf, int size)
             else if (k == GFX_KEY_HOME) cur = 0;
             else if (k == GFX_KEY_END) cur = len;
             else if (k == 21) { buf[0] = '\0'; cur = 0; ret = 1; }          /* Ctrl+U: সব মোছো */
-            else if (k == 3) ui_clip_set(buf, len);                         /* Ctrl+C */
+            else if (k == 3) { if (!pw_mask) ui_clip_set(buf, len); }       /* Ctrl+C (secret নয়) */
             else if (k == 22) {                                             /* Ctrl+V */
                 int n = 0, i;
                 char *c = ui_clip_get(&n);
@@ -640,11 +649,29 @@ int ui_do_textbox(ui_ctx *u, int x, int y, int w, char *buf, int size)
     }
     ui_sunken(u->s, x, y, w, h, t->field);
     gfx_set_clip(u->s, x + 3, y + 2, w - 6, h - 4);
+    if (pw_mask) {                               /* ধাপ ১৯ছ: লেখার বদলে * */
+        char stars[256];
+        int ns = len - (u->focus == id ? u->tb_off : 0), i;
+        if (ns > (int)sizeof(stars) - 1) ns = (int)sizeof(stars) - 1;
+        for (i = 0; i < ns; i++) stars[i] = '*';
+        stars[ns > 0 ? ns : 0] = '\0';
+        gfx_text(u->s, NULL, x + 5, y + (h - FH) / 2, stars, t->field_text);
+    } else
     gfx_text(u->s, NULL, x + 5, y + (h - FH) / 2, buf + (u->focus == id ? u->tb_off : 0), t->field_text);
     if (u->focus == id && u->blink)
         gfx_fill_rect(u->s, x + 5 + (u->tb_cur - u->tb_off) * FW, y + 4, 2, h - 8, GFX_WHITE);
     gfx_reset_clip(u->s);
     return ret;
+}
+
+/* ধাপ ১৯ছ: লেখা দেখা যায় না (*), কপি হয় না */
+int ui_do_password(ui_ctx *u, int x, int y, int w, char *buf, int size)
+{
+    int r;
+    pw_mask = 1;
+    r = ui_do_textbox(u, x, y, w, buf, size);
+    pw_mask = 0;
+    return r;
 }
 
 int ui_do_vscroll(ui_ctx *u, int x, int y, int w, int h, int *pos, int total, int page)
@@ -1065,6 +1092,114 @@ int ui_inputbox(const char *title, const char *prompt, char *buf, int size)
         if (d.u.key == GFX_KEY_ESC) answer = 0;
         if (d.u.key == '\n') answer = 1;
         if (d.u.closing) { close_flag = 1; answer = 0; }
+    }
+    if (answer < 0) answer = 0;
+    dlg_close(&d);
+    return answer;
+}
+
+/* ধাপ ১৯ছ: secret চাওয়া; confirm = 1 হলে দুবার (মিলতে হবে) */
+int ui_passwordbox(const char *title, const char *prompt, char *buf, int size, int confirm)
+{
+    struct dlg d;
+    char again[256] = "";
+    int answer = -1, bad = 0;
+    dlg_open(&d, 420, confirm ? 200 : 150);
+    d.u.want_focus = 1;
+    buf[0] = '\0';
+    while (answer < 0 && ui_run(&d.u)) {
+        int r1, r2 = 0, ok = 0, yy;
+        dlg_frame(&d, title);
+        gfx_text(d.u.s, NULL, d.x + 16, d.y + 38, prompt ? prompt : "Secret:", GFX_WHITE);
+        r1 = ui_do_password(&d.u, d.x + 16, d.y + 58, d.w - 32, buf, size);
+        yy = d.y + 88;
+        if (confirm) {
+            gfx_text(d.u.s, NULL, d.x + 16, yy, "Again:", GFX_WHITE);
+            r2 = ui_do_password(&d.u, d.x + 16, yy + 20, d.w - 32, again, (int)sizeof(again));
+            yy += 50;
+            if (r1 == 2) ui_focus_next(&d.u);
+        }
+        if (bad) gfx_text(d.u.s, NULL, d.x + 16, yy, bad == 1 ? "The two are not the same." : "Write something first.",
+                          GFX_RGB(240, 110, 100));
+        if (ui_do_button(&d.u, d.x + d.w - 192, d.y + d.h - 40, 84, 28, "OK")) ok = 1;
+        if (ui_do_button(&d.u, d.x + d.w - 100, d.y + d.h - 40, 84, 28, "Cancel")) answer = 0;
+        if ((confirm ? r2 : r1) == 2 || d.u.key == '\n') ok = 1;
+        if (d.u.key == GFX_KEY_ESC) answer = 0;
+        if (d.u.closing) { close_flag = 1; answer = 0; }
+        if (ok && answer < 0) {
+            if (!buf[0]) bad = 2;
+            else if (confirm && strcmp(buf, again)) { bad = 1; again[0] = '\0'; }
+            else answer = 1;
+            ui_redraw(&d.u);
+        }
+    }
+    memset(again, 0, sizeof(again));
+    if (answer < 0) answer = 0;
+    if (!answer) memset(buf, 0, (size_t)size);
+    dlg_close(&d);
+    return answer;
+}
+
+/* ধাপ ১৯ছ: ডান-ক্লিকের মেনু (x, y = উইন্ডোর ভেতরে, সাধারণত u.mx/u.my)। বাছাই করা আইটেমের
+ * id ফেরত, বাইরে ক্লিক বা Esc = 0। id < 0 = ধূসর (চাপা যায় না), label "-" = রেখা */
+int ui_popup_menu(const struct ui_menuitem *items, int n, int x, int y)
+{
+    struct dlg d;
+    const struct ui_theme *t = &dark3d;
+    int answer = -1, sel = -1, w = 0, h = 6, i, first = 1;
+    for (i = 0; i < n; i++) {
+        int tw = gfx_text_width(NULL, items[i].label) + (items[i].shortcut ? gfx_text_width(NULL, items[i].shortcut) + 24 : 0);
+        if (tw > w) w = tw;
+        h += !strcmp(items[i].label, "-") ? 8 : 22;
+    }
+    w += 40;
+    dlg_open(&d, w, h);
+    while (answer < 0 && ui_run(&d.u)) {
+        int px = x, py = y, yy, over = -1;
+        gfx_surface *s = d.u.s;
+        if (px + w > d.u.w) px = d.u.w - w;
+        if (py + h > d.u.h) py = d.u.h - h;
+        if (px < 0) px = 0;
+        if (py < 0) py = 0;
+        if (d.snap) gfx_blit(s, 0, 0, d.snap, 0, 0, -1, -1);
+        yy = py + 3;
+        for (i = 0; i < n; i++) {
+            int ih = !strcmp(items[i].label, "-") ? 8 : 22;
+            if (ih == 22 && items[i].id > 0 && d.u.mx >= px && d.u.mx < px + w && d.u.my >= yy && d.u.my < yy + ih) over = i;
+            yy += ih;
+        }
+        if (over >= 0) sel = over;
+        if (d.u.key == GFX_KEY_DOWN || d.u.key == GFX_KEY_UP) {
+            int k, dir = d.u.key == GFX_KEY_DOWN ? 1 : -1;
+            for (k = 0; k < n; k++) {
+                sel = (sel + dir + n) % n;
+                if (strcmp(items[sel].label, "-") && items[sel].id > 0) break;
+            }
+        }
+        if (d.u.key == '\n' && sel >= 0) answer = items[sel].id;
+        if (d.u.key == GFX_KEY_ESC) answer = 0;
+        /* প্রথম ফ্রেমের ঘটনা = যে ডান-ক্লিকে মেনু খুলেছে, সেটা গোনা নয় */
+        if (!first && (d.u.pressed || d.u.rpressed)) {
+            if (over >= 0 && d.u.pressed) answer = items[over].id;
+            else if (!(d.u.mx >= px && d.u.mx < px + w && d.u.my >= py && d.u.my < py + h)) answer = 0;
+        }
+        if (d.u.closing) { close_flag = 1; answer = 0; }
+        first = 0;
+        ui_panel(s, px, py, w, h, t->face, 1);
+        yy = py + 3;
+        for (i = 0; i < n; i++) {
+            if (!strcmp(items[i].label, "-")) {
+                ui_separator(s, px + 4, yy + 3, w - 8);
+                yy += 8;
+                continue;
+            }
+            if (items[i].id > 0) ui_menu_item(s, px + 3, yy, w - 6, 22, items[i].label, i == sel);
+            else gfx_text(s, NULL, px + 13, yy + 3, items[i].label, t->text_dim);
+            if (items[i].shortcut)
+                gfx_text(s, NULL, px + w - 10 - gfx_text_width(NULL, items[i].shortcut), yy + 3, items[i].shortcut,
+                         i == sel ? GFX_WHITE : t->text_dim);
+            yy += 22;
+        }
     }
     if (answer < 0) answer = 0;
     dlg_close(&d);

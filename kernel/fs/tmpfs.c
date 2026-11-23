@@ -304,6 +304,13 @@ static void tmpfs_release(struct vnode *vn)
     kfree(n);                             /* ডিরেক্টরি খালি না হলে মোছা যায় না (VFS যাচাই করে) */
 }
 
+/* ধাপ ১৯ছ: flag শুধু মেমোরিতে (tmpfs-এ সবকিছুই তাই) */
+static int tmpfs_setflags(struct vnode *vn, uint32_t flags)
+{
+    vn->flags = flags & VN_IMMUTABLE;
+    return 0;
+}
+
 static const struct vnode_ops tmpfs_ops = {
     tmpfs_read,
     tmpfs_write,
@@ -314,7 +321,8 @@ static const struct vnode_ops tmpfs_ops = {
     tmpfs_readdir,
     tmpfs_release,
     NULL,
-    tmpfs_rename                          /* ধাপ ১৫ক */
+    tmpfs_rename,                         /* ধাপ ১৫ক */
+    tmpfs_setflags                        /* ধাপ ১৯ছ */
 };
 
 /* ---------- mount ---------- */

@@ -100,6 +100,13 @@ int     execvpe(const char *file, char *const argv[], char *const envp[]);
 int     link(const char *oldpath, const char *newpath);
 int     symlink(const char *target, const char *linkpath);
 ssize_t readlink(const char *path, char *buf, size_t size);
+/* ধাপ ১৯ছ: *at() রূপ — dirfd = AT_FDCWD বা পুরো পথ হলে চলে (নইলে ENOSYS) */
+int     unlinkat(int dirfd, const char *path, int flags);
+int     faccessat(int dirfd, const char *path, int mode, int flags);
+int     fchownat(int dirfd, const char *path, uid_t uid, gid_t gid, int flags);
+int     linkat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, int flags);
+int     symlinkat(const char *target, int newdirfd, const char *linkpath);
+ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t size);
 int     chown(const char *path, uid_t uid, gid_t gid);
 int     fchown(int fd, uid_t uid, gid_t gid);
 int     lchown(const char *path, uid_t uid, gid_t gid);

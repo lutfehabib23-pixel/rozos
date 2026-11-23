@@ -24,5 +24,6 @@ struct dirent *readdir(DIR *d);
 int            closedir(DIR *d);
 void           rewinddir(DIR *d);
 int            dirfd(DIR *d);
+DIR           *fdopendir(int fd);     /* ধাপ ১৯ছ: খোলা ডিরেক্টরির fd থেকে (fd DIR-এর হয়ে যায়) */
 
 #endif
