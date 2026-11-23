@@ -181,7 +181,7 @@ static int64_t sys_uname(struct interrupt_frame *f, uint64_t ubuf, uint64_t a2, 
                          uint64_t a4, uint64_t a5, uint64_t a6)
 {
     static const char *const fields[6] = {
-        "rozOS", "rozos", "0.19.12-phase19l", "phase19l", "x86_64", "(none)"
+        "rozOS", "rozos", "0.21.0-phase21", "phase21", "x86_64", "(none)"
     };
     char buf[6 * 65];
     int i;

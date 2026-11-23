@@ -415,6 +415,14 @@ static void page_system(ui_ctx *u, int x, int y, int w, int h)
     }
     snprintf(line, sizeof(line), "CPU: %s, rozOS uses one core (more cores: planned)", un.machine);
     ui_label(u->s, x, yy, line, T->text);
+    yy += 34;
+    /* ধাপ ২১: ভার্সন, বিল্ড নম্বর, CPU-র নাম — About উইন্ডোতে */
+    if (ui_do_button(u, x, yy, 150, 28, "About rozOS...")) {
+        const char *argv[2];
+        argv[0] = "about";
+        argv[1] = NULL;
+        ui_launch(argv, NULL);
+    }
 }
 
 /* ================= Processes ================= */

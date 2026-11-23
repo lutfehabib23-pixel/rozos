@@ -39,6 +39,7 @@
 #include <rozui.h>
 #include <rozwm_proto.h>
 #include <rozlock.h>          /* ধাপ ১৯ছ: লক করা ফোল্ডার, .hidden */
+#include <rozos.h>            /* ধাপ ২১: rozos_netinfo (tray) */
 
 #define MAXWIN    32
 #define MAXCLI    32
@@ -471,8 +472,8 @@ static void load_apps(void)
 #define MENU_W   200
 #define SUB_W    260
 #define ITEM_H   24
-enum { FIXED_TERM = 0, FIXED_TEXT, FIXED_RESTART, FIXED_OFF, NFIXED };
-static const char *const fixed_names[NFIXED] = { "Terminal", "Text mode", "Restart", "Shut down" };
+enum { FIXED_TERM = 0, FIXED_ABOUT, FIXED_TEXT, FIXED_RESTART, FIXED_OFF, NFIXED };   /* ধাপ ২১: About */
+static const char *const fixed_names[NFIXED] = { "Terminal", "About rozOS", "Text mode", "Restart", "Shut down" };
 static int menu_open, menu_hover = -1, sub_cat = -1, sub_hover = -1;
 static int menu_x, menu_y, menu_h, sub_x, sub_y, sub_h, sub_n;
 
@@ -611,6 +612,7 @@ static int menu_mouse(int type, int x, int y)
             int f = row - ncats;
             open_menu(0);
             if (f == FIXED_TERM) spawn_terminal(NULL, 0);
+            else if (f == FIXED_ABOUT) spawn("about");
             else { exit_action = f == FIXED_TEXT ? 't' : f == FIXED_RESTART ? 'r' : 'p'; running = 0; }
         }
         return 1;
@@ -817,12 +819,13 @@ static void damage_icons(void) { damage(0, PANEL_H, W, H - PANEL_H - TASK_H); }
 /* ---------- ধাপ ১৯চ: ডেস্কটপের ডান-ক্লিক মেনু ---------- */
 enum { CX_NEWTEXT = 1, CX_NEWFOLDER, CX_ADDICON, CX_WALLPAPER, CX_SETTINGS, CX_REFRESH,
        CX_OPEN, CX_REMOVE, CX_SHOWFILES,
-       CX_LOCK, CX_UNLOCK, CX_HIDE, CX_SHOWHIDDEN };                 /* ধাপ ১৯ছ */
+       CX_LOCK, CX_UNLOCK, CX_HIDE, CX_SHOWHIDDEN,                   /* ধাপ ১৯ছ */
+       CX_ABOUT };                                                    /* ধাপ ২১ */
 struct ctxitem { const char *label; int id; };
 static const struct ctxitem ctx_desktop[] = {
     { "New text file", CX_NEWTEXT }, { "New folder", CX_NEWFOLDER }, { "-", 0 },
     { "Add icon...", CX_ADDICON }, { "Change wallpaper...", CX_WALLPAPER }, { "Settings...", CX_SETTINGS },
-    { "-", 0 }, { "Show hidden icons", CX_SHOWHIDDEN }, { "Refresh", CX_REFRESH }
+    { "-", 0 }, { "Show hidden icons", CX_SHOWHIDDEN }, { "Refresh", CX_REFRESH }, { "About rozOS", CX_ABOUT }
 };
 static const struct ctxitem ctx_builtin[] = { { "Open", CX_OPEN } };
 static const struct ctxitem ctx_app[] = { { "Open", CX_OPEN }, { "Remove from desktop", CX_REMOVE } };
@@ -947,6 +950,7 @@ static void ctx_do(int id)
         if (ic >= NICONS) rozhide_set(uicons[ic - NICONS].path, !uicons[ic - NICONS].hidden);
         break;
     case CX_SHOWHIDDEN: desk_show_hidden = !desk_show_hidden; break;
+    case CX_ABOUT: spawn("about"); break;
     }
     if (load_user_icons()) damage_icons();
 }
@@ -1031,26 +1035,121 @@ static void draw_panel(void)
     gfx_text(S, NULL, W - 10 - gfx_text_width(NULL, clock), 5, clock, T->text);
 }
 
-static void taskbar_button_rect(int k, int n, int *x, int *y, int *w, int *h)
+/* ---------- ধাপ ২১: taskbar — Start | পিন করা ৩টা | খোলা উইন্ডো (শুধু আইকন) | tray ----------
+ * পিন: Terminal, Files, Code — চালু না থাকলে ক্লিকে চালু, চালু থাকলে সামনে/ছোট (একাধিক হলে
+ * পালা করে); ডান-ক্লিকে নতুন একটা। নিচে রঙিন দাগ = চালু আছে। নাম দেখা যায় মাউস রাখলে
+ * (tooltip)। tray: নেটওয়ার্ক (IP থাকলে উজ্জ্বল, ক্লিকে Settings > Network), শব্দ (ড্রাইভার নেই) */
+struct pin { const char *label, *image; char kind; const char *cmd; const char *match; };
+static const struct pin pins[] = {
+    { "Terminal", "terminal", 't', NULL,    "Terminal" },
+    { "Files",    "files",    'f', "files", "Files" },
+    { "Code",     "code",     'e', "code",  "Code" },
+};
+#define NPINS   ((int)(sizeof(pins) / sizeof(pins[0])))
+#define PIN_X   108
+#define PIN_W   38
+#define WIN_X   (PIN_X + NPINS * PIN_W + 12)
+#define WBTN_W  40
+#define TRAY_W  72
+static char tip[96];                    /* এখন দেখানো tooltip ("" = নেই) */
+static int tip_x, tip_w;
+static int net_state = -1;              /* 0 = কার্ড নেই, 1 = ঠিকানা নেই, 2 = চালু */
+static char net_ip[20];
+
+/* শিরোনাম "NAME" বা "... - NAME" */
+static int title_is(const char *t, const char *app)
 {
-    int avail = W - 110 - 10, bw = n ? avail / n : 0;
-    if (bw > 180) bw = 180;
-    *x = 108 + k * bw;
+    size_t a = strlen(t), b = strlen(app);
+    return !strcmp(t, app) || (a > b + 3 && !strcmp(t + a - b, app) && !strncmp(t + a - b - 3, " - ", 3));
+}
+
+static int win_pin(int i)
+{
+    int p;
+    for (p = 0; p < NPINS; p++) if (title_is(wins[i].title, pins[p].match)) return p;
+    return -1;
+}
+
+/* উইন্ডোর আইকন শিরোনাম দেখে (চেনা না গেলে সাধারণ প্রোগ্রাম-চিহ্ন) */
+static void win_icon(const char *t, const char **img, char *kind)
+{
+    static const struct { const char *m, *img; char k; } map[] = {
+        { "Paint", "paint", 'g' }, { "Calculator", "calculator", 'g' }, { "Images", "images", 'g' },
+        { "Help", "help", 'e' }, { "Settings", "settings", 's' }, { "Terminal", "terminal", 't' },
+        { "Files", "files", 'f' }, { "Code", "code", 'e' }, { "Lock folder", "locked-folder", 'l' },
+        { "Unlock folder", "locked-folder", 'l' }, { "About rozOS", "about", 's' }
+    };
+    size_t i;
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); i++)
+        if (title_is(t, map[i].m) || strstr(t, map[i].m)) { *img = map[i].img; *kind = map[i].k; return; }
+    *img = "program";
+    *kind = 'p';
+}
+
+static void pin_rect(int p, int *x, int *y, int *w, int *h)
+{
+    *x = PIN_X + p * PIN_W;
     *y = H - TASK_H + 4;
-    *w = bw - 4;
+    *w = PIN_W - 4;
     *h = TASK_H - 7;
+}
+
+/* k-তম (পিনের বাইরের) উইন্ডোর বোতাম; জায়গা না থাকলে 0 */
+static int taskbar_button_rect(int k, int n, int *x, int *y, int *w, int *h)
+{
+    (void)n;
+    *x = WIN_X + k * WBTN_W;
+    *y = H - TASK_H + 4;
+    *w = WBTN_W - 4;
+    *h = TASK_H - 7;
+    return *x + *w <= W - TRAY_W - 6;
 }
 
 static int task_count(void)
 {
     int i, n = 0;
-    for (i = 0; i < MAXWIN; i++) if (wins[i].used) n++;
+    for (i = 0; i < MAXWIN; i++) if (wins[i].used && win_pin(i) < 0) n++;
     return n;
+}
+
+static void update_net(void)
+{
+    struct rozos_netinfo ni;
+    int st = 0;
+    char ip[20] = "";
+    if (rozos_netinfo(0, &ni) == 0) {
+        st = ni.configured && ni.ip ? 2 : 1;
+        if (st == 2)
+            snprintf(ip, sizeof(ip), "%u.%u.%u.%u", ni.ip & 255, (ni.ip >> 8) & 255, (ni.ip >> 16) & 255, ni.ip >> 24);
+    }
+    if (st != net_state || strcmp(ip, net_ip)) {
+        net_state = st;
+        snprintf(net_ip, sizeof(net_ip), "%s", ip);
+        damage(W - TRAY_W, H - TASK_H, TRAY_W, TASK_H);
+    }
+}
+
+static void draw_tray(void)
+{
+    int x = W - TRAY_W + 6, y = H - TASK_H + 7;
+    uint32_t c = net_state == 2 ? T->text : T->text_dim;
+    gfx_vline(S, W - TRAY_W, H - TASK_H + 5, TASK_H - 10, T->dark);
+    /* নেটওয়ার্ক: তিনটা বাড়তে থাকা দাগ; না থাকলে লাল কাটা */
+    gfx_fill_rect(S, x + 2, y + 10, 3, 5, c);
+    gfx_fill_rect(S, x + 7, y + 6, 3, 9, c);
+    gfx_fill_rect(S, x + 12, y + 2, 3, 13, c);
+    if (net_state < 2) gfx_line(S, x, y + 15, x + 16, y, GFX_RGB(220, 80, 70));
+    /* শব্দ: স্পিকার; ড্রাইভার নেই বলে x */
+    x += 32;
+    gfx_fill_rect(S, x + 1, y + 5, 4, 6, T->text_dim);
+    gfx_fill_triangle(S, x + 4, y + 8, x + 10, y + 2, x + 10, y + 14, T->text_dim);
+    gfx_line(S, x + 12, y + 5, x + 17, y + 11, GFX_RGB(220, 80, 70));
+    gfx_line(S, x + 17, y + 5, x + 12, y + 11, GFX_RGB(220, 80, 70));
 }
 
 static void draw_taskbar(void)
 {
-    int i, k = 0, n = task_count();
+    int i, k = 0, n = task_count(), p;
     int start_hover = mx < 100 && my >= H - TASK_H;
     gfx_fill_rect(S, 0, H - TASK_H, W, TASK_H, T->taskbar);
     gfx_hline(S, 0, H - TASK_H, W, T->line);
@@ -1059,16 +1158,82 @@ static void draw_taskbar(void)
     gfx_fill_circle(S, 18, H - TASK_H / 2 + 1, 6, T->accent);
     gfx_fill_circle(S, 18, H - TASK_H / 2 + 1, 3, T->taskbar);
     gfx_text(S, NULL, 30, H - TASK_H + 8, "Start", T->text);
+    /* পিন */
+    for (p = 0; p < NPINS; p++) {
+        int x, y, w, h, running = 0, active = 0, hov;
+        pin_rect(p, &x, &y, &w, &h);
+        for (i = 0; i < MAXWIN; i++)
+            if (wins[i].used && win_pin(i) == p) { running = 1; if (i == focus && !wins[i].minimized) active = 1; }
+        hov = mx >= x && mx < x + w && my >= y && my < y + h;
+        ui_button(S, x, y, w, h, NULL, active ? UI_DOWN : hov ? UI_HOVER : UI_NORMAL);
+        ui_draw_icon(S, x + (w - 18) / 2, y + (h - 18) / 2 - 1, 18, pins[p].image, pins[p].kind);
+        if (running) gfx_fill_rect(S, x + 8, y + h - 3, w - 16, 2, T->accent);
+    }
+    gfx_vline(S, WIN_X - 7, H - TASK_H + 6, TASK_H - 12, T->dark);
+    gfx_vline(S, WIN_X - 6, H - TASK_H + 6, TASK_H - 12, T->light2);
+    /* বাকি খোলা উইন্ডো — শুধু আইকন */
+    for (i = 0; i < MAXWIN; i++) {
+        int x, y, w, h, hov;
+        const char *img;
+        char kind;
+        if (!wins[i].used || win_pin(i) >= 0) continue;
+        if (!taskbar_button_rect(k++, n, &x, &y, &w, &h)) break;
+        hov = mx >= x && mx < x + w && my >= y && my < y + h;
+        ui_button(S, x, y, w, h, NULL, (i == focus && !wins[i].minimized) ? UI_DOWN : hov ? UI_HOVER : UI_NORMAL);
+        win_icon(wins[i].title, &img, &kind);
+        ui_draw_icon(S, x + (w - 18) / 2, y + (h - 18) / 2 - 1, 18, img, kind);
+        if (wins[i].minimized) gfx_fill_rect(S, x + 10, y + h - 3, w - 20, 2, T->text_dim);
+    }
+    draw_tray();
+}
+
+/* tooltip: taskbar-এর ঠিক ওপরে, মাউস যার ওপরে তার নাম */
+static void draw_tooltip(void)
+{
+    int y = H - TASK_H - 26;
+    if (!tip[0]) return;
+    ui_panel(S, tip_x, y, tip_w, 22, T->face, 1);
+    gfx_text(S, NULL, tip_x + 6, y + 3, tip, T->text);
+}
+
+static void set_tip(const char *t, int cx)
+{
+    int w = t[0] ? gfx_text_width(NULL, t) + 12 : 0, x = cx - w / 2;
+    if (x + w > W - 2) x = W - 2 - w;
+    if (x < 2) x = 2;
+    if (!strcmp(t, tip) && (!t[0] || x == tip_x)) return;
+    if (tip[0]) damage(tip_x, H - TASK_H - 26, tip_w, 22);
+    snprintf(tip, sizeof(tip), "%s", t);
+    tip_x = x;
+    tip_w = w;
+    if (tip[0]) damage(tip_x, H - TASK_H - 26, tip_w, 22);
+}
+
+/* মাউস taskbar-এ: কোন জিনিসের ওপরে — tooltip ঠিক করা */
+static void taskbar_hover(void)
+{
+    int i, k = 0, n = task_count(), p;
+    char t[96];
+    if (my < H - TASK_H || menu_open) { set_tip("", 0); return; }
+    for (p = 0; p < NPINS; p++) {
+        int x, y, w, h;
+        pin_rect(p, &x, &y, &w, &h);
+        if (mx >= x && mx < x + w) { set_tip(pins[p].label, x + w / 2); return; }
+    }
     for (i = 0; i < MAXWIN; i++) {
         int x, y, w, h;
-        char t[40];
-        if (!wins[i].used) continue;
-        taskbar_button_rect(k++, n, &x, &y, &w, &h);
-        ui_button(S, x, y, w, h, NULL, (i == focus && !wins[i].minimized) ? UI_DOWN : UI_NORMAL);
-        ui_icon(S, x + 4, y + 3, 'p', T->text);
-        snprintf(t, sizeof(t), "%.*s", w > 40 ? (w - 30) / 8 : 0, wins[i].title);
-        gfx_text(S, NULL, x + 24, y + 4, t, wins[i].minimized ? T->text_dim : T->text);
+        if (!wins[i].used || win_pin(i) >= 0) continue;
+        if (!taskbar_button_rect(k++, n, &x, &y, &w, &h)) break;
+        if (mx >= x && mx < x + w) { set_tip(wins[i].title, x + w / 2); return; }
     }
+    if (mx >= W - TRAY_W && mx < W - TRAY_W + 32) {
+        if (net_state == 2) snprintf(t, sizeof(t), "Network: connected, %s", net_ip);
+        else snprintf(t, sizeof(t), "%s", net_state == 1 ? "Network: no address yet" : "Network: no supported network card");
+        set_tip(t, mx);
+        return;
+    }
+    if (mx >= W - TRAY_W + 32) { set_tip("Sound: no sound driver yet", mx); return; }
+    set_tip("", 0);
 }
 
 /* মাউস-তীর (12x19) — সবশেষে আঁকা */
@@ -1109,6 +1274,7 @@ static void render_rect(int x, int y, int w, int h)
     if (y + h > H - TASK_H) draw_taskbar();
     draw_menu();
     draw_ctx();                                  /* ধাপ ১৯চ */
+    draw_tooltip();                              /* ধাপ ২১ */
     draw_cursor();
     gfx_reset_clip(S);
     gfx_present_rect(x, y, w, h);
@@ -1196,17 +1362,53 @@ static void minimize(int idx)
     damage(0, H - TASK_H, W, TASK_H);
 }
 
-static void taskbar_click(int x, int y)
+static void pin_launch(int p)
 {
-    int i, k = 0, n = task_count();
+    if (!pins[p].cmd) spawn_terminal(NULL, 0);
+    else spawn(pins[p].cmd);
+}
+
+/* ধাপ ২১: পিনে ক্লিক — না চললে চালু; একটাই সামনে থাকলে ছোট; নইলে পরেরটা সামনে */
+static void pin_click(int p, int right)
+{
+    int i, list[MAXWIN], n = 0, cur = -1;
+    if (right) { pin_launch(p); return; }
+    for (i = 0; i < MAXWIN; i++)
+        if (wins[i].used && win_pin(i) == p) {
+            if (i == focus && !wins[i].minimized) cur = n;
+            list[n++] = i;
+        }
+    if (!n) { pin_launch(p); return; }
+    if (cur >= 0 && n == 1) { minimize(list[0]); return; }
+    i = list[cur >= 0 ? (cur + 1) % n : 0];
+    wins[i].minimized = 0;
+    set_focus(i);
+}
+
+static void taskbar_click(int x, int y, int button)
+{
+    int i, k = 0, n = task_count(), p;
     if (x < 100) {
         open_menu(!menu_open);
         return;
     }
+    for (p = 0; p < NPINS; p++) {
+        int bx, by, bw, bh;
+        pin_rect(p, &bx, &by, &bw, &bh);
+        if (x >= bx && x < bx + bw && y >= by && y < by + bh) {
+            pin_click(p, button == GFX_BUTTON_RIGHT);
+            damage(0, H - TASK_H, W, TASK_H);
+            return;
+        }
+    }
+    if (x >= W - TRAY_W) {                       /* tray: নেটওয়ার্ক → Settings */
+        if (x < W - TRAY_W + 32) spawn("settings network");
+        return;
+    }
     for (i = 0; i < MAXWIN; i++) {
         int bx, by, bw, bh;
-        if (!wins[i].used) continue;
-        taskbar_button_rect(k++, n, &bx, &by, &bw, &bh);
+        if (!wins[i].used || win_pin(i) >= 0) continue;
+        if (!taskbar_button_rect(k++, n, &bx, &by, &bw, &bh)) break;
         if (x >= bx && x < bx + bw && y >= by && y < by + bh) {
             if (i == focus && !wins[i].minimized) minimize(i);
             else {
@@ -1229,7 +1431,8 @@ static void mouse_event(const gfx_event *ev)
         damage(oldx, oldy, 12, 19);
         damage(mx, my, 12, 19);
         /* শিরোনামের বোতাম আর taskbar-এ হোভার রং */
-        if (oldy >= H - TASK_H || my >= H - TASK_H) damage(0, H - TASK_H, 110, TASK_H);
+        if (oldy >= H - TASK_H || my >= H - TASK_H) damage(0, H - TASK_H, W, TASK_H);   /* ধাপ ২১: পিন/উইন্ডোর হোভার */
+        taskbar_hover();
         idx = window_at(mx, my);
         if (idx >= 0) damage(wins[idx].x + wins[idx].w - 80, wins[idx].y - TITLE_H, 80, TITLE_H);
         idx = window_at(oldx, oldy);
@@ -1286,7 +1489,7 @@ static void mouse_event(const gfx_event *ev)
         last_click_ms = now_ms();
         last_click_x = mx; last_click_y = my;
         if (my >= H - TASK_H) {
-            taskbar_click(mx, my);
+            taskbar_click(mx, my, ev->button);
             return;
         }
         if (my < PANEL_H) return;
@@ -1616,6 +1819,7 @@ int main(int argc, char **argv)
             /* ধাপ ১৯চ: Settings-এ বদল (ওয়ালপেপার) আর /home/Desktop-এ নতুন/মোছা আইকন */
             if (conf_changed()) { load_config(); damage(0, 0, W, H); }
             if (load_user_icons()) damage_icons();
+            update_net();                        /* ধাপ ২১: tray-এর নেটওয়ার্ক চিহ্ন */
         }
         render();
     }

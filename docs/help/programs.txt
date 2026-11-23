@@ -6,6 +6,7 @@
   [[rmdir]]    delete an empty directory [[touch]]   create an empty file
   [[wc]]       count lines, words, bytes  ([[redirect|ls | wc -l]])
   [[rozlock]]  lock/unlock, hide/unhide  chattr, lsattr  the undeletable flag
+  about        About rozOS: version, build number, CPU, memory ([[desktop]])
   [[sbase]]    grep sed sort head tail find xargs cut tr uniq ... (70 more)
 
 == Text and development ==

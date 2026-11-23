@@ -3,10 +3,18 @@ rozOS starts in the desktop (use `make run` to see the QEMU window):
   top panel     rozOS, the name of the front window, date and time
   icons         Terminal, Files, Code, Calculator, Paint, Images, Help -
                 double-click (pictures: [[icons]])
-  taskbar       Start, then one button per window (click = front,
-                click again = minimise)
+  taskbar       Start; three pinned icons - Terminal, Files, Code (click =
+                start it, or bring it to the front / minimise; a line under
+                it = running; right-click = one more window); then an icon
+                for every other window (click = front, again = minimise).
+                Rest the mouse on an icon to see its name. Right side:
+                network (bright = connected; click = Settings > Network)
+                and sound (no sound driver yet) - phase 21
   Start menu    the programs of /usr/share/apps by category, then
-                Terminal, Text mode, Restart, Shut down
+                Terminal, About rozOS, Text mode, Restart, Shut down
+  About rozOS   version, build number, CPU, memory, disk; Copy puts it all
+                on the clipboard (Start > About rozOS, or right-click the
+                desktop, or Settings > System)
 Text programs from the menu open in a [[rozterm|terminal window]],
 graphics programs in their own window ([[graphics]]).
 
