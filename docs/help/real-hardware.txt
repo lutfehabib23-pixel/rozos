@@ -33,9 +33,10 @@ SATA and NVMe disks (read-only), USB pen drives. Not yet: network (only
 Intel e1000 is supported), sound, Wi-Fi, more than one CPU core (all run
 on one). Everything runs from memory: changes are lost at power off -
 save to the pen drive (/mnt/usb).
-If "[kernel] iretq to user failed" appears (seen on an AMD Ryzen with
-the desktop, phase 19j), take a photo of all its lines (frame, GDTR, CR0..,
-CPU) - they show the cause.
+"[kernel] iretq to user failed ... SS=0018" on AMD Ryzen (desktop or a
+big build) was fixed in phase 19k: sysret on AMD does not set the RPL of
+SS, so the STAR MSR now holds it. If the message comes again, take a
+photo of all its lines (frame, GDTR, CR0.., CPU).
 Phase 19i fixed the first real-PC stop: big UEFI memory maps (over 256
 entries) lost the RAM above 4 GB and the framebuffer, so the screen froze
 right after "PMM". See [[boot]], [[boot-menu]], [[usb]].

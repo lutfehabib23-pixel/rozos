@@ -69,9 +69,12 @@ static void int80_handler(struct interrupt_frame *f)
 
 void syscall_init(void)
 {
-    /* sysret: CS = STAR[63:48] + 16, SS = STAR[63:48] + 8 → 0x10 থেকে user code 0x20, user data 0x18
-     * syscall: CS = STAR[47:32], SS = +8 → kernel code 0x08, kernel data 0x10 */
-    uint64_t star = ((uint64_t)(GDT_KERNEL_DATA) << 48) | ((uint64_t)GDT_KERNEL_CODE << 32);
+    /* sysret: CS = STAR[63:48] + 16, SS = STAR[63:48] + 8 → 0x13 থেকে user code 0x23, user data 0x1B
+     * syscall: CS = STAR[47:32], SS = +8 → kernel code 0x08, kernel data 0x10
+     * ধাপ ১৯ট: ওপরের অংশে RPL 3 আগেই বসানো (0x10 | 3)। Intel/QEMU sysret-এ SS-এর RPL নিজে
+     * 3 করে, AMD করে না → প্রোগ্রাম SS=0x18 নিয়ে চলত, তার মাঝে ইন্টারাপ্ট এলে ফেরার iretq
+     * #GP(0x18) দিত (আসল Ryzen-এ ডেস্কটপ, KVM-এ কার্নেল বিল্ড)। Linux-ও STAR-এ RPL 3 রাখে। */
+    uint64_t star = ((uint64_t)(GDT_KERNEL_DATA | 3) << 48) | ((uint64_t)GDT_KERNEL_CODE << 32);
 
     cpu_wrmsr(MSR_EFER, cpu_rdmsr(MSR_EFER) | EFER_SCE);
     cpu_wrmsr(MSR_STAR, star);

@@ -212,6 +212,14 @@ static int bad_iret(struct interrupt_frame *f)
         __asm__ __volatile__(".byte 0x0f, 0x01, 0xf8");   /* swapgs (TCC-র assembler-এর জন্য বাইটে) */          /* আবার ইউজারের GS — iretq-তে ফেরা */
         return 1;
     }
+    /* ধাপ ১৯ট: SS-এ শুধু RPL বাদ (0x18) — AMD-র sysret-এর পুরোনো ধরন; ঠিক করে আবার চেষ্টা
+     * (STAR ঠিক হওয়ার পরে আর আসার কথা নয়, তবু প্রোগ্রাম না মেরে বাঁচানো) */
+    if (b[1] == GDT_USER_CODE_SEL && b[4] == GDT_USER_DATA) {
+        ((uint64_t *)(uintptr_t)f->rsp)[4] = GDT_USER_DATA_SEL;
+        kprintf("[kernel] SS had no RPL (0x18) - fixed to 0x1b, retrying\n");
+        __asm__ __volatile__(".byte 0x0f, 0x01, 0xf8");   /* swapgs — আবার ইউজারের GS */
+        return 1;
+    }
     /* ধাপ ১৯ঞ: ফ্রেম ঠিক দেখালে একবার আবার চেষ্টা (সেকেন্ডে একবারের বেশি নয়) — সফল হলে সমস্যা
      * ক্ষণস্থায়ী, পরের ছবিতে "#2" না এলে সেটাই বোঝা যাবে */
     if (b[1] == GDT_USER_CODE_SEL && b[4] == GDT_USER_DATA_SEL && timer_ticks() - last_retry_tick > 1000) {
