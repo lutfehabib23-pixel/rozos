@@ -1,6 +1,6 @@
 /* rozOS — নেটওয়ার্ক (ধাপ ৯)
  *
- * স্তর:  NIC ড্রাইভার (e1000) → struct net_device → lwIP (kernel/net/lwip, IPv4)
+ * স্তর:  NIC ড্রাইভার (e1000, ধাপ ২২ থেকে rtl8168) → struct net_device → lwIP (kernel/net/lwip, IPv4)
  *        → socket স্তর (kernel/net/socket.c) → BSD socket syscall (Linux নম্বর)
  *
  * "netd" কার্নেল-থ্রেড প্রতি মিলিসেকেন্ডে ড্রাইভার poll করে প্যাকেট lwIP-তে দেয় আর
@@ -27,10 +27,15 @@ struct net_device {
     int (*link_status)(struct net_device *dev);
     void *priv;
     uint64_t rx_packets, tx_packets, rx_bytes, tx_bytes, rx_dropped, tx_errors;
+    /* ধাপ ২২: kmon `nic`-এর জন্য ড্রাইভারের নিজস্ব বিবরণ (না থাকলে NULL) */
+    void (*diag)(struct net_device *dev);
 };
 
 int  net_register_device(struct net_device *dev);
 int  e1000_init(void);                    /* পাওয়া কার্ডের সংখ্যা */
+int  rtl8168_init(void);                  /* ধাপ ২২: Realtek RTL8111/8168 */
+/* index-তম কার্ড (kmon `nic`); না থাকলে NULL */
+struct net_device *net_get_device(int index);
 
 /* বুটে: ড্রাইভার, lwIP, DHCP, netd থ্রেড। ফেরত NIC-এর সংখ্যা */
 int  net_init(void);

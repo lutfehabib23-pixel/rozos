@@ -7,7 +7,8 @@
  * ধাপ ৫: lspci, disks, df, sync, date, cp, fill
  * ধাপ ৬: ps, run, spawn, kill
  * ধাপ ৭: shell থেকে /bin/kmon দিয়ে ডাকা যায় (kmon_session) — "exit" দিলে shell-এ ফেরে
- * ধাপ ৯: net */
+ * ধাপ ৯: net
+ * ধাপ ২২: nic */
 
 #include <stdint.h>
 #include <stddef.h>
@@ -699,6 +700,35 @@ static void cmd_net(void)
     }
 }
 
+/* ধাপ ২২: কার্ডের ড্রাইভার-বিবরণ (আসল PC-তে নেটওয়ার্ক সমস্যা খোঁজার জন্য) */
+static void cmd_nic(void)
+{
+    int i;
+    struct net_device *d;
+    for (i = 0; (d = net_get_device(i)) != NULL; i++) {
+        kprintf("  %s  %s  link %s  rx %llu tx %llu dropped %llu tx-errors %llu\n", d->name,
+                d->driver ? d->driver : "?", d->link_up ? "up" : "down",
+                (unsigned long long)d->rx_packets, (unsigned long long)d->tx_packets,
+                (unsigned long long)d->rx_dropped, (unsigned long long)d->tx_errors);
+        if (d->diag) {
+            d->diag(d);
+        }
+    }
+    if (i == 0) {
+        kprintf("no network card driver is active; PCI network devices:\n");
+        {
+            size_t k;
+            for (k = 0; k < pci_device_count(); k++) {
+                struct pci_device *p = pci_device_at(k);
+                if (p->class_code == 0x02) {
+                    kprintf("  %02x:%02x.%u  %04x:%04x rev %02x\n", p->bus, p->slot, p->func,
+                            p->vendor_id, p->device_id, p->revision);
+                }
+            }
+        }
+    }
+}
+
 static void cmd_date(void)
 {
     char buf[40];
@@ -853,6 +883,7 @@ static void cmd_help(void)
             "  kill <pid> [s] end a process (default signal 9)\n"
             "  exit           back to the shell (when started as /bin/kmon)\n"
             "  net            network cards, addresses and counters\n"
+            "  nic            network driver details: chip, registers, link, init log\n"
             "  echo <text>    print text\n"
             "  int3           breakpoint exception test (returns)\n"
             "  fault          invalid opcode test (panics)\n"
@@ -1008,6 +1039,8 @@ static void run_command(int argc, char **argv)
         cmd_fill(argc, argv);
     } else if (!strcmp(cmd, "net")) {
         cmd_net();
+    } else if (!strcmp(cmd, "nic")) {
+        cmd_nic();                               /* ধাপ ২২ */
     } else if (!strcmp(cmd, "ps")) {
         cmd_ps();
     } else if (!strcmp(cmd, "run")) {

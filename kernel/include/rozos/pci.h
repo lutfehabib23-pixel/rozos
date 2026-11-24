@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define PCI_MAX_DEVICES 64
+#define PCI_MAX_DEVICES 128   /* ধাপ ২২: আসল PC-তে ৬৪-র বেশি function থাকতে পারে */
 
 /* configuration space-এর কিছু রেজিস্টার */
 #define PCI_VENDOR_ID     0x00
@@ -52,6 +52,11 @@ void     pci_write16(const struct pci_device *d, uint8_t offset, uint16_t value)
 
 /* memory decoding + bus mastering (DMA) চালু */
 void pci_enable_device(const struct pci_device *d);
+
+/* ধাপ ২২: capability তালিকায় id খোঁজা (0 = নেই); PM দিয়ে D0-তে আনা; PCIe ASPM বন্ধ */
+uint8_t pci_find_cap(const struct pci_device *d, uint8_t id);
+void    pci_set_power_d0(const struct pci_device *d);
+void    pci_disable_aspm(const struct pci_device *d);
 
 const char *pci_class_name(uint8_t class_code, uint8_t subclass);
 

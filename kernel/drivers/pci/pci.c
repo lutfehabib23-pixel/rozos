@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <rozos/pci.h>
 #include <rozos/string.h>
+#include <rozos/printf.h>
+#include <rozos/timer.h>
 #include <arch/x86_64/io.h>
 
 #define PCI_CONFIG_ADDRESS 0xCF8
@@ -63,6 +65,55 @@ void pci_enable_device(const struct pci_device *d)
     uint16_t cmd = pci_read16(d, PCI_COMMAND);
     cmd |= PCI_CMD_MEMORY | PCI_CMD_BUS_MASTER;
     pci_write16(d, PCI_COMMAND, cmd);
+}
+
+/* ধাপ ২২ */
+uint8_t pci_find_cap(const struct pci_device *d, uint8_t id)
+{
+    uint8_t p;
+    int guard = 48;
+    if (!(pci_read16(d, PCI_STATUS) & 0x0010)) {          /* capability তালিকা নেই */
+        return 0;
+    }
+    p = (uint8_t)(pci_read8(d, 0x34) & 0xFC);
+    while (p >= 0x40 && guard-- > 0) {
+        if (pci_read8(d, p) == id) {
+            return p;
+        }
+        p = (uint8_t)(pci_read8(d, (uint8_t)(p + 1)) & 0xFC);
+    }
+    return 0;
+}
+
+void pci_set_power_d0(const struct pci_device *d)
+{
+    uint8_t pm = pci_find_cap(d, 0x01);
+    uint16_t csr;
+    if (!pm) {
+        return;
+    }
+    csr = pci_read16(d, (uint8_t)(pm + 4));
+    if (csr & 3) {
+        uint64_t t0;
+        kprintf("[pci] %02x:%02x.%u: power state D%u -> D0\n", d->bus, d->slot, d->func, csr & 3);
+        pci_write16(d, (uint8_t)(pm + 4), (uint16_t)(csr & ~3u));
+        t0 = timer_uptime_ms();
+        while (timer_uptime_ms() - t0 < 20) {               /* D3hot → D0: ১০ ms লাগে */
+        }
+    }
+}
+
+void pci_disable_aspm(const struct pci_device *d)
+{
+    uint8_t pe = pci_find_cap(d, 0x10);
+    uint16_t lc;
+    if (!pe) {
+        return;
+    }
+    lc = pci_read16(d, (uint8_t)(pe + 0x10));               /* Link Control */
+    if (lc & 3) {
+        pci_write16(d, (uint8_t)(pe + 0x10), (uint16_t)(lc & ~3u));
+    }
 }
 
 static void read_bars(struct pci_device *d)

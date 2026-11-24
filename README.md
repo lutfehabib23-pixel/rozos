@@ -6,7 +6,7 @@
 
 rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphical desktop. It includes a C compiler, a text editor, `make`, a TCP/IP stack with HTTPS, and a package manager, so you can write, compile and even rebuild the rozOS kernel **from inside rozOS itself**.
 
-> Status: hobby / educational OS, under active development (current: **0.21.0-phase21**).
+> Status: hobby / educational OS, under active development (current: **0.22.0-phase22**).
 > It runs in QEMU. Real hardware has not been tested yet.
 
 ---
@@ -20,7 +20,7 @@ rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphica
 | **Processes** | process groups and sessions, Ctrl+C to the foreground job, real signal handlers (`sigaction`, SA_SIGINFO, SA_RESTART, masks, `sigsuspend`, `sigaltstack`, `alarm`/`setitimer`, SIGCHLD, SIGWINCH, catching SIGSEGV/SIGFPE) |
 | **Filesystems** | VFS, ext2 (read/write root), FAT32 (boot partition), devfs, tmpfs, initrd (the whole system on the ISO, a 5 MB rescue system on the disk); `rename()`, `mount`/`umount`; immutable files |
 | **IPC** | pipes, `poll`, shared memory (`shm_open` + `mmap MAP_SHARED`), PTYs, Unix domain sockets |
-| **Drivers** | PCI, ACPI, PS/2 keyboard and mouse, serial, VGA/framebuffer console with PSF2 fonts, AHCI (SATA) and NVMe disks, USB (xHCI: pen drives, keyboards, mice, hot-plug), e1000/e1000e network |
+| **Drivers** | PCI, ACPI, PS/2 keyboard and mouse, serial, VGA/framebuffer console with PSF2 fonts, AHCI (SATA) and NVMe disks, USB (xHCI: pen drives, keyboards, mice, hot-plug), e1000/e1000e and Realtek RTL8111/8168 network |
 | **Network** | lwIP TCP/IP, DHCP, DNS, BSD sockets, BearSSL TLS (HTTPS) |
 | **libc** | own C library, *rozlibc*: most of POSIX 2008 + C99, pthread — exact printf, wchar/UTF-8, locale, iconv, regex, getopt_long, time zones, full libm, select/readv; Lua and zlib build unchanged with the in-OS tcc |
 | **Kernel modules** | `insmod`/`lsmod`/`rmmod`: ELF relocatable `.ko` files (gcc or the in-OS tcc), exported-symbol table, example `/lib/modules/hello.ko` |
@@ -107,7 +107,7 @@ kernel/        the kernel
   mm/            physical/virtual memory, heap, shared memory
   proc/          processes, scheduler, ELF loader
   fs/            VFS, ext2, FAT, devfs, pipes
-  drivers/       PS/2, serial, framebuffer/console, PTY, AHCI, e1000
+  drivers/       PS/2, serial, framebuffer/console, PTY, AHCI, e1000, rtl8168
   net/           lwIP port, BSD sockets, Unix sockets
   syscall/       system calls (Linux x86_64 numbers where possible)
 libc/          rozlibc: headers + sources + crt0
@@ -129,7 +129,7 @@ Contributions of all sizes are welcome: bug reports, help pages, drivers, ported
 
 **Good places to start**
 - **Desktop:** more apps (settings, text viewer, games), drag and drop in Files, Bengali text shaping, icon pictures (`/usr/share/icons`).
-- **Drivers:** USB hubs, more network cards, interrupt-driven xHCI/NVMe/AHCI, NTFS/exFAT reading.
+- **Drivers:** USB hubs, Wi-Fi and 2.5G network cards, interrupt-driven xHCI/NVMe/AHCI, NTFS/exFAT reading.
 - **Kernel:** SMP (use all CPU cores), job control (Ctrl+Z, `fg`/`bg`), more exported symbols for modules.
 - **libc:** shared libraries, per-thread signal masks, eventually musl compatibility.
 - **Toolchain:** binutils + GCC (C++) running inside rozOS.

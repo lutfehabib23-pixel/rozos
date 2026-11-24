@@ -29,10 +29,11 @@ lines show where.
 
 == What to expect ==
 Works: the screen (UEFI framebuffer), keyboard and mouse (USB or PS/2),
-SATA and NVMe disks (read-only), USB pen drives. Not yet: network (only
-Intel e1000 is supported), sound, Wi-Fi, more than one CPU core (all run
-on one). Everything runs from memory: changes are lost at power off -
-save to the pen drive (/mnt/usb).
+SATA and NVMe disks (read-only), USB pen drives, wired network on
+Realtek RTL8111/8168 or Intel e1000 cards (phase 22; `kmon` then `nic`
+if it does not work - see [[network]]). Not yet: sound, Wi-Fi, more
+than one CPU core (all run on one). Everything runs from memory:
+changes are lost at power off - save to the pen drive (/mnt/usb).
 "[kernel] iretq to user failed ... SS=0018" on AMD Ryzen (desktop or a
 big build) was fixed in phase 19k: sysret on AMD does not set the RPL of
 SS, so the STAR MSR now holds it. If the message comes again, take a

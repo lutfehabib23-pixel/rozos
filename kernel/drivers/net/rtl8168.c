@@ -1,0 +1,639 @@
+/* rozOS — Realtek RTL8111/8168 গিগাবিট নেটওয়ার্ক কার্ড (ধাপ ২২)
+ *
+ * লক্ষ্য: আসল PC-র বোর্ডের চিপ (Gigabyte B550M DS3H R2: PCI 10ec:8168 rev 0x15 =
+ * RTL8111H/8168H)। QEMU এই চিপ চালাতে পারে না, তাই প্রতিটা ধাপের ফল `log`-এ রাখা হয়
+ * আর kmon-এর `nic` কমান্ড তা দেখায় (বুটের বার্তা ডেস্কটপের নিচে চাপা পড়ে)।
+ *
+ * পদ্ধতি Linux-এর r8169 ড্রাইভারের মূল পথ অনুসরণ করে (rtl_hw_start → 8168H):
+ *   PCI D0 + ASPM বন্ধ → TxConfig থেকে XID → ChipCmd রিসেট → Cfg9346 খোলা →
+ *   ASPM/CLKREQ বন্ধ (Config2/5) → CPlusCmd → (8168G+) FIFO মাপ, packet filter রিসেট,
+ *   RXDV gate বন্ধ → RxMaxSize, descriptor ঠিকানা → Cfg9346 বন্ধ → TE/RE চালু →
+ *   RxConfig, TxConfig, rx mode → ইন্টারাপ্ট mask (netd poll করে, e1000-এর মতো)।
+ *
+ * Descriptor (১৬ বাইট): opts1 (OWN 31, EOR 30, FS 29, LS 28, দৈর্ঘ্য 0-13), opts2,
+ * ৬৪-বিট বাফার ঠিকানা। চিপ ফ্রেম লিখে OWN মুছে দেয়; আমরা কপি করে OWN আবার বসাই।
+ * সব DMA মেমোরি 4 GiB-এর নিচে (pmm_alloc_contiguous), যাতে পুরোনো চিপেও চলে। */
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdarg.h>
+#include <rozos/net.h>
+#include <rozos/pci.h>
+#include <rozos/pmm.h>
+#include <rozos/vmm.h>
+#include <rozos/heap.h>
+#include <rozos/string.h>
+#include <rozos/printf.h>
+#include <rozos/timer.h>
+#include <arch/x86_64/cpu.h>
+
+/* ---------- রেজিস্টার ---------- */
+#define R_MAC0          0x00
+#define R_MAR0          0x08
+#define R_TXDESC_LO     0x20
+#define R_TXDESC_HI     0x24
+#define R_CHIPCMD       0x37
+#define R_TXPOLL        0x38
+#define R_INTRMASK      0x3C
+#define R_INTRSTATUS    0x3E
+#define R_TXCONFIG      0x40
+#define R_RXCONFIG      0x44
+#define R_CFG9346       0x50
+#define R_CONFIG2       0x53
+#define R_CONFIG5       0x56
+#define R_PHYAR         0x60
+#define R_PHYSTATUS     0x6C
+#define R_PMCH          0x6F
+#define R_ERIDR         0x70
+#define R_ERIAR         0x74
+#define R_GPHY_OCP      0xB8
+#define R_RXMAXSIZE     0xDA
+#define R_CPLUSCMD      0xE0
+#define R_INTRMITIGATE  0xE2
+#define R_RXDESC_LO     0xE4
+#define R_RXDESC_HI     0xE8
+#define R_MAXTXPKT      0xEC
+#define R_MISC          0xF0
+
+#define CMD_RESET       0x10
+#define CMD_RX_EN       0x08
+#define CMD_TX_EN       0x04
+#define TXPOLL_NPQ      0x40
+#define CFG9346_UNLOCK  0xC0
+#define CFG9346_LOCK    0x00
+#define CONFIG2_CLKREQ  0x80
+#define CONFIG5_ASPM    0x01
+#define MISC_RXDV_GATE  (1u << 19)
+
+#define PHY_TBI         0x80
+#define PHY_1000F       0x10
+#define PHY_100         0x08
+#define PHY_10          0x04
+#define PHY_LINK        0x02
+#define PHY_FULL        0x01
+
+/* RxConfig */
+#define RX_ACCEPT_PHYS  0x02
+#define RX_ACCEPT_MULTI 0x04
+#define RX_ACCEPT_BCAST 0x08
+#define RX_ACCEPT_MASK  0x3F
+#define RX_DMA_BURST    (7u << 8)         /* সীমাহীন */
+#define RX_EARLY_OFF    (1u << 11)
+#define RX_MULTI_EN     (1u << 14)
+#define RX_128_INT_EN   (1u << 15)
+#define RX_FIFO_THRESH  (7u << 13)        /* পুরোনো চিপ: পুরো ফ্রেম এলে DMA */
+
+/* TxConfig */
+#define TX_DMA_BURST    (7u << 8)
+#define TX_IFG          (3u << 24)
+#define TX_AUTO_FIFO    (1u << 7)
+
+/* CPlusCmd */
+#define CP_RXCHKSUM     0x0020
+#define CP_RXVLAN       0x0040
+
+/* ERI (চিপের ভেতরের রেজিস্টার) */
+#define ERIAR_FLAG      0x80000000u
+#define ERIAR_WRITE     0x80000000u
+#define ERIAR_MASK_0011 (0x3u << 12)
+#define ERIAR_MASK_1111 (0xFu << 12)
+
+/* descriptor বিট */
+#define D_OWN           (1u << 31)
+#define D_EOR           (1u << 30)
+#define D_FS            (1u << 29)
+#define D_LS            (1u << 28)
+#define D_RX_RES        (1u << 21)        /* ফ্রেমে ভুল */
+#define D_LEN_MASK      0x3FFFu
+
+/* MII */
+#define MII_BMCR        0
+#define MII_BMSR        1
+#define BMCR_ANENABLE   0x1000
+#define BMCR_ANRESTART  0x0200
+#define BMCR_PDOWN      0x0800
+#define BMSR_LINK       0x0004
+#define BMSR_ANDONE     0x0020
+
+#define NUM_RX          256
+#define NUM_TX          64
+#define BUF_SIZE        2048
+#define LOG_SIZE        1024
+
+struct rtl_desc {
+    uint32_t opts1;
+    uint32_t opts2;
+    uint64_t addr;
+};
+typedef char rtl_desc_size_check[(sizeof(struct rtl_desc) == 16) ? 1 : -1];
+
+struct rtl {
+    struct net_device dev;
+    struct pci_device *pci;
+    volatile uint8_t *regs;
+    uint32_t xid;                         /* TxConfig[31:20] থেকে চিপের সংস্করণ */
+    int modern;                           /* 8168G বা নতুন (RXDV gate, OCP PHY) */
+    const char *chip;
+    struct rtl_desc *rx, *tx;             /* HHDM ঠিকানা */
+    uint64_t rx_phys, tx_phys;
+    uint8_t *rx_buf, *tx_buf;             /* পাশাপাশি বাফার */
+    uint64_t rx_buf_phys, tx_buf_phys;
+    unsigned rx_next, tx_next;
+    uint64_t link_check_ms;               /* শেষ autoneg চেষ্টার সময় */
+    int an_restarts;
+    uint64_t rx_errors;
+    uint16_t last_istatus;
+    char log[LOG_SIZE];
+    size_t log_len;
+};
+
+/* ---------- MMIO ---------- */
+static inline uint8_t  r8(struct rtl *t, uint32_t r)  { return *(volatile uint8_t  *)(t->regs + r); }
+static inline uint16_t r16(struct rtl *t, uint32_t r) { return *(volatile uint16_t *)(t->regs + r); }
+static inline uint32_t r32(struct rtl *t, uint32_t r) { return *(volatile uint32_t *)(t->regs + r); }
+static inline void w8(struct rtl *t, uint32_t r, uint8_t v)   { *(volatile uint8_t  *)(t->regs + r) = v; }
+static inline void w16(struct rtl *t, uint32_t r, uint16_t v) { *(volatile uint16_t *)(t->regs + r) = v; }
+static inline void w32(struct rtl *t, uint32_t r, uint32_t v) { *(volatile uint32_t *)(t->regs + r) = v; }
+
+static inline void barrier(void) { __asm__ __volatile__("" : : : "memory"); }
+
+/* লগ: বুটে kprintf-ও হয়, আর `nic` পরে পুরোটা দেখায় */
+static void tlog(struct rtl *t, const char *fmt, ...)
+{
+    char line[160];
+    va_list ap;
+    int n;
+    va_start(ap, fmt);
+    n = kvsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    if (n < 0) {
+        return;
+    }
+    if ((size_t)n >= sizeof(line)) {
+        n = (int)sizeof(line) - 1;
+    }
+    kprintf("[rtl8168] %s\n", line);
+    if (t->log_len + (size_t)n + 2 < LOG_SIZE) {
+        memcpy(t->log + t->log_len, line, (size_t)n);
+        t->log_len += (size_t)n;
+        t->log[t->log_len++] = '\n';
+        t->log[t->log_len] = '\0';
+    }
+}
+
+/* রেজিস্টারের বিট বসা (set=1) বা মোছা (set=0) পর্যন্ত অপেক্ষা, সর্বোচ্চ ms; 1 = হয়েছে */
+static int wait32(struct rtl *t, uint32_t reg, uint32_t mask, int set, unsigned ms)
+{
+    uint64_t t0 = timer_uptime_ms();
+    for (;;) {
+        if (((r32(t, reg) & mask) != 0) == (set != 0)) return 1;
+        if (timer_uptime_ms() - t0 > ms) return 0;
+        cpu_pause();
+    }
+}
+
+static int wait8(struct rtl *t, uint32_t reg, uint8_t mask, int set, unsigned ms)
+{
+    uint64_t t0 = timer_uptime_ms();
+    for (;;) {
+        if (((r8(t, reg) & mask) != 0) == (set != 0)) return 1;
+        if (timer_uptime_ms() - t0 > ms) return 0;
+        cpu_pause();
+    }
+}
+
+/* ---------- ERI ---------- */
+static void eri_write(struct rtl *t, uint32_t addr, uint32_t mask, uint32_t val)
+{
+    w32(t, R_ERIDR, val);
+    w32(t, R_ERIAR, ERIAR_WRITE | mask | addr);
+    if (!wait32(t, R_ERIAR, ERIAR_FLAG, 0, 10)) {
+        tlog(t, "ERI write 0x%03x timed out", addr);
+    }
+}
+
+static uint32_t eri_read(struct rtl *t, uint32_t addr)
+{
+    w32(t, R_ERIAR, ERIAR_MASK_1111 | addr);
+    if (!wait32(t, R_ERIAR, ERIAR_FLAG, 1, 10)) {
+        tlog(t, "ERI read 0x%03x timed out", addr);
+        return 0;
+    }
+    return r32(t, R_ERIDR);
+}
+
+/* ---------- PHY (MII) ---------- */
+/* 8168G থেকে PHY OCP দিয়ে (GPHY_OCP, ঠিকানা 0xa400 + reg*2); পুরোনোয় PHYAR */
+static int phy_read(struct rtl *t, unsigned reg)
+{
+    if (t->modern) {
+        uint32_t a = 0xA400u + reg * 2;
+        w32(t, R_GPHY_OCP, a << 15);
+        if (!wait32(t, R_GPHY_OCP, 0x80000000u, 1, 10)) return -1;
+        return (int)(r32(t, R_GPHY_OCP) & 0xFFFF);
+    }
+    w32(t, R_PHYAR, (reg & 0x1F) << 16);
+    if (!wait32(t, R_PHYAR, 0x80000000u, 1, 10)) return -1;
+    return (int)(r32(t, R_PHYAR) & 0xFFFF);
+}
+
+static void phy_write(struct rtl *t, unsigned reg, uint16_t val)
+{
+    if (t->modern) {
+        uint32_t a = 0xA400u + reg * 2;
+        w32(t, R_GPHY_OCP, 0x80000000u | (a << 15) | val);
+        wait32(t, R_GPHY_OCP, 0x80000000u, 0, 10);
+        return;
+    }
+    w32(t, R_PHYAR, 0x80000000u | ((reg & 0x1F) << 16) | val);
+    wait32(t, R_PHYAR, 0x80000000u, 0, 10);
+}
+
+/* PHY চালু রাখা আর autoneg আবার শুরু */
+static void phy_restart_an(struct rtl *t)
+{
+    int bmcr = phy_read(t, MII_BMCR);
+    if (bmcr < 0) {
+        tlog(t, "PHY: BMCR read failed");
+        return;
+    }
+    phy_write(t, MII_BMCR, (uint16_t)((bmcr & ~BMCR_PDOWN) | BMCR_ANENABLE | BMCR_ANRESTART));
+    t->an_restarts++;
+}
+
+/* ---------- চিপ চেনা ---------- */
+static const char *chip_name(uint32_t xid)
+{
+    /* Linux r8169-এর টেবিলের কয়েকটা (mask, মান) */
+    if ((xid & 0x7C8) == 0x540 || (xid & 0x7CF) == 0x541) return "RTL8168H/8111H";
+    if ((xid & 0x7CF) == 0x4C0 || (xid & 0x7CF) == 0x509) return "RTL8168G/8111G";
+    if ((xid & 0x7CF) == 0x5C8) return "RTL8411B";
+    if ((xid & 0x7CF) == 0x502 || (xid & 0x7CF) == 0x501) return "RTL8168EP";
+    if ((xid & 0x7CF) == 0x54A || (xid & 0x7CF) == 0x54B) return "RTL8168FP";
+    if ((xid & 0x7C8) == 0x480) return "RTL8168F/8111F";
+    if ((xid & 0x7C8) == 0x2C0 || (xid & 0x7C8) == 0x2C8) return "RTL8168E/8111E";
+    if ((xid & 0x7C8) == 0x280 || (xid & 0x7C8) == 0x288) return "RTL8168D/8111D";
+    if ((xid & 0x7C8) == 0x3C0 || (xid & 0x7C8) == 0x3C8) return "RTL8168C/8111C";
+    return "RTL8168 family";
+}
+
+/* ---------- পাঠানো ---------- */
+static int rtl_transmit(struct net_device *dev, const void *frame, size_t len)
+{
+    struct rtl *t = (struct rtl *)dev->priv;
+    unsigned i = t->tx_next;
+    struct rtl_desc *d = &t->tx[i];
+    uint8_t *buf = t->tx_buf + (size_t)i * BUF_SIZE;
+    uint32_t opts;
+
+    if (len > NET_FRAME_MAX) {
+        dev->tx_errors++;
+        return -1;
+    }
+    /* চিপ আগের ফ্রেম শেষ না করলে একটু অপেক্ষা */
+    {
+        uint64_t t0 = timer_uptime_ms();
+        while (d->opts1 & D_OWN) {
+            if (timer_uptime_ms() - t0 > 50) {
+                dev->tx_errors++;
+                return -1;
+            }
+            cpu_pause();
+        }
+    }
+    memcpy(buf, frame, len);
+    if (len < 60) {                       /* ছোট ফ্রেম শূন্য দিয়ে ভরা (কিছু চিপ নিজে করে না) */
+        memset(buf + len, 0, 60 - len);
+        len = 60;
+    }
+    d->opts2 = 0;
+    d->addr = t->tx_buf_phys + (uint64_t)i * BUF_SIZE;
+    opts = D_OWN | D_FS | D_LS | (uint32_t)len;
+    if (i == NUM_TX - 1) {
+        opts |= D_EOR;
+    }
+    barrier();
+    d->opts1 = opts;
+    barrier();
+    t->tx_next = (i + 1) % NUM_TX;
+    w8(t, R_TXPOLL, TXPOLL_NPQ);
+    dev->tx_packets++;
+    dev->tx_bytes += len;
+    return 0;
+}
+
+/* ---------- পাওয়া ---------- */
+static void rx_give_back(struct rtl *t, unsigned i)
+{
+    struct rtl_desc *d = &t->rx[i];
+    uint32_t opts = D_OWN | BUF_SIZE;
+    if (i == NUM_RX - 1) {
+        opts |= D_EOR;
+    }
+    d->opts2 = 0;
+    d->addr = t->rx_buf_phys + (uint64_t)i * BUF_SIZE;
+    barrier();
+    d->opts1 = opts;
+}
+
+static size_t rtl_poll(struct net_device *dev, void *buf, size_t max)
+{
+    struct rtl *t = (struct rtl *)dev->priv;
+    uint16_t is = r16(t, R_INTRSTATUS);
+
+    /* poll-মোডে স্ট্যাটাস বিট জমতে না দেওয়া (RxOverflow ইত্যাদি) */
+    if (is) {
+        t->last_istatus = is;
+        w16(t, R_INTRSTATUS, is);
+    }
+    for (;;) {
+        unsigned i = t->rx_next;
+        struct rtl_desc *d = &t->rx[i];
+        uint32_t st = d->opts1;
+        size_t len;
+
+        if (st & D_OWN) {
+            return 0;
+        }
+        barrier();
+        len = st & D_LEN_MASK;
+        if ((st & D_RX_RES) || (st & (D_FS | D_LS)) != (D_FS | D_LS) || len < 4 ||
+            len - 4 > max) {
+            t->rx_errors++;
+            dev->rx_dropped++;
+            len = 0;
+        } else {
+            len -= 4;                     /* শেষের CRC বাদ */
+            memcpy(buf, t->rx_buf + (size_t)i * BUF_SIZE, len);
+            dev->rx_packets++;
+            dev->rx_bytes += len;
+        }
+        rx_give_back(t, i);
+        t->rx_next = (i + 1) % NUM_RX;
+        if (len) {
+            return len;
+        }
+    }
+}
+
+/* ---------- লিংক ---------- */
+static int rtl_link(struct net_device *dev)
+{
+    struct rtl *t = (struct rtl *)dev->priv;
+    uint8_t ps = r8(t, R_PHYSTATUS);
+    int up = (ps & PHY_LINK) != 0;
+
+    /* লিংক না থাকলে প্রতি ৮ সেকেন্ডে একবার autoneg আবার (সর্বোচ্চ ৪ বার) */
+    if (!up && t->an_restarts < 4 && timer_uptime_ms() - t->link_check_ms > 8000) {
+        t->link_check_ms = timer_uptime_ms();
+        phy_restart_an(t);
+        tlog(t, "link down: autoneg restart #%d", t->an_restarts);
+    }
+    if (up && !dev->link_up) {
+        tlog(t, "link up: %s %s-duplex", (ps & PHY_1000F) ? "1000" : (ps & PHY_100) ? "100" :
+             (ps & PHY_10) ? "10" : "?", (ps & PHY_FULL) ? "full" : "half");
+    }
+    return up;
+}
+
+/* ---------- kmon `nic` ---------- */
+static void rtl_diag(struct net_device *dev)
+{
+    struct rtl *t = (struct rtl *)dev->priv;
+    uint8_t ps = r8(t, R_PHYSTATUS);
+    int bmcr = phy_read(t, MII_BMCR), bmsr = phy_read(t, MII_BMSR);
+    unsigned own = 0, i;
+
+    for (i = 0; i < NUM_RX; i++) {
+        if (t->rx[i].opts1 & D_OWN) own++;
+    }
+    kprintf("     chip %s  PCI %02x:%02x.%u rev %02x  XID %03x  %s\n", t->chip, t->pci->bus,
+            t->pci->slot, t->pci->func, t->pci->revision, t->xid,
+            t->modern ? "(8168G+ path)" : "(classic path)");
+    kprintf("     ChipCmd %02x  TxConfig %08x  RxConfig %08x  CPlusCmd %04x  MISC %08x\n",
+            r8(t, R_CHIPCMD), r32(t, R_TXCONFIG), r32(t, R_RXCONFIG), r16(t, R_CPLUSCMD),
+            r32(t, R_MISC));
+    kprintf("     PHYstatus %02x (link %s, %s)  BMCR %04x  BMSR %04x  autoneg restarts %d\n", ps,
+            (ps & PHY_LINK) ? "up" : "down",
+            (ps & PHY_1000F) ? "1000" : (ps & PHY_100) ? "100" : (ps & PHY_10) ? "10" : "-",
+            bmcr & 0xFFFF, bmsr & 0xFFFF, t->an_restarts);
+    kprintf("     rx next %u (chip owns %u/%u)  tx next %u  rx errors %llu  last IntrStatus %04x\n",
+            t->rx_next, own, NUM_RX, t->tx_next, (unsigned long long)t->rx_errors,
+            t->last_istatus);
+    if (t->log_len) {
+        kprintf("     init log:\n%s", t->log);
+    }
+}
+
+/* ---------- চালু করা ---------- */
+static int setup_rings(struct rtl *t)
+{
+    /* ring: এক পেজ করে; বাফার: পাশাপাশি পেজ (256×2 KiB = 128 পেজ, 64×2 KiB = 32 পেজ) */
+    uint64_t lim = 0x100000000ull;
+    unsigned i;
+
+    t->rx_phys = pmm_alloc_contiguous(1, lim);
+    t->tx_phys = pmm_alloc_contiguous(1, lim);
+    t->rx_buf_phys = pmm_alloc_contiguous(NUM_RX * BUF_SIZE / 4096, lim);
+    t->tx_buf_phys = pmm_alloc_contiguous(NUM_TX * BUF_SIZE / 4096, lim);
+    if (!t->rx_phys || !t->tx_phys || !t->rx_buf_phys || !t->tx_buf_phys) {
+        tlog(t, "out of DMA memory below 4 GiB");
+        return 0;
+    }
+    t->rx = (struct rtl_desc *)pmm_phys_to_virt(t->rx_phys);
+    t->tx = (struct rtl_desc *)pmm_phys_to_virt(t->tx_phys);
+    t->rx_buf = (uint8_t *)pmm_phys_to_virt(t->rx_buf_phys);
+    t->tx_buf = (uint8_t *)pmm_phys_to_virt(t->tx_buf_phys);
+    memset(t->rx, 0, 4096);
+    memset(t->tx, 0, 4096);
+    for (i = 0; i < NUM_RX; i++) {
+        rx_give_back(t, i);
+    }
+    for (i = 0; i < NUM_TX; i++) {
+        t->tx[i].opts1 = (i == NUM_TX - 1) ? D_EOR : 0;
+    }
+    t->rx_next = 0;
+    t->tx_next = 0;
+    return 1;
+}
+
+static int setup_chip(struct rtl *t)
+{
+    uint16_t cp;
+    uint32_t rxcfg, txcfg;
+    int i;
+
+    w16(t, R_INTRMASK, 0);
+    w16(t, R_INTRSTATUS, 0xFFFF);
+
+    t->xid = (r32(t, R_TXCONFIG) >> 20) & 0xFCF;
+    if (t->xid == 0xFCF || t->xid == 0) {
+        tlog(t, "TxConfig reads %08x: chip not responding (power state?)", r32(t, R_TXCONFIG));
+        return 0;
+    }
+    t->chip = chip_name(t->xid);
+    /* 8168G (0x4c0) ও তার পরের সব: RXDV gate, OCP PHY, ERI FIFO */
+    t->modern = (t->xid & 0x7C8) >= 0x4C0 && (t->xid & 0x7C8) != 0x7C8;
+    tlog(t, "XID %03x -> %s", t->xid, t->chip);
+
+    /* PLL/PHY পাওয়ার (8168G+: PMCH-এর উপরের দুই বিট) */
+    if (t->modern) {
+        w8(t, R_PMCH, r8(t, R_PMCH) | 0xC0);
+    }
+
+    /* রিসেট: নতুন চিপে আগে RXDV gate বসিয়ে RX বন্ধ */
+    if (t->modern) {
+        w32(t, R_MISC, r32(t, R_MISC) | MISC_RXDV_GATE);
+    }
+    w8(t, R_CHIPCMD, CMD_RESET);
+    if (!wait8(t, R_CHIPCMD, CMD_RESET, 0, 100)) {
+        tlog(t, "reset did not finish (ChipCmd %02x)", r8(t, R_CHIPCMD));
+        return 0;
+    }
+    tlog(t, "reset ok");
+
+    /* MAC: firmware IDR0-5-এ রেখে দেয় */
+    for (i = 0; i < 6; i++) {
+        t->dev.mac[i] = r8(t, R_MAC0 + (uint32_t)i);
+    }
+    tlog(t, "MAC %02x:%02x:%02x:%02x:%02x:%02x", t->dev.mac[0], t->dev.mac[1], t->dev.mac[2],
+         t->dev.mac[3], t->dev.mac[4], t->dev.mac[5]);
+
+    w8(t, R_CFG9346, CFG9346_UNLOCK);
+
+    /* ASPM আর CLKREQ বন্ধ (ঘুমিয়ে গিয়ে DMA আটকে যাওয়া এড়াতে) */
+    w8(t, R_CONFIG2, r8(t, R_CONFIG2) & ~CONFIG2_CLKREQ);
+    w8(t, R_CONFIG5, r8(t, R_CONFIG5) & ~CONFIG5_ASPM);
+
+    cp = r16(t, R_CPLUSCMD);
+    cp &= (uint16_t)~(CP_RXCHKSUM | CP_RXVLAN);
+    w16(t, R_CPLUSCMD, cp);
+
+    w8(t, R_MAXTXPKT, 0x3F);              /* TxPacketMax = 8064 >> 7 */
+
+    if (t->modern) {
+        /* Linux rtl_hw_start_8168h_1-এর মূল অংশ */
+        eri_write(t, 0xC8, ERIAR_MASK_1111, (0x08u << 16) | 0x10);   /* FIFO মাপ */
+        eri_write(t, 0xE8, ERIAR_MASK_1111, (0x02u << 16) | 0x06);
+        eri_write(t, 0xDC, ERIAR_MASK_1111, eri_read(t, 0xDC) & ~1u); /* packet filter রিসেট */
+        eri_write(t, 0xDC, ERIAR_MASK_1111, eri_read(t, 0xDC) | 1u);
+        w32(t, R_MISC, r32(t, R_MISC) & ~MISC_RXDV_GATE);           /* RXDV gate বন্ধ */
+        eri_write(t, 0xC0, ERIAR_MASK_0011, 0);
+        eri_write(t, 0xB8, ERIAR_MASK_0011, 0);
+        tlog(t, "8168G+ setup: FIFO, packet filter, RXDV gate off (MISC %08x)", r32(t, R_MISC));
+    }
+
+    w16(t, R_INTRMITIGATE, 0);
+    w16(t, R_RXMAXSIZE, BUF_SIZE);
+
+    /* ঠিকানা: আগে উপরের অর্ধেক */
+    w32(t, R_TXDESC_HI, (uint32_t)(t->tx_phys >> 32));
+    w32(t, R_TXDESC_LO, (uint32_t)t->tx_phys);
+    w32(t, R_RXDESC_HI, (uint32_t)(t->rx_phys >> 32));
+    w32(t, R_RXDESC_LO, (uint32_t)t->rx_phys);
+
+    w8(t, R_CFG9346, CFG9346_LOCK);
+    (void)r8(t, R_CHIPCMD);               /* PCI commit */
+
+    w8(t, R_CHIPCMD, CMD_TX_EN | CMD_RX_EN);
+
+    if (t->modern) {
+        rxcfg = RX_128_INT_EN | RX_MULTI_EN | RX_DMA_BURST | RX_EARLY_OFF;
+    } else {
+        rxcfg = RX_FIFO_THRESH | RX_DMA_BURST;
+    }
+    txcfg = TX_DMA_BURST | TX_IFG;
+    if (t->modern) {
+        txcfg |= TX_AUTO_FIFO;
+    }
+    w32(t, R_TXCONFIG, txcfg);
+
+    /* সব multicast গ্রহণ (lwIP-এর IGMP সরল রাখতে) */
+    w32(t, R_MAR0 + 4, 0xFFFFFFFF);
+    w32(t, R_MAR0, 0xFFFFFFFF);
+    w32(t, R_RXCONFIG, (rxcfg & ~RX_ACCEPT_MASK) | RX_ACCEPT_BCAST | RX_ACCEPT_MULTI |
+        RX_ACCEPT_PHYS);
+
+    w16(t, R_INTRMASK, 0);                /* ইন্টারাপ্ট নয়, netd poll করে */
+    w16(t, R_INTRSTATUS, 0xFFFF);
+
+    tlog(t, "rx/tx on: ChipCmd %02x RxConfig %08x TxConfig %08x", r8(t, R_CHIPCMD),
+         r32(t, R_RXCONFIG), r32(t, R_TXCONFIG));
+
+    /* PHY: পাওয়ার-ডাউনে থাকলে জাগানো; নইলে BIOS-এর autoneg চলতে থাকে */
+    {
+        int bmcr = phy_read(t, MII_BMCR);
+        tlog(t, "PHY BMCR %04x BMSR %04x PHYstatus %02x", bmcr & 0xFFFF,
+             phy_read(t, MII_BMSR) & 0xFFFF, r8(t, R_PHYSTATUS));
+        if (bmcr >= 0 && ((bmcr & BMCR_PDOWN) || !(bmcr & BMCR_ANENABLE))) {
+            phy_restart_an(t);
+            tlog(t, "PHY was powered down/autoneg off: restarted");
+        }
+    }
+    t->link_check_ms = timer_uptime_ms();
+    return 1;
+}
+
+int rtl8168_init(void)
+{
+    static const uint16_t ids[] = { 0x8168 };
+    size_t k, n;
+    int found = 0;
+
+    for (k = 0; k < sizeof(ids) / sizeof(ids[0]); k++) {
+        for (n = 0; ; n++) {
+            struct pci_device *pd = pci_find_id(0x10EC, ids[k], n);
+            struct rtl *t;
+            uint64_t mmio = 0;
+            int b;
+
+            if (!pd) {
+                break;
+            }
+            /* প্রথম memory BAR (সাধারণত BAR2, ৬৪-বিট); BAR0 I/O */
+            for (b = 0; b < 6; b++) {
+                if (pd->bar[b] && !pd->bar_is_io[b]) {
+                    mmio = pd->bar[b];
+                    break;
+                }
+            }
+            t = (struct rtl *)kzalloc(sizeof(*t));
+            if (!t) {
+                return found;
+            }
+            t->pci = pd;
+            t->chip = "RTL8168";
+            tlog(t, "found 10ec:%04x rev %02x at %02x:%02x.%u, MMIO BAR%d %llx", ids[k],
+                 pd->revision, pd->bus, pd->slot, pd->func, b, (unsigned long long)mmio);
+            if (!mmio) {
+                tlog(t, "no memory BAR - skipped");
+                kfree(t);
+                continue;
+            }
+            pci_set_power_d0(pd);
+            pci_disable_aspm(pd);
+            pci_enable_device(pd);
+            t->regs = (volatile uint8_t *)vmm_map_mmio(mmio, 0x1000);
+            if (!t->regs || !setup_rings(t) || !setup_chip(t)) {
+                kprintf("[WARN] rtl8168: setup failed (see messages above)\n");
+                /* DMA মেমোরি ফেরত নয় — চিপ হয়তো এখনো ঠিকানাগুলো জানে */
+                kfree(t);
+                continue;
+            }
+            t->dev.driver = "rtl8168";
+            if (!strcmp(t->chip, "RTL8168H/8111H")) {
+                t->dev.driver = "rtl8168 (8168H)";
+            }
+            t->dev.transmit = rtl_transmit;
+            t->dev.poll = rtl_poll;
+            t->dev.link_status = rtl_link;
+            t->dev.diag = rtl_diag;
+            t->dev.priv = t;
+            t->dev.link_up = (r8(t, R_PHYSTATUS) & PHY_LINK) != 0;
+            if (net_register_device(&t->dev) == 0) {
+                found++;
+            }
+        }
+    }
+    return found;
+}

@@ -1,8 +1,10 @@
 # Networking
-rozOS talks TCP/IP through an Intel e1000/e1000e network card.
+rozOS talks TCP/IP through an Intel e1000/e1000e network card (QEMU)
+or a Realtek RTL8111/8168 gigabit card (most real PC boards, phase 22).
 
 == The layers ==
-  card driver   kernel/drivers/net/e1000.c - sends and receives frames
+  card driver   kernel/drivers/net/e1000.c, rtl8168.c - send and receive
+                frames
   lwIP          a small TCP/IP stack inside the kernel: ARP, IPv4,
                 ICMP (ping), UDP, TCP, DHCP, DNS
   sockets       kernel/net/socket.c - turns lwIP into file descriptors
@@ -27,3 +29,12 @@ The DNS server is written to /etc/resolv.conf; fixed names are in
   `http-get -h https://example.com/`   the same over TLS
   `rozpkg update`            the package list ([[rozpkg]])
 There is no firewall and no IPv6 yet.
+
+== Real PC (Realtek) ==
+On a real PC plug in the cable before booting; the router gives the
+address by DHCP and the taskbar's network icon loses its red slash.
+Wi-Fi and 2.5G cards (RTL8125) are not supported yet.
+If there is no network, run `kmon` then `nic`: it shows the chip (XID),
+its registers, the link (PHYstatus, BMCR/BMSR) and the driver's init
+log. If no driver is active it lists the PCI network devices instead.
+Take a photo of that screen - it shows where the card stopped.

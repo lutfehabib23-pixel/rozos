@@ -194,6 +194,7 @@ int net_init(void)
     int i, cards;
 
     cards = e1000_init();
+    cards += rtl8168_init();                 /* ধাপ ২২ */
     if (nic_count == 0) {
         return 0;
     }
@@ -222,6 +223,11 @@ int net_init(void)
 }
 
 /* ---------- তথ্য ও হাতে কনফিগার ---------- */
+
+struct net_device *net_get_device(int index)
+{
+    return (index >= 0 && index < nic_count) ? nics[index].dev : NULL;
+}
 
 int net_get_info(int index, struct rozos_netinfo *out)
 {
