@@ -6,7 +6,7 @@
 
 rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphical desktop. It includes a C compiler, a text editor, `make`, a TCP/IP stack with HTTPS, and a package manager, so you can write, compile and even rebuild the rozOS kernel **from inside rozOS itself**.
 
-> Status: hobby / educational OS, under active development (current: **0.22.0-phase22**).
+> Status: hobby / educational OS, under active development (current: **0.23.0-phase23a**).
 > It runs in QEMU. Real hardware has not been tested yet.
 
 ---
@@ -27,11 +27,11 @@ rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphica
 | **Toolchain in the OS** | TinyCC (`tcc`), `make` (pdpmake), Code (graphical) and `edit` (terminal, F10 menu) editors, Lua 5.4 (`lua`, `liblua.a`), zlib (`gzip`/`gunzip`, `libz.a`) |
 | **Packages** | `rozpkg`, which downloads C libraries over HTTPS (or from a local folder) and links them; packages: cJSON, **SQLite 3** (`sqlite3` shell, `-lsqlite3`) |
 | **Security** | folder lock: right-click > Lock... encrypts a folder into one file (ChaCha20-Poly1305, key from PBKDF2-SHA256), undeletable while locked (immutable flag, `chattr`/`lsattr`); hide/unhide without renaming (`.hidden`); `rozlock` command and *librozlock* |
-| **Graphics** | `/dev/fb0`, *librozgfx* (shapes, TrueType text via stb_truetype, BMP/PNG/JPEG via stb_image) |
+| **Graphics** | `/dev/fb0`, *librozgfx* (shapes, smooth TrueType text via FreeType with Inter / JetBrains Mono system fonts and stb_truetype, BMP/PNG/JPEG via stb_image) |
 | **Games** | *librozgame*: fixed-step game loop, real key press/release (`/dev/keyev`), fast image drawing (row-classified sprites, memcpy for opaque rows), sprite sheets and animation, scaling (fit / integer / native, optional bilinear), high-quality photo resize, collisions, TrueType text, menus, best scores, camera (follow, bounds, shake), text-file tile maps with move-and-slide, particles; Lua games with `luagame`; **Snake**, **Breakout**, **Tetris**, **Platformer** (own levels as `.map` text files) and **Star catcher** (Lua), with source in `/usr/src/games` and starter templates (`edit --new game`) |
 | **Widgets** | *librozui*: immediate-mode buttons, check boxes, text boxes, lists, scroll bars, menu bars with shortcuts, message boxes, input and file dialogs; icons can be replaced by pictures |
 | **Desktop** | **rozwm** compositing window manager: flicker-free damage-based drawing, movable/resizable windows with minimise/maximise/close, Start menu, taskbar, clock; **rozterm** terminal windows (VT100, scrollback, copy and paste, blinking cursor); dark 3D theme (Ebony, Obsidian, Onyx, Jet Black) |
-| **Desktop apps** | **Code** (graphical C editor: menus, syntax colours, compile and run with tcc, clickable errors), **Files** (file manager with right-click menu, lock/unlock, hide/unhide), **Settings** (wallpaper, desktop icons, memory, processes, disks, network), calculator, paint, image viewer |
+| **Desktop apps** | **Code** (graphical C editor: menus, syntax colours, compile and run with tcc, clickable errors), **Files** (file manager with right-click menu, lock/unlock, hide/unhide), **Settings** (wallpaper, desktop icons, memory, processes, disks, network, fonts), calculator, paint, image viewer, font viewer |
 | **Shell** | `rozsh`: pipes, redirection, `&&`/`||`, job control, history; about 50 own programs in `/bin` plus about 70 classic Unix tools from **sbase** (grep, sed, sort, head, tail, find, xargs, cut, tr, sha256sum ...) |
 | **C reference** | Turbo C-style help for C: the language and every function of `<stdio.h>`, `<stdlib.h>`, `<string.h>`, `<strings.h>`, `<ctype.h>`, `<math.h>`, `<time.h>`, and POSIX - `<unistd.h>`, `<fcntl.h>`, `<sys/*.h>`, `<signal.h>`, `<pthread.h>`, sockets, `<termios.h>`, `<regex.h>`, `<wchar.h>`, `<locale.h>`, `<iconv.h>` ..., and the rozOS libraries `<rozgfx.h>`, `<rozui.h>`, `<rozgame.h>`, `<rozhttp.h>`, `<rozos.h>`, `<rozlock.h>` plus guides to Lua (C API and the `game` module), zlib and SQLite (440 pages) with syntax, explanation and a runnable example; Ctrl+F1 on a word in Code or `edit`, the `crefview` window (Copy / Try it), and `cref` in a terminal; every example is compiled and run by `make cref-check` |
 | **Docs** | 114 built-in help pages (`help`, `help desktop`, `help syscalls`, …) |
@@ -175,6 +175,8 @@ rozOS is released under the [MIT License](LICENSE). Third-party components keep 
 | [BearSSL](https://bearssl.org) | TLS (fetched) | MIT |
 | [stb_truetype / stb_image](https://github.com/nothings/stb) | fonts, images | MIT / public domain |
 | [DejaVu fonts](https://dejavu-fonts.github.io) | UI and console fonts | Bitstream Vera / DejaVu license |
+| [FreeType](https://freetype.org) | smooth font rendering (`./toolchain/get-freetype.sh`) | FreeType License (BSD-style) |
+| Inter, JetBrains Mono, Fira Code, Noto Sans/Serif (+ Bengali), Roboto, Open Sans, Source Sans 3 / Serif 4, Hind Siliguri, Tiro Bangla | desktop fonts (`./toolchain/get-fonts.sh`) | SIL Open Font License 1.1 |
 
 ---
 

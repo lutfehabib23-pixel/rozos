@@ -19,3 +19,5 @@ ports/zlib/src/
 __pycache__/
 ports/sbase/src/
 ports/sqlite/src/
+ports/fonts/src/
+ports/freetype/src/

@@ -143,6 +143,21 @@ int  gfx_text_width(gfx_font *font, const char *str);
 /* ধাপ ১৪: একটা গ্লিফ সরাসরি নম্বর দিয়ে (0-255, CP437 — টার্মিনালের জন্য), পেছনে bg */
 void gfx_glyph(gfx_surface *s, gfx_font *font, int x, int y, int index, uint32_t fg, uint32_t bg);
 
+/* ধাপ ২৩ক: মসৃণ TrueType সিস্টেম ফন্ট (FreeType)। /etc/rozos.conf-এ বদলানো যায়:
+ *   ui_font=/usr/share/fonts/Inter-Regular.ttf  ui_font_size=14
+ *   mono_font=/usr/share/fonts/JetBrainsMono-Regular.ttf  mono_font_size=15
+ * gfx_text/gfx_text_width-এ font = NULL দিলে UI ফন্ট (আনুপাতিক, ১৬ px লাইনের বাক্সে)।
+ * gfx_font_default() আগের মতো 8×16 PSF-ই থাকে (গেম ইত্যাদির লেআউটের জন্য)। */
+int  gfx_have_freetype(void);                    /* 1 = FreeType আছে */
+gfx_font *gfx_font_ui(void);                     /* UI ফন্ট; না থাকলে NULL (তখন PSF) */
+gfx_font *gfx_font_mono(void);                   /* সমান-চওড়া ঘরের ফন্ট; না থাকলে PSF */
+/* .ttf/.otf, px = em মাপ, mono = 1 হলে প্রতিটা অক্ষর এক ঘরে; ব্যর্থ হলে NULL */
+gfx_font *gfx_font_load_ttf(const char *path, int px, int mono);
+int  gfx_font_is_ttf(const gfx_font *font);
+/* সিস্টেম ফন্টের ফাইল অন্য মাপে (নতুন বস্তু — gfx_font_free দিয়ে ছাড়া): mono 0 = UI,
+ * 1 = সমান-চওড়া; px 0 = Settings-এর মাপ */
+gfx_font *gfx_font_system(int mono, int px);
+
 /* ---------- TrueType ---------- */
 typedef struct gfx_ttf gfx_ttf;
 gfx_ttf *gfx_ttf_load(const char *path);         /* যেমন /usr/share/fonts/DejaVuSans.ttf */

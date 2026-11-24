@@ -30,6 +30,9 @@
 /* ---------- রেজিস্টার ---------- */
 #define R_MAC0          0x00
 #define R_MAR0          0x08
+#define R_COUNTER_LO    0x10               /* ধাপ ২২গ: tally counter */
+#define R_COUNTER_HI    0x14
+#define COUNTER_DUMP    0x08
 #define R_TXDESC_LO     0x20
 #define R_TXDESC_HI     0x24
 #define R_CHIPCMD       0x37
@@ -132,7 +135,7 @@
 #define NUM_RX          256
 #define NUM_TX          64
 #define BUF_SIZE        2048
-#define LOG_SIZE        1024
+#define LOG_SIZE        2048
 
 struct rtl_desc {
     uint32_t opts1;
@@ -140,6 +143,23 @@ struct rtl_desc {
     uint64_t addr;
 };
 typedef char rtl_desc_size_check[(sizeof(struct rtl_desc) == 16) ? 1 : -1];
+
+/* ধাপ ২২গ: চিপের tally counter (Linux struct rtl8169_counters), ৬৪-বাইট aligned */
+struct rtl_tally {
+    uint64_t tx_packets;
+    uint64_t rx_packets;
+    uint64_t tx_errors;
+    uint32_t rx_errors;
+    uint16_t rx_missed;
+    uint16_t align_errors;
+    uint32_t tx_one_collision;
+    uint32_t tx_multi_collision;
+    uint64_t rx_unicast;
+    uint64_t rx_broadcast;
+    uint32_t rx_multicast;
+    uint16_t tx_aborted;
+    uint16_t tx_underrun;
+} __attribute__((packed));
 
 struct rtl {
     struct net_device dev;
@@ -159,6 +179,13 @@ struct rtl {
     uint16_t last_istatus;
     uint16_t istatus_seen;                /* ধাপ ২২খ: চালুর পর থেকে সব বিটের OR */
     int rx_restarts;
+    /* ধাপ ২২গ: চিপের নিজের গণনা (tally) আর RX আটকে যাওয়া ধরা */
+    struct rtl_tally *tally;
+    uint64_t tally_phys;
+    uint64_t wd_ms;                       /* শেষ watchdog */
+    uint64_t wd_chip_rx, wd_our_rx;       /* তখনকার গণনা */
+    int stall_restarts;
+    uint32_t rxcfg;                       /* RxConfig-এর মান (আবার চালুর সময় লেখা) */
     char log[LOG_SIZE];
     size_t log_len;
 };
@@ -372,6 +399,38 @@ static void rx_give_back(struct rtl *t, unsigned i)
     d->opts1 = opts;
 }
 
+/* ধাপ ২২গ: RX বন্ধ → ring-এর ঠিকানা আবার লেখা → সব ঘর চিপকে → RX চালু, RxConfig আবার */
+static void rx_restart(struct rtl *t)
+{
+    unsigned k;
+    w8(t, R_CHIPCMD, CMD_TX_EN);
+    wait8(t, R_CHIPCMD, CMD_RX_EN, 0, 10);
+    for (k = 0; k < NUM_RX; k++) {
+        rx_give_back(t, k);
+    }
+    t->rx_next = 0;
+    w8(t, R_CFG9346, CFG9346_UNLOCK);
+    w32(t, R_RXDESC_HI, (uint32_t)(t->rx_phys >> 32));
+    w32(t, R_RXDESC_LO, (uint32_t)t->rx_phys);
+    w8(t, R_CFG9346, CFG9346_LOCK);
+    w8(t, R_CHIPCMD, CMD_TX_EN | CMD_RX_EN);
+    if (t->rxcfg) {
+        w32(t, R_RXCONFIG, t->rxcfg);
+    }
+}
+
+/* চিপের গণনা মেমরিতে আনা; 1 = হয়েছে */
+static int tally_dump(struct rtl *t)
+{
+    if (!(r8(t, R_CHIPCMD) & CMD_RX_EN)) {
+        return 0;
+    }
+    w32(t, R_COUNTER_HI, (uint32_t)(t->tally_phys >> 32));
+    w32(t, R_COUNTER_LO, (uint32_t)t->tally_phys);
+    w32(t, R_COUNTER_LO, (uint32_t)t->tally_phys | COUNTER_DUMP);
+    return wait32(t, R_COUNTER_LO, COUNTER_DUMP, 0, 10);
+}
+
 static size_t rtl_poll(struct net_device *dev, void *buf, size_t max)
 {
     struct rtl *t = (struct rtl *)dev->priv;
@@ -382,20 +441,33 @@ static size_t rtl_poll(struct net_device *dev, void *buf, size_t max)
         t->last_istatus = is;
         t->istatus_seen |= is;
         w16(t, R_INTRSTATUS, is);
-        /* ধাপ ২২খ: descriptor নেই বলে চিপ থেমেছে অথচ সব descriptor চিপের হাতে —
-         * RX বন্ধ করে ring শুরু থেকে আবার চালু (চিপের ভেতরের পয়েন্টার 0-তে ফেরে) */
+        /* ধাপ ২২খ: descriptor নেই বলে চিপ থেমেছে অথচ সব descriptor চিপের হাতে */
         if ((is & IS_RX_DESC_UNAV) && (t->rx[t->rx_next].opts1 & D_OWN)) {
-            unsigned k;
-            w8(t, R_CHIPCMD, CMD_TX_EN);
-            for (k = 0; k < NUM_RX; k++) {
-                rx_give_back(t, k);
-            }
-            t->rx_next = 0;
-            w8(t, R_CHIPCMD, CMD_TX_EN | CMD_RX_EN);
             t->rx_restarts++;
+            rx_restart(t);
             if (t->rx_restarts <= 5) {
                 tlog(t, "RX stalled (IntrStatus %04x): ring restarted #%d", is, t->rx_restarts);
             }
+        }
+    }
+    /* ধাপ ২২গ: ২ সেকেন্ড পরপর চিপের গণনা — চিপ নতুন ফ্রেম পেয়েছে অথচ আমাদের ring-এ
+     * কিছু আসেনি (পরের ঘর এখনো চিপের হাতে) হলে RX আটকে গেছে: আবার চালু */
+    if (t->tally && timer_uptime_ms() - t->wd_ms >= 2000) {
+        t->wd_ms = timer_uptime_ms();
+        if (tally_dump(t)) {
+            uint64_t chip_rx = t->tally->rx_packets;
+            if (chip_rx > t->wd_chip_rx && dev->rx_packets == t->wd_our_rx &&
+                (t->rx[t->rx_next].opts1 & D_OWN)) {
+                t->stall_restarts++;
+                if (t->stall_restarts <= 5) {
+                    tlog(t, "RX stall: chip counted %llu new frames, ring got none (rx next %u):"
+                         " restart #%d", (unsigned long long)(chip_rx - t->wd_chip_rx),
+                         t->rx_next, t->stall_restarts);
+                }
+                rx_restart(t);
+            }
+            t->wd_chip_rx = chip_rx;
+            t->wd_our_rx = dev->rx_packets;
         }
     }
     for (;;) {
@@ -478,6 +550,34 @@ static void rtl_diag(struct net_device *dev)
             "  rx restarts %d\n", t->last_istatus, t->istatus_seen, t->rx_restarts);
     kprintf("     DLLPR %02x  MISC_1 %02x  ANAR %04x  GBCR %04x\n", r8(t, R_DLLPR),
             r8(t, R_MISC_1), phy_read(t, MII_ANAR) & 0xFFFF, phy_read(t, MII_GBCR) & 0xFFFF);
+    /* ধাপ ২২গ */
+    if (t->tally && tally_dump(t)) {
+        struct rtl_tally *c = t->tally;
+        kprintf("     chip tally: rx %llu (unicast %llu bcast %llu mcast %u) missed %u rx-err %u"
+                " align %u\n", (unsigned long long)c->rx_packets,
+                (unsigned long long)c->rx_unicast, (unsigned long long)c->rx_broadcast,
+                c->rx_multicast, c->rx_missed, c->rx_errors, c->align_errors);
+        kprintf("                 tx %llu tx-err %llu aborted %u underrun %u collisions %u/%u\n",
+                (unsigned long long)c->tx_packets, (unsigned long long)c->tx_errors,
+                c->tx_aborted, c->tx_underrun, c->tx_one_collision, c->tx_multi_collision);
+    } else {
+        kprintf("     chip tally: not available\n");
+    }
+    kprintf("     stall restarts %d   desc: ", t->stall_restarts);
+    {
+        unsigned idx[4];
+        int k;
+        idx[0] = (t->rx_next + NUM_RX - 1) % NUM_RX;
+        idx[1] = t->rx_next;
+        idx[2] = (t->rx_next + 1) % NUM_RX;
+        idx[3] = NUM_RX - 1;
+        for (k = 0; k < 4; k++) {
+            kprintf("[%u] %08x/%08x  ", idx[k], t->rx[idx[k]].opts1,
+                    (uint32_t)t->rx[idx[k]].addr);
+        }
+        kprintf("\n     ring %llx bufs %llx  RxDesc reg %08x\n", (unsigned long long)t->rx_phys,
+                (unsigned long long)t->rx_buf_phys, r32(t, R_RXDESC_LO));
+    }
     if (t->log_len) {
         kprintf("     init log:\n%s", t->log);
     }
@@ -497,6 +597,11 @@ static int setup_rings(struct rtl *t)
     if (!t->rx_phys || !t->tx_phys || !t->rx_buf_phys || !t->tx_buf_phys) {
         tlog(t, "out of DMA memory below 4 GiB");
         return 0;
+    }
+    t->tally_phys = pmm_alloc_contiguous(1, lim);          /* ধাপ ২২গ (না পেলে tally বাদ) */
+    if (t->tally_phys) {
+        t->tally = (struct rtl_tally *)pmm_phys_to_virt(t->tally_phys);
+        memset(t->tally, 0, 4096);
     }
     t->rx = (struct rtl_desc *)pmm_phys_to_virt(t->rx_phys);
     t->tx = (struct rtl_desc *)pmm_phys_to_virt(t->tx_phys);
@@ -626,8 +731,8 @@ static int setup_chip(struct rtl *t)
     /* সব multicast গ্রহণ (lwIP-এর IGMP সরল রাখতে) */
     w32(t, R_MAR0 + 4, 0xFFFFFFFF);
     w32(t, R_MAR0, 0xFFFFFFFF);
-    w32(t, R_RXCONFIG, (rxcfg & ~RX_ACCEPT_MASK) | RX_ACCEPT_BCAST | RX_ACCEPT_MULTI |
-        RX_ACCEPT_PHYS);
+    t->rxcfg = (rxcfg & ~RX_ACCEPT_MASK) | RX_ACCEPT_BCAST | RX_ACCEPT_MULTI | RX_ACCEPT_PHYS;
+    w32(t, R_RXCONFIG, t->rxcfg);
 
     w16(t, R_INTRMASK, 0);                /* ইন্টারাপ্ট নয়, netd poll করে */
     w16(t, R_INTRSTATUS, 0xFFFF);
@@ -691,6 +796,18 @@ int rtl8168_init(void)
             }
             pci_set_power_d0(pd);
             pci_disable_aspm(pd);
+            {
+                /* ধাপ ২২গ: PCIe Device Control-এ No Snoop বন্ধ (চিপের DMA লেখা যেন CPU-র
+                 * cache-এর সাথে মেলে); Linux কিছু 8168-এ একই কাজ করে */
+                uint8_t pe = pci_find_cap(pd, 0x10);
+                if (pe) {
+                    uint16_t dc = pci_read16(pd, (uint8_t)(pe + 8));
+                    tlog(t, "PCIe DevCtl %04x%s", dc, (dc & 0x0800) ? " -> No Snoop off" : "");
+                    if (dc & 0x0800) {
+                        pci_write16(pd, (uint8_t)(pe + 8), (uint16_t)(dc & ~0x0800u));
+                    }
+                }
+            }
             pci_enable_device(pd);
             t->regs = (volatile uint8_t *)vmm_map_mmio(mmio, 0x1000);
             if (!t->regs || !setup_rings(t) || !setup_chip(t)) {

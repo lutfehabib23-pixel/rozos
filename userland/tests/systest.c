@@ -17,6 +17,7 @@
 #include <sys/sysinfo.h>
 #include <sys/statvfs.h>
 #include <stdio.h>
+#include <rozgfx.h>
 #include <poll.h>
 #include <pty.h>
 #include <sys/un.h>
@@ -2065,6 +2066,43 @@ static void test_phase19h(void)
     rmdir("/tmp/st19h");
 }
 
+/* ধাপ ২৩ক: FreeType দিয়ে মসৃণ লেখা, UI আর mono সিস্টেম ফন্ট, fontview */
+static void test_phase23a(void)
+{
+    gfx_surface *s = gfx_surface_new(120, 24);
+    gfx_font *f = gfx_font_load_ttf("/usr/share/fonts/Inter-Regular.ttf", 14, 0), *m;
+    int ok = 0, x, y, mid = 0, full = 0;
+    if (s && f) {
+        gfx_clear(s, GFX_RGB(0, 0, 0));
+        gfx_text(s, f, 2, 2, "Hello rozOS", GFX_WHITE);
+        for (y = 0; y < s->h; y++)
+            for (x = 0; x < s->w; x++) {
+                unsigned v = GFX_G(gfx_get_pixel(s, x, y));
+                if (v == 255) full++;
+                else if (v > 0) mid++;
+            }
+        ok = full > 10 && mid > 10;            /* ধার মসৃণ: মাঝের রংও আছে */
+    }
+    check(gfx_have_freetype() && ok, "FreeType draws smooth (anti-aliased) Inter text");
+    gfx_font_free(f);
+    gfx_surface_free(s);
+    check(gfx_font_ui() && gfx_text_width(NULL, "iiii") < gfx_text_width(NULL, "MMMM"),
+          "UI font is proportional TrueType (gfx_text with NULL)");
+    m = gfx_font_mono();
+    check(gfx_font_is_ttf(m) && gfx_text_width(m, "iii") == gfx_text_width(m, "MMM") && gfx_font_width(m) >= 8,
+          "mono font has equal TrueType cells (terminal, Code)");
+    ok = access("/bin/fontview", X_OK) == 0 &&
+         system("fontview -l | grep -c KiB > /tmp/st23.out") == 0;
+    if (ok) {
+        FILE *fp = fopen("/tmp/st23.out", "r");
+        int n = 0;
+        ok = fp && fscanf(fp, "%d", &n) == 1 && n >= 15;
+        if (fp) fclose(fp);
+        unlink("/tmp/st23.out");
+    }
+    check(ok, "fontview -l lists the TrueType fonts (15 or more)");
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -2095,6 +2133,7 @@ int main(int argc, char **argv)
     test_phase19f();
     test_phase19g();
     test_phase19h();
+    test_phase23a();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

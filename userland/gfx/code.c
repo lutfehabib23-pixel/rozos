@@ -834,6 +834,17 @@ static void set_font(int px)
     char p[80];
     gfx_font *f;
     snprintf(p, sizeof(p), "/usr/share/fonts/rozos-mono-%d.psf", px);
+    if (gfx_font_is_ttf(gfx_font_mono())) {
+        /* ধাপ ২৩ক: TrueType — 16 = Settings-এর মাপ, 20/24 = সেই অনুপাতে বড় */
+        static gfx_font *big[2];
+        int k = px == 24;
+        if (px == 16) f = gfx_font_mono();
+        else {
+            if (!big[k]) big[k] = gfx_font_system(1, (gfx_font_height(gfx_font_mono()) * 3 / 4) * px / 16);
+            f = big[k];
+        }
+        if (!f) snprintf(p, sizeof(p), "mono TrueType font at size %d", px);
+    } else
     f = px == 16 ? gfx_font_default() : gfx_font_load(p);
     if (!f) { snprintf(status_msg, sizeof(status_msg), "Font not found: %s", p); return; }
     font = f;
@@ -1257,7 +1268,7 @@ int main(int argc, char **argv)
         perror("code: no screen");
         return 1;
     }
-    font = gfx_font_default();
+    font = gfx_font_mono();                      /* ধাপ ২৩ক: JetBrains Mono (না থাকলে PSF) */
     cw = gfx_font_width(font);
     chh = gfx_font_height(font);
     if (argc > 1) {

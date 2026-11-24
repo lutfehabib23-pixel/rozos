@@ -438,7 +438,7 @@ int main(int argc, char **argv)
         perror("crefview: no screen");
         return 1;
     }
-    mono = gfx_font_default();
+    mono = gfx_font_mono();                      /* ধাপ ২৩ক */
     ui_init(&U);
     wrap_cols = 80;
     if (argc > 1) {

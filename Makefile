@@ -11,6 +11,8 @@
 #   make libc       rozlibc (ধাপ ৭): build/libc/libc.a + crt0.o (+ crti/crtn, ধাপ ৮)
 #   ./toolchain/get-tcc.sh   TCC সোর্স আনা (ধাপ ৮) — তারপর make userland-এ /bin/tcc
 #   ./toolchain/get-lua.sh, get-zlib.sh   ধাপ ১৬খ-১: Lua ও zlib সোর্স — /bin/lua, gzip, liblua.a, libz.a
+#   ./toolchain/get-freetype.sh ধাপ ২৩ক: FreeType সোর্স — মসৃণ TrueType লেখা
+#   ./toolchain/get-fonts.sh   ধাপ ২৩ক: Inter, JetBrains Mono, Noto, বাংলা ফন্ট ইত্যাদি
 #   ./toolchain/get-sbase.sh   ধাপ ১৯ছ: sbase সোর্স — grep, sed, sort, head, tail, find, xargs ...
 #   make userland   ইউজার প্রোগ্রাম (ধাপ ৬-৭): build/userland/bin/* (init, rozsh, edit, ls ...)
 #   make disk-update ডিস্কের /bin, /usr/lib, /usr/include-এ শুধু নতুন বিল্ড বসায় (বাকি ডেটা অক্ষত)
@@ -121,12 +123,28 @@ BEARSSL_A    := $(BEARSSL_BUILD)/libbearssl.a
 BEARSSL_CFLAGS := $(USER_CFLAGS) -I$(BEARSSL_SRC)/inc -I$(BEARSSL_SRC)/src \
                   -DBR_USE_URANDOM=1 -DBR_USE_UNIX_TIME=1 -w
 
+# ---------- FreeType (ধাপ ২৩ক: মসৃণ TrueType লেখা) ----------
+# সোর্স: ./toolchain/get-freetype.sh → ports/freetype/src; ফন্ট: ./toolchain/get-fonts.sh →
+# ports/fonts/src। FreeType-এর অবজেক্ট librozgfx.a-র ভেতরেই যায় (প্রোগ্রামে -lrozgfx-ই যথেষ্ট)।
+# না থাকলে আগের মতো PSF বিটম্যাপ ফন্টে আঁকা হয়।
+FT_SRC       := ports/freetype/src
+FT_BUILD     := $(BUILD)/freetype
+HAVE_FREETYPE := $(if $(wildcard $(FT_SRC)/include/ft2build.h),1,)
+FT_MODS      := base/ftsystem base/ftinit base/ftdebug base/ftbase base/ftbbox base/ftbitmap \
+                base/ftglyph base/ftmm base/ftsynth autofit/autofit truetype/truetype cff/cff \
+                psaux/psaux pshinter/pshinter psnames/psnames sfnt/sfnt smooth/smooth
+FT_OBJS      := $(if $(HAVE_FREETYPE),$(patsubst %,$(FT_BUILD)/%.o,$(FT_MODS)))
+FT_CFLAGS    := $(USER_CFLAGS) -w -DFT2_BUILD_LIBRARY -Iports/freetype/rozos -I$(FT_SRC)/include \
+                '-DFT_CONFIG_MODULES_H=<rozft-module.h>' '-DFT_CONFIG_OPTIONS_H=<rozft-option.h>'
+FONT_EXTRA   := $(wildcard ports/fonts/src/*.ttf ports/fonts/src/LICENSE-*.txt)
+
 # ---------- rozhttp (ধাপ ১০): http/https ক্লায়েন্ট লাইব্রেরি — http-get ও rozpkg ব্যবহার করে ----------
 ROZHTTP_SRCS := userland/lib/rozhttp.c    # শুধু এটা — পুরোনো ধাপ ৬-এর userland/lib/ulib.c (থাকলে) বাদ
 ROZHTTP_OBJS := $(patsubst userland/lib/%.c,$(USER_BUILD)/lib/%.o,$(ROZHTTP_SRCS))
 ROZHTTP_A    := $(USER_BUILD)/lib/librozhttp.a
 # ধাপ ১৩: librozgfx (গ্রাফিক্স; rozgfx_ttf.c-তে stb_truetype)
-ROZGFX_SRCS  := userland/lib/rozgfx.c userland/lib/rozgfx_ttf.c userland/lib/rozgfx_img.c
+ROZGFX_SRCS  := userland/lib/rozgfx.c userland/lib/rozgfx_ttf.c userland/lib/rozgfx_img.c \
+                $(if $(HAVE_FREETYPE),userland/lib/rozgfx_ft.c)
 ROZGFX_OBJS  := $(patsubst userland/lib/%.c,$(USER_BUILD)/lib/%.o,$(ROZGFX_SRCS))
 ROZGFX_A     := $(USER_BUILD)/lib/librozgfx.a
 # ধাপ ১৪: rozui (3D UI) — rozgfx-এর ওপর
@@ -275,7 +293,7 @@ APP_FILES    := $(wildcard sysroot/usr/share/apps/*.app)
 # ধাপ ১২ক: edit --new-এর টেমপ্লেট (sysroot/usr/share/templates/*)
 TEMPLATE_FILES := $(wildcard sysroot/usr/share/templates/*)
 # ধাপ ১৩: ফন্ট (PSF কনসোল-ফন্ট, TrueType) আর গ্রাফিক্স ডেমোর ছবি
-FONT_FILES   := $(wildcard sysroot/usr/share/fonts/*)
+FONT_FILES   := $(wildcard sysroot/usr/share/fonts/*) $(FONT_EXTRA)
 IMAGE_FILES  := $(wildcard sysroot/usr/share/images/*)
 # ধাপ ১৪খ: আইকনের ছবি (/usr/share/icons/<নাম>.png — না থাকলে আঁকা চিহ্ন)
 ICON_FILES   := $(wildcard sysroot/usr/share/icons/*)
@@ -410,10 +428,21 @@ $(USER_BUILD)/lib/%.o: userland/lib/%.c config.mk
 $(USER_BUILD)/lib/rozgfx_ttf.o: LIB_EXTRA_CFLAGS := -w
 $(USER_BUILD)/lib/rozgfx_img.o: LIB_EXTRA_CFLAGS := -w
 
-$(ROZGFX_A): $(ROZGFX_OBJS)
+# ধাপ ২৩ক: FreeType থাকলে rozgfx.c/rozgfx_ft.c সেটা ব্যবহার করে
+ifeq ($(HAVE_FREETYPE),1)
+$(USER_BUILD)/lib/rozgfx.o: LIB_EXTRA_CFLAGS := -DROZOS_HAVE_FREETYPE
+$(USER_BUILD)/lib/rozgfx_ft.o: LIB_EXTRA_CFLAGS := -DROZOS_HAVE_FREETYPE -I$(FT_SRC)/include
+endif
+
+$(FT_BUILD)/%.o: $(FT_SRC)/src/%.c ports/freetype/rozos/rozft-module.h ports/freetype/rozos/rozft-option.h
+	@mkdir -p $(dir $@)
+	@echo "  CC      $< (freetype)"
+	@$(CC) $(FT_CFLAGS) -c $< -o $@
+
+$(ROZGFX_A): $(ROZGFX_OBJS) $(FT_OBJS)
 	@echo "  AR      $@"
 	@rm -f $@
-	@$(USER_AR) rcs $@ $(ROZGFX_OBJS)
+	@$(USER_AR) rcs $@ $(ROZGFX_OBJS) $(FT_OBJS)
 
 $(ROZUI_A): $(ROZUI_OBJS)
 	@echo "  AR      $@"
@@ -585,12 +614,14 @@ tcc-check:
 	@test -n "$(HAVE_TCC)" || echo "  NOTE    TCC সোর্স নেই — /bin/tcc বাদ। আনতে: ./toolchain/get-tcc.sh"
 	@test -n "$(HAVE_PDPMAKE)" || echo "  NOTE    pdpmake সোর্স নেই — /bin/make বাদ। আনতে: ./toolchain/get-pdpmake.sh"
 	@test -n "$(HAVE_BEARSSL)" || echo "  NOTE    BearSSL সোর্স নেই — https ও rozpkg চলবে না। আনতে: ./toolchain/get-bearssl.sh"
+	@test -n "$(HAVE_FREETYPE)" || echo "  NOTE    FreeType সোর্স নেই — লেখা আগের মতো বিটম্যাপে। আনতে: ./toolchain/get-freetype.sh"
+	@test -n "$(FONT_EXTRA)" || echo "  NOTE    TrueType ফন্ট নেই (Inter, JetBrains Mono ...)। আনতে: ./toolchain/get-fonts.sh"
 	@test -n "$(HAVE_SBASE)" || echo "  NOTE    sbase সোর্স নেই — grep, sed, sort, head, tail ... বাদ। আনতে: ./toolchain/get-sbase.sh"
 	@test -n "$(HAVE_LUA)" || echo "  NOTE    Lua সোর্স নেই — /bin/lua বাদ। আনতে: ./toolchain/get-lua.sh"
 	@test -n "$(HAVE_ZLIB)" || echo "  NOTE    zlib সোর্স নেই — libz ও gzip বাদ। আনতে: ./toolchain/get-zlib.sh"
 
 # মধ্যবর্তী .o ফাইল make যেন মুছে না ফেলে (নইলে প্রতিবার আবার বিল্ড)
-.SECONDARY: $(LUA_OBJS) $(LUA_BUILD)/lua.o $(ZLIB_OBJS) $(ZLIB_BUILD)/minigzip.o $(PDPMAKE_OBJS) $(BEARSSL_OBJS) $(ROZHTTP_OBJS) $(ROZGFX_OBJS) $(ROZUI_OBJS) $(ROZGAME_OBJS) $(ROZCREF_OBJS) $(ROZLOCK_OBJS) $(SBASE_LIB_OBJS) $(patsubst %,$(SBASE_BUILD)/%.o,$(SBASE_TOOLS)) $(LIBC_OBJS) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_LIB1_OBJS) $(TCC_RUNMAIN) $(TCC_BUILD)/tcc.o $(patsubst %,$(USER_BUILD)/obj/%.o,$(USER_PROGS)) $(USER_BINS)
+.SECONDARY: $(FT_OBJS) $(LUA_OBJS) $(LUA_BUILD)/lua.o $(ZLIB_OBJS) $(ZLIB_BUILD)/minigzip.o $(PDPMAKE_OBJS) $(BEARSSL_OBJS) $(ROZHTTP_OBJS) $(ROZGFX_OBJS) $(ROZUI_OBJS) $(ROZGAME_OBJS) $(ROZCREF_OBJS) $(ROZLOCK_OBJS) $(SBASE_LIB_OBJS) $(patsubst %,$(SBASE_BUILD)/%.o,$(SBASE_TOOLS)) $(LIBC_OBJS) $(LIBC_CRT0) $(LIBC_CRTS) $(TCC_LIB1_OBJS) $(TCC_RUNMAIN) $(TCC_BUILD)/tcc.o $(patsubst %,$(USER_BUILD)/obj/%.o,$(USER_PROGS)) $(USER_BINS)
 
 # sysroot + /bin-এর প্রোগ্রাম + rozlibc (/usr/include, /usr/lib — ধাপ ৮-এর TCC-র জন্য)
 $(BUILD)/modules/%.ko: modules/%.c kernel/include/rozos/module.h
@@ -610,6 +641,8 @@ define stage_root
 	@mkdir -p $(1)/etc/ssl $(1)/var/cache/rozpkg $(1)/var/lib/rozpkg/installed $(1)/var/log && cp $(CA_PEM) $(1)/etc/ssl/certs.pem
 	@cp $(DEV_LIBS) $(1)/usr/lib/ && cp $(DEV_HEADERS) $(1)/usr/include/
 	@mkdir -p $(1)/usr/src/gfx && cp $(GFX_SRC_FILES) $(1)/usr/src/gfx/
+	$(if $(FONT_EXTRA),@cp $(FONT_EXTRA) $(1)/usr/share/fonts/)
+	$(if $(HAVE_FREETYPE),@cp $(FT_SRC)/docs/FTL.TXT $(1)/usr/share/fonts/LICENSE-FreeType.txt)
 	@mkdir -p $(1)/usr/src/games $(1)/usr/share/games && cp $(GAME_SRC_FILES) $(1)/usr/src/games/
 	@mkdir -p $(1)/usr/share/cref && $(if $(CREF_FILES),cp $(CREF_FILES) $(1)/usr/share/cref/,true)
 	@mkdir -p $(1)/lib/modules $(1)/usr/src/modules && cp $(MOD_KOS) $(1)/lib/modules/ && cp $(MOD_SRCS) $(1)/usr/src/modules/
@@ -816,6 +849,7 @@ $(DISK_BIN_STAMP): $(USER_STRIPPED) $(if $(HAVE_ZLIB),$(ZLIB_ZCONF)) $(LIBC_A) $
 	   for f in $(TEMPLATE_FILES); do echo "rm /usr/share/templates/$$(basename $$f)"; echo "write $$f /usr/share/templates/$$(basename $$f)"; done; \
 	   echo "mkdir /usr/share/fonts"; echo "mkdir /usr/share/images"; \
 	   for f in $(FONT_FILES); do echo "rm /usr/share/fonts/$$(basename $$f)"; echo "write $$f /usr/share/fonts/$$(basename $$f)"; done; \
+	   $(if $(HAVE_FREETYPE),echo "rm /usr/share/fonts/LICENSE-FreeType.txt"; echo "write $(FT_SRC)/docs/FTL.TXT /usr/share/fonts/LICENSE-FreeType.txt";) \
 	   for f in $(IMAGE_FILES); do echo "rm /usr/share/images/$$(basename $$f)"; echo "write $$f /usr/share/images/$$(basename $$f)"; done; \
 	   echo "mkdir /usr/share/icons"; \
 	   echo "mkdir /lib"; echo "mkdir /lib/modules"; echo "mkdir /usr/src/modules"; \

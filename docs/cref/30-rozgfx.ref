@@ -427,13 +427,16 @@ int main(void)
 @syntax int gfx_font_width(const gfx_font *f);   int gfx_font_height(const gfx_font *f);
 @syntax void gfx_glyph(gfx_surface *s, gfx_font *font, int x, int y, int index, uint32_t fg, uint32_t bg);
 @syntax void gfx_font_free(gfx_font *f);
-@summary Write text with a fixed-width bitmap (PSF) font.
+@summary Write text: the smooth system UI font, or a bitmap (PSF) font.
 @desc
-font NULL means the default rozos-mono-16 (8 x 16 pixels). Other fonts:
-/usr/share/fonts/rozos-mono-20/24/32.psf. (x, y) is the top-left of the
-text; '\n' starts a new line. text_bg also paints the background. glyph
-draws one character by number (0-255). For smooth text of any size use
-gfx_ttf_text.
+font NULL means the system UI font (phase 23a: Inter 14 px, smooth
+TrueType; set in Settings > Fonts) placed in a 16-pixel line, so old
+layouts made for 8 x 16 still fit. Without FreeType NULL falls back to
+the bitmap rozos-mono-16. gfx_font_default() is always that 8 x 16 PSF
+font (also rozos-mono-20/24/32.psf). (x, y) is the top-left of the text;
+'\n' starts a new line. text_bg also paints the background. glyph draws
+one character by number (0-255) in a cell. TrueType fonts:
+gfx_font_ui, gfx_font_mono, gfx_font_load_ttf.
 @returns
 gfx_text: the x after the last character. text_width: width in pixels.
 @see gfx_ttf_text
@@ -450,6 +453,51 @@ int main(void)
     end = gfx_text(s, f, 4, 4, "Score: 120", GFX_WHITE);
     printf("font %d x %d, text ends at x = %d, width %d\n", gfx_font_width(f), gfx_font_height(f),
            end, gfx_text_width(f, "Score: 120"));
+    gfx_surface_free(s);
+    return 0;
+}
+@end
+
+@entry gfx_font_ui
+@also gfx_font_mono gfx_font_load_ttf gfx_font_system gfx_font_is_ttf gfx_have_freetype freetype ui-font
+@header rozgfx.h
+@syntax int gfx_have_freetype(void);
+@syntax gfx_font *gfx_font_ui(void);       gfx_font *gfx_font_mono(void);
+@syntax gfx_font *gfx_font_load_ttf(const char *path, int px, int mono);
+@syntax gfx_font *gfx_font_system(int mono, int px);
+@syntax int gfx_font_is_ttf(const gfx_font *font);
+@summary Smooth TrueType fonts (FreeType) that work with gfx_text.
+@desc
+Phase 23a. The system fonts come from /etc/rozos.conf (Settings > Fonts):
+ui_font / ui_font_size (Inter 14) and mono_font / mono_font_size
+(JetBrains Mono 15). font_ui is the proportional font that gfx_text(NULL)
+uses; font_mono has equal cells (terminal, Code) and falls back to the
+PSF font. load_ttf opens any .ttf/.otf at px pixels (em size); mono 1 puts
+every character in one cell. font_system loads the chosen system font
+at another size (px 0 = the chosen size). Use the result with gfx_text,
+gfx_text_width, gfx_glyph and gfx_font_width/height (line height), and
+free your own fonts with gfx_font_free. Bengali shaping comes later.
+@returns
+NULL when FreeType or the file is missing (font_mono then gives the PSF
+font). have_freetype and is_ttf: 1 or 0.
+@see gfx_text gfx_ttf_text
+@example
+#include <stdio.h>
+#include <rozgfx.h>
+
+int main(void)
+{
+    gfx_surface *s = gfx_surface_new(320, 60);
+    gfx_font *big = gfx_font_load_ttf("/usr/share/fonts/Inter-Bold.ttf", 28, 0);
+    printf("FreeType: %s\n", gfx_have_freetype() ? "yes" : "no");
+    if (big) {
+        int end = gfx_text(s, big, 8, 8, "rozOS", GFX_WHITE);
+        printf("bold 28 px: line %d px, text ends at x = %d\n", gfx_font_height(big), end);
+        gfx_font_free(big);
+    } else {
+        printf("Inter-Bold.ttf is not here\n");
+    }
+    printf("mono cell: %d x %d\n", gfx_font_width(gfx_font_mono()), gfx_font_height(gfx_font_mono()));
     gfx_surface_free(s);
     return 0;
 }

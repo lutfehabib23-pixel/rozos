@@ -585,22 +585,54 @@ static int take_focus(ui_ctx *u, int id, int over)
 }
 
 static int pw_mask;                      /* ধাপ ১৯ছ: ui_do_password চলার সময় 1 */
+static gfx_font *list_font;              /* ধাপ ২৩ক: ui_do_list-এর ফন্ট (NULL = UI ফন্ট) */
+
+void ui_list_font(gfx_font *f) { list_font = f; }
+
+/* ধাপ ২৩ক: UI ফন্ট আনুপাতিক — লেখার প্রথম n বাইটের পিক্সেল চওড়া (ঘরের লেখা ASCII) */
+static int tw_n(const char *str, int n)
+{
+    char tmp[1024];
+    if (n <= 0) return 0;
+    if (n > (int)sizeof(tmp) - 1) n = (int)sizeof(tmp) - 1;
+    memcpy(tmp, str, (size_t)n);
+    tmp[n] = '\0';
+    return gfx_text_width(NULL, tmp);
+}
+
+/* পিক্সেল px-এর সবচেয়ে কাছের অক্ষর-সীমা (from থেকে গুনে) */
+static int tw_hit(const char *str, int from, int len, int px)
+{
+    int i, best = from, bd = 1 << 30;
+    for (i = from; i <= len; i++) {
+        int d = tw_n(str + from, i - from) - px;
+        if (d < 0) d = -d;
+        if (d < bd) { bd = d; best = i; }
+        else break;
+    }
+    return best;
+}
 
 int ui_do_textbox(ui_ctx *u, int x, int y, int w, char *buf, int size)
 {
     int id = ++u->id, h = UI_TEXTBOX_H, over = ui_hover(u, x, y, w, h), len = (int)strlen(buf);
-    int ret = 0, vis = (w - 10) / FW, cur;
+    int ret = 0, cur;
     const struct ui_theme *t = &dark3d;
+    char stars[256];
+    const char *disp = buf;                      /* ধাপ ২৩ক: যা দেখানো হয় (password হলে *) */
+    if (pw_mask) {
+        int i, n = len < (int)sizeof(stars) - 1 ? len : (int)sizeof(stars) - 1;
+        for (i = 0; i < n; i++) stars[i] = '*';
+        stars[n] = '\0';
+        disp = stars;
+    }
     if (take_focus(u, id, over)) {
         u->tb_cur = len;
         u->tb_off = 0;
-        if (over && u->pressed) {                /* ক্লিকের জায়গায় কার্সর */
-            int c = (u->mx - x - 5 + FW / 2) / FW;
-            u->tb_cur = c < 0 ? 0 : c > len ? len : c;
-        }
+        if (over && u->pressed)                  /* ক্লিকের জায়গায় কার্সর */
+            u->tb_cur = tw_hit(disp, 0, len, u->mx - x - 5);
     } else if (u->focus == id && over && u->pressed) {
-        int c = (u->mx - x - 5 + FW / 2) / FW + u->tb_off;
-        u->tb_cur = c < 0 ? 0 : c > len ? len : c;
+        u->tb_cur = tw_hit(disp, u->tb_off, len, u->mx - x - 5);
         u->focus_claimed = 1;
     }
     if (u->focus == id) {
@@ -641,25 +673,24 @@ int ui_do_textbox(ui_ctx *u, int x, int y, int w, char *buf, int size)
                 u->key = k;                      /* অন্য কী অ্যাপের জন্য রেখে দাও */
             }
             len = (int)strlen(buf);
+            if (pw_mask) {
+                int i, n = len < (int)sizeof(stars) - 1 ? len : (int)sizeof(stars) - 1;
+                for (i = 0; i < n; i++) stars[i] = '*';
+                stars[n] = '\0';
+            }
         }
         u->tb_cur = cur;
+        if (u->tb_off > len) u->tb_off = len;
         if (cur < u->tb_off) u->tb_off = cur;
-        if (cur > u->tb_off + vis) u->tb_off = cur - vis;
+        while (u->tb_off < cur && tw_n(disp + u->tb_off, cur - u->tb_off) > w - 12) u->tb_off++;
         u->auto_tick = 1;                        /* কার্সর ঝলকানো — ৫০০ ms পরপর ফ্রেম */
     }
     ui_sunken(u->s, x, y, w, h, t->field);
     gfx_set_clip(u->s, x + 3, y + 2, w - 6, h - 4);
-    if (pw_mask) {                               /* ধাপ ১৯ছ: লেখার বদলে * */
-        char stars[256];
-        int ns = len - (u->focus == id ? u->tb_off : 0), i;
-        if (ns > (int)sizeof(stars) - 1) ns = (int)sizeof(stars) - 1;
-        for (i = 0; i < ns; i++) stars[i] = '*';
-        stars[ns > 0 ? ns : 0] = '\0';
-        gfx_text(u->s, NULL, x + 5, y + (h - FH) / 2, stars, t->field_text);
-    } else
-    gfx_text(u->s, NULL, x + 5, y + (h - FH) / 2, buf + (u->focus == id ? u->tb_off : 0), t->field_text);
+    /* ধাপ ১৯ছ: password হলে লেখার বদলে * (disp) */
+    gfx_text(u->s, NULL, x + 5, y + (h - FH) / 2, disp + (u->focus == id ? u->tb_off : 0), t->field_text);
     if (u->focus == id && u->blink)
-        gfx_fill_rect(u->s, x + 5 + (u->tb_cur - u->tb_off) * FW, y + 4, 2, h - 8, GFX_WHITE);
+        gfx_fill_rect(u->s, x + 5 + tw_n(disp + u->tb_off, u->tb_cur - u->tb_off), y + 4, 2, h - 8, GFX_WHITE);
     gfx_reset_clip(u->s);
     return ret;
 }
@@ -745,7 +776,7 @@ int ui_do_list(ui_ctx *u, int x, int y, int w, int h, const char *const *items, 
         int r = *top + i, ry = y + 2 + i * rowh;
         if (r == *sel) gfx_fill_rect(u->s, x + 2, ry, w - sb - 4, rowh, t->select);
         if (r == *sel && u->focus == id) gfx_rect(u->s, x + 2, ry, w - sb - 4, rowh, t->accent);
-        gfx_text(u->s, NULL, x + 6, ry + 2, items[r], r == *sel ? GFX_WHITE : t->field_text);
+        gfx_text(u->s, list_font, x + 6, ry + 2, items[r], r == *sel ? GFX_WHITE : t->field_text);
     }
     gfx_reset_clip(u->s);
     if (sb) ui_do_vscroll(u, x + w - sb, y, sb, h, top, n, vis);

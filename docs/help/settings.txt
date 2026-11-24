@@ -1,6 +1,6 @@
 # settings - desktop settings and system information (phase 19f)
   `settings`             (Start > System > Settings, or right-click the desktop)
-  `settings wallpaper`   open at a page: wallpaper icons system processes disks network
+  `settings wallpaper`   open at a page: wallpaper icons system processes disks network fonts
 Pages (the list on the left):
   Wallpaper      click a picture of /usr/share/images to use it at once;
                  Browse... (any picture), None (plain colour); style
@@ -16,6 +16,9 @@ Pages (the list on the left):
                  sends it SIGTERM (asks first; init cannot be ended).
   Disks          every mounted file system: size, used, free.
   Network        the network card: address, gateway, DNS, MAC, packets.
+  Fonts          the smooth font of menus/buttons/titles and of the
+                 terminal and Code, with size and a sample; Apply saves
+                 it in /etc/rozos.conf for new windows ([[fonts]]).
 q or Esc closes. In C the same information comes from sysinfo(),
 statvfs() and rozos_proc_list() - see [[cref]].
 See [[desktop]], [[mount]], [[kmon]].

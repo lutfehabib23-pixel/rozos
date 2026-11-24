@@ -1,0 +1,10 @@
+# fontview - look at fonts (phase 23a)
+  `fontview`          every TrueType font in /usr/share/fonts: the list on
+                      the left, the chosen one on the right at 11 to 40 px
+  `fontview FILE`     one font file (.ttf or .otf)
+  `fontview -l`       list the fonts and their size in the terminal, and
+                      whether TrueType (FreeType) works
+Write your own sample in the Text box; - and + (buttons or keys) make
+every line smaller or bigger. q or Esc closes. Start > Graphics > Fonts.
+To use a font for the whole desktop see Settings > Fonts ([[settings]]).
+See [[fonts]].

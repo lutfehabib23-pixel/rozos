@@ -160,6 +160,9 @@ int ui_do_password(ui_ctx *u, int x, int y, int w, char *buf, int size);
 void ui_focus_next(ui_ctx *u);           /* পরের লেখার ঘর/তালিকায় ফোকাস */
 /* তালিকা: 1 = নির্বাচন বদলেছে, 2 = ডাবল-ক্লিক বা Enter */
 int ui_do_list(ui_ctx *u, int x, int y, int w, int h, const char *const *items, int n, int *sel, int *top);
+/* ধাপ ২৩ক: এরপরের ui_do_list কোন ফন্টে লিখবে — সারি স্পেস দিয়ে কলামে সাজানো হলে
+ * gfx_font_default() (সমান চওড়া, ১৬ px সারি); NULL = আবার মসৃণ UI ফন্ট */
+void ui_list_font(gfx_font *font);
 /* খাড়া স্ক্রলবার: pos 0..total-page; বদলালে 1 */
 int ui_do_vscroll(ui_ctx *u, int x, int y, int w, int h, int *pos, int total, int page);
 int ui_do_slider(ui_ctx *u, int x, int y, int w, int *value, int min, int max);

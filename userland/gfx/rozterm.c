@@ -581,7 +581,7 @@ int main(int argc, char **argv)
         if (!strcmp(argv[i], "-w")) wait_key = 1;
         else if (!strcmp(argv[i], "-e") && i + 1 < argc) cmd = argv[++i];
     }
-    font = gfx_font_default();
+    font = gfx_font_mono();                      /* ধাপ ২৩ক: JetBrains Mono (না থাকলে PSF) */
     if (!font) {
         fprintf(stderr, "rozterm: no font (/usr/share/fonts/rozos-mono-16.psf)\n");
         return 1;

@@ -953,7 +953,23 @@ int gfx_save_png(const gfx_surface *s, const char *path)
 struct gfx_font {
     int w, h, bpr, count;
     uint8_t *glyphs;
+    struct rozft *ft;                 /* ধাপ ২৩ক: TrueType (FreeType) হলে; h = লাইনের বাক্স */
 };
+
+#ifdef ROZOS_HAVE_FREETYPE
+#include "rozgfx_ft.h"
+#else
+/* FreeType ছাড়া বিল্ড: সব TrueType চেষ্টা ব্যর্থ, আগের PSF আঁকাই চলে */
+struct rozft;
+static int rozft_available(void) { return 0; }
+static void rozft_close(struct rozft *f) { (void)f; }
+static int rozft_text(struct rozft *f, gfx_surface *s, int x, int y, int b, const char *t,
+                      uint32_t fg, uint32_t bg, int wb)
+{ (void)f; (void)s; (void)y; (void)b; (void)t; (void)fg; (void)bg; (void)wb; return x; }
+static int rozft_width(struct rozft *f, const char *t) { (void)f; (void)t; return 0; }
+static void rozft_cell(struct rozft *f, gfx_surface *s, int x, int y, int h, int i, uint32_t fg, uint32_t bg)
+{ (void)f; (void)s; (void)x; (void)y; (void)h; (void)i; (void)fg; (void)bg; }
+#endif
 
 gfx_font *gfx_font_load(const char *path)
 {
@@ -1001,9 +1017,90 @@ gfx_font *gfx_font_default(void)
     return def;
 }
 
+/* ---------- ধাপ ২৩ক: TrueType সিস্টেম ফন্ট ---------- */
+
+int gfx_have_freetype(void) { return rozft_available(); }
+
+gfx_font *gfx_font_load_ttf(const char *path, int px, int mono)
+{
+#ifdef ROZOS_HAVE_FREETYPE
+    gfx_font *f;
+    struct rozft *ft = rozft_open(path, px, mono);
+    if (!ft) return NULL;
+    f = (gfx_font *)calloc(1, sizeof(*f));
+    if (!f) { rozft_close(ft); return NULL; }
+    f->ft = ft;
+    f->h = rozft_line_h(ft);
+    f->w = mono ? rozft_cell_w(ft) : (rozft_width(ft, "abcdefghijklmnopqrstuvwxyz") + 13) / 26;
+    return f;
+#else
+    (void)path; (void)px; (void)mono;
+    return NULL;
+#endif
+}
+
+/* সিস্টেম ফন্টের ফাইল (Settings-এ বাছা) অন্য মাপে: mono = 0 UI, 1 সমান-চওড়া; px 0 = সেটিংয়ের মাপ */
+gfx_font *gfx_font_system(int mono, int px)
+{
+#ifdef ROZOS_HAVE_FREETYPE
+    char path[256];
+    int def;
+    rozft_system_font(mono, path, sizeof(path), &def);
+    return gfx_font_load_ttf(path, px > 0 ? px : def, mono);
+#else
+    (void)mono; (void)px;
+    return NULL;
+#endif
+}
+
+/* UI ফন্ট: gfx_text(s, NULL, ...) এটায় আঁকে। লাইনের বাক্স ১৬ px (আগের PSF-এর মতো),
+ * তাই পুরোনো লেআউট বদলাতে হয় না। FreeType বা ফন্ট না থাকলে NULL (→ PSF)। */
+gfx_font *gfx_font_ui(void)
+{
+    static gfx_font *ui;
+    static int tried;
+#ifdef ROZOS_HAVE_FREETYPE
+    if (!tried) {
+        char path[256];
+        int px;
+        tried = 1;
+        rozft_system_font(0, path, sizeof(path), &px);
+        ui = gfx_font_load_ttf(path, px, 0);
+        if (!ui) ui = gfx_font_load_ttf("/usr/share/fonts/DejaVuSans.ttf", 13, 0);
+        if (ui) ui->h = 16;
+    }
+#else
+    (void)tried;
+#endif
+    return ui;
+}
+
+/* সমান চওড়া ফন্ট (টার্মিনাল, Code): TrueType না থাকলে PSF */
+gfx_font *gfx_font_mono(void)
+{
+    static gfx_font *mono;
+    static int tried;
+#ifdef ROZOS_HAVE_FREETYPE
+    if (!tried) {
+        char path[256];
+        int px;
+        tried = 1;
+        rozft_system_font(1, path, sizeof(path), &px);
+        mono = gfx_font_load_ttf(path, px, 1);
+        if (!mono) mono = gfx_font_load_ttf("/usr/share/fonts/DejaVuSansMono.ttf", px, 1);
+    }
+#else
+    (void)tried;
+#endif
+    return mono ? mono : gfx_font_default();
+}
+
+int gfx_font_is_ttf(const gfx_font *f) { return f && f->ft != NULL; }
+
 void gfx_font_free(gfx_font *f)
 {
-    if (!f || f == gfx_font_default()) return;
+    if (!f || f == gfx_font_default() || f == gfx_font_ui() || f == gfx_font_mono()) return;
+    if (f->ft) rozft_close(f->ft);
     free(f->glyphs);
     free(f);
 }
@@ -1044,8 +1141,10 @@ static int draw_text(gfx_surface *s, gfx_font *f, int x, int y, const char *str,
                      uint32_t fg, uint32_t bg, int with_bg)
 {
     int x0 = x;
+    if (!f) f = gfx_font_ui();                  /* ধাপ ২৩ক: NULL = মসৃণ UI ফন্ট */
     if (!f) f = gfx_font_default();
     if (!f) return x;
+    if (f->ft) return rozft_text(f->ft, s, x, y, f->h, str, fg, bg, with_bg);
     while (*str) {
         int c = next_char(&str), gy, gx;
         const uint8_t *g;
@@ -1070,6 +1169,7 @@ void gfx_glyph(gfx_surface *s, gfx_font *f, int x, int y, int index, uint32_t fg
     int gy, gx;
     if (!f) f = gfx_font_default();
     if (!f) return;
+    if (f->ft) { rozft_cell(f->ft, s, x, y, f->h, index, fg, bg); return; }   /* ধাপ ২৩ক */
     if (index < 0 || index >= f->count) index = '?';
     g = f->glyphs + (size_t)index * f->h * f->bpr;
     for (gy = 0; gy < f->h; gy++) {
@@ -1097,7 +1197,9 @@ int gfx_text_bg(gfx_surface *s, gfx_font *f, int x, int y, const char *str, uint
 int gfx_text_width(gfx_font *f, const char *str)
 {
     int n = 0, best = 0;
+    if (!f) f = gfx_font_ui();                  /* ধাপ ২৩ক */
     if (!f) f = gfx_font_default();
+    if (f && f->ft) return rozft_width(f->ft, str);
     while (*str) {
         int c = next_char(&str);
         if (c == '\n') { if (n > best) best = n; n = 0; }

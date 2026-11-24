@@ -1,6 +1,6 @@
 /* rozOS — settings: ডেস্কটপ আর সিস্টেমের সেটিং ও তথ্য (ধাপ ১৯চ)
  *
- *   settings [wallpaper|icons|system|processes|disks|network]
+ *   settings [wallpaper|icons|system|processes|disks|network|fonts]
  *
  *   Wallpaper      /usr/share/images-এর ছবি থাম্বনেইলে, ক্লিকেই বসে; Browse..., None;
  *                  ধরন Stretch / Fill; শুরুতে লোগো (splash) চালু/বন্ধ → /etc/rozos.conf
@@ -10,6 +10,8 @@
  *   Processes      চলমান প্রসেস (rozos_proc_list), প্রতি সেকেন্ডে হালনাগাদ, End process
  *   Disks          mount করা ডিস্ক — মাপ, ব্যবহার, খালি (statvfs)
  *   Network        নেটওয়ার্ক কার্ড — ঠিকানা, MAC, প্যাকেট (rozos_netinfo)
+ *   Fonts          ধাপ ২৩ক: UI ফন্ট আর টার্মিনাল/Code ফন্ট, মাপ, নমুনা → /etc/rozos.conf
+ *                  (ui_font, ui_font_size, mono_font, mono_font_size; নতুন খোলা জানালায় লাগে)
  * ডেস্কটপে ডান-ক্লিক → "Change wallpaper..." / "Add icon..." / "Settings..." এটা খোলে। */
 
 #include <stdio.h>
@@ -39,8 +41,9 @@
 #define MAXAPP      96
 #define MAXROW      128
 
-enum { S_WALL, S_ICONS, S_SYSTEM, S_PROC, S_DISKS, S_NET, S_COUNT };
-static const char *const sections[S_COUNT] = { "Wallpaper", "Desktop icons", "System", "Processes", "Disks", "Network" };
+enum { S_WALL, S_ICONS, S_SYSTEM, S_PROC, S_DISKS, S_NET, S_FONTS, S_COUNT };   /* ধাপ ২৩ক: Fonts */
+static const char *const sections[S_COUNT] = { "Wallpaper", "Desktop icons", "System", "Processes", "Disks", "Network",
+                                               "Fonts" };
 static int section, nav_top;
 static char status[200];
 
@@ -463,8 +466,11 @@ static void page_processes(ui_ctx *u, int x, int y, int w, int h)
         read_procs();
         last_proc_read = u->now;
     }
-    ui_label(u->s, x, y + 4, "  PID  NAME             STATE        CPU time THR      MEMORY", T->text_dim);
+    /* ধাপ ২৩ক: কলামগুলো স্পেস দিয়ে সাজানো — সমান-চওড়া PSF ফন্টে */
+    gfx_text(u->s, gfx_font_default(), x, y + 4, "  PID  NAME             STATE        CPU time THR      MEMORY", T->text_dim);
+    ui_list_font(gfx_font_default());
     ui_do_list(u, x, y + 24, w - 10, h - 80, proc_ptrs, nprocs, &proc_sel, &proc_top);
+    ui_list_font(NULL);
     if (ui_do_button(u, x, y + h - 46, 140, 26, "End process") && proc_sel >= 0) {
         struct prow *p = &procs[proc_sel];
         char q[160];
@@ -556,6 +562,133 @@ static void page_network(ui_ctx *u, int x, int y, int w, int h)
     if (!any) ui_label(u->s, x, yy, "No network card found.", T->text);
 }
 
+/* ================= Fonts (ধাপ ২৩ক) ================= */
+
+#define FONT_DIR "/usr/share/fonts"
+#define MAXFONT  48
+static char *ui_files[MAXFONT], *mono_files[MAXFONT];
+static char ui_names[MAXFONT][48], mono_names[MAXFONT][48];
+static const char *ui_ptrs[MAXFONT], *mono_ptrs[MAXFONT];
+static int n_ui, n_mono, ui_sel = -1, ui_top, mono_sel = -1, mono_top, ui_px = 14, mono_px = 15;
+static int fonts_scanned;
+static gfx_font *prev_ui, *prev_mono;
+static int prev_ui_key = -1, prev_mono_key = -1;
+
+static void font_label(const char *file, char *out, size_t n)
+{
+    char *dash;
+    snprintf(out, n, "%s", file);
+    if ((dash = strrchr(out, '.')) != NULL) *dash = '\0';
+    if ((dash = strstr(out, "-Regular")) != NULL) *dash = '\0';
+}
+
+static void scan_fonts(void)
+{
+    DIR *d = opendir(FONT_DIR);
+    struct dirent *e;
+    char cur_ui[200], cur_mono[200], v[16];
+    int i;
+    fonts_scanned = 1;
+    if (!d) return;
+    while ((e = readdir(d)) != NULL) {
+        const char *n = e->d_name, *dot = strrchr(n, '.');
+        char *path;
+        int mono;
+        if (!dot || (strcasecmp(dot, ".ttf") && strcasecmp(dot, ".otf"))) continue;
+        /* মোটা/তেরছা রূপ আলাদা দেখানো হয় না; বাংলা ফন্ট ধাপ ২৩খ-এর পরে */
+        if (strchr(n, '-') && !strstr(n, "-Regular")) continue;
+        if (strstr(n, "Bengali") || strstr(n, "Bangla") || strstr(n, "Siliguri")) continue;
+        mono = strstr(n, "Mono") || strstr(n, "Code");
+        if ((mono ? n_mono : n_ui) >= MAXFONT) continue;
+        path = (char *)malloc(strlen(FONT_DIR) + strlen(n) + 2);
+        if (!path) break;
+        sprintf(path, "%s/%s", FONT_DIR, n);
+        if (mono) { mono_files[n_mono] = path; font_label(n, mono_names[n_mono], 48); n_mono++; }
+        else { ui_files[n_ui] = path; font_label(n, ui_names[n_ui], 48); n_ui++; }
+    }
+    closedir(d);
+    conf_get("ui_font", cur_ui, sizeof(cur_ui), FONT_DIR "/Inter-Regular.ttf");
+    conf_get("mono_font", cur_mono, sizeof(cur_mono), FONT_DIR "/JetBrainsMono-Regular.ttf");
+    conf_get("ui_font_size", v, sizeof(v), "14");
+    ui_px = atoi(v) >= 11 && atoi(v) <= 16 ? atoi(v) : 14;
+    conf_get("mono_font_size", v, sizeof(v), "15");
+    mono_px = atoi(v) >= 10 && atoi(v) <= 24 ? atoi(v) : 15;
+    for (i = 0; i < n_ui; i++) { ui_ptrs[i] = ui_names[i]; if (!strcmp(ui_files[i], cur_ui)) ui_sel = i; }
+    for (i = 0; i < n_mono; i++) { mono_ptrs[i] = mono_names[i]; if (!strcmp(mono_files[i], cur_mono)) mono_sel = i; }
+}
+
+/* − মাপ + */
+static void size_box(ui_ctx *u, int x, int y, int *px, int lo, int hi)
+{
+    const struct ui_theme *T = ui_theme_get();
+    char t[16];
+    ui_label(u->s, x, y + 5, "Size", T->text_dim);
+    if (ui_do_button(u, x + 44, y, 28, 26, "-") && *px > lo) (*px)--;
+    snprintf(t, sizeof(t), "%d px", *px);
+    ui_label(u->s, x + 80, y + 5, t, T->text);
+    if (ui_do_button(u, x + 132, y, 28, 26, "+") && *px < hi) (*px)++;
+}
+
+static void preview(ui_ctx *u, gfx_font **f, int *key, const char *path, int px, int mono,
+                    int x, int y, int w, int h, const char *text)
+{
+    const struct ui_theme *T = ui_theme_get();
+    int k = px * 1000 + (path ? (int)(strlen(path) * 31 + path[strlen(path) - 5]) : 0);
+    if (k != *key) {
+        if (*f) gfx_font_free(*f);
+        *f = path ? gfx_font_load_ttf(path, px, mono) : NULL;
+        *key = k;
+    }
+    ui_sunken(u->s, x, y, w, h, T->field);
+    gfx_set_clip(u->s, x + 2, y + 2, w - 4, h - 4);
+    if (*f) gfx_text(u->s, *f, x + 10, y + 8, text, T->field_text);
+    else ui_label(u->s, x + 10, y + 10, path ? "Cannot load this font." : "No TrueType support (FreeType).", T->text_dim);
+    gfx_reset_clip(u->s);
+}
+
+static void page_fonts(ui_ctx *u, int x, int y, int w, int h)
+{
+    const struct ui_theme *T = ui_theme_get();
+    int lw = 210, half = (h - 50) / 2;
+    if (!fonts_scanned) scan_fonts();
+    ui_label(u->s, x, y + 4, "Menus, buttons and titles", T->text);
+    ui_do_list(u, x, y + 24, lw, half - 30, ui_ptrs, n_ui, &ui_sel, &ui_top);
+    size_box(u, x + lw + 16, y + 24, &ui_px, 11, 16);
+    preview(u, &prev_ui, &prev_ui_key, ui_sel >= 0 ? ui_files[ui_sel] : NULL, ui_px, 0,
+            x + lw + 16, y + 58, w - lw - 26, half - 64,
+            "The quick brown fox jumps over the lazy dog.\nFiles  Settings  Shut down  0123456789");
+
+    y += half;
+    ui_label(u->s, x, y + 4, "Terminal and Code", T->text);
+    ui_do_list(u, x, y + 24, lw, half - 30, mono_ptrs, n_mono, &mono_sel, &mono_top);
+    size_box(u, x + lw + 16, y + 24, &mono_px, 10, 24);
+    preview(u, &prev_mono, &prev_mono_key, mono_sel >= 0 ? mono_files[mono_sel] : NULL, mono_px, 1,
+            x + lw + 16, y + 58, w - lw - 26, half - 64,
+            "int main(void) {\n    puts(\"Hello, rozOS!\");\n}   // 0O 1lI {}[]");
+
+    y += half;
+    if (ui_do_button(u, x, y + 6, 120, 28, "Apply")) {
+        char v[16];
+        int ok = 1;
+        if (ui_sel >= 0) ok &= conf_set("ui_font", ui_files[ui_sel]) == 0;
+        snprintf(v, sizeof(v), "%d", ui_px);
+        ok &= conf_set("ui_font_size", v) == 0;
+        if (mono_sel >= 0) ok &= conf_set("mono_font", mono_files[mono_sel]) == 0;
+        snprintf(v, sizeof(v), "%d", mono_px);
+        ok &= conf_set("mono_font_size", v) == 0;
+        snprintf(status, sizeof(status), ok ? "Saved. New windows use it; Start > Restart for the whole desktop."
+                                            : "Could not write " CONF ": %s", strerror(errno));
+    }
+    if (ui_do_button(u, x + 130, y + 6, 120, 28, "Defaults")) {
+        int i;
+        ui_px = 14;
+        mono_px = 15;
+        for (i = 0; i < n_ui; i++) if (strstr(ui_files[i], "/Inter-Regular.ttf")) ui_sel = i;
+        for (i = 0; i < n_mono; i++) if (strstr(mono_files[i], "/JetBrainsMono-Regular.ttf")) mono_sel = i;
+        snprintf(status, sizeof(status), "Inter 14 and JetBrains Mono 15 - press Apply to keep them.");
+    }
+}
+
 /* ================= main ================= */
 
 int main(int argc, char **argv)
@@ -563,7 +696,8 @@ int main(int argc, char **argv)
     ui_ctx ui;
     int i;
     if (argc > 1) {
-        static const char *const keys[S_COUNT] = { "wallpaper", "icons", "system", "processes", "disks", "network" };
+        static const char *const keys[S_COUNT] = { "wallpaper", "icons", "system", "processes", "disks", "network",
+                                                   "fonts" };
         for (i = 0; i < S_COUNT; i++) if (!strcmp(argv[1], keys[i])) section = i;
     }
     if (gfx_init_window("Settings", 780, 540) < 0) {
@@ -597,6 +731,7 @@ int main(int argc, char **argv)
         case S_PROC: page_processes(&ui, px, py, pw, ph); break;
         case S_DISKS: page_disks(&ui, px, py, pw, ph); break;
         case S_NET: page_network(&ui, px, py, pw, ph); break;
+        case S_FONTS: page_fonts(&ui, px, py, pw, ph); break;
         }
         ui_statusbar(ui.s, 0, H - 26, W, 26, status);
         /* লেখার ঘর কী নিলে ui.key = 0 হয়ে যায় — তাই শেষে দেখা */

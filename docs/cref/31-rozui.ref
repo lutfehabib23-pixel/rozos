@@ -252,6 +252,44 @@ int main(void)
 }
 @end
 
+@entry ui_list_font
+@also columns
+@header rozui.h
+@syntax void ui_list_font(gfx_font *font);
+@summary Choose the font of the next ui_do_list calls.
+@desc
+Phase 23a: lists use the smooth proportional UI font, so rows lined up
+with spaces ("%-16s") no longer form columns. Call ui_list_font with
+gfx_font_default() (8 x 16, equal width) before such a list and
+ui_list_font(NULL) after it to go back to the UI font. Settings >
+Processes does this.
+@returns
+Nothing.
+@see ui_do_list gfx_font_default gfx_font_ui
+@check compile
+@example
+#include <stdio.h>
+#include <rozui.h>
+
+int main(void)
+{
+    static const char *const rows[] = { "  1  init      running", "  7  rozwm     running" };
+    int sel = 0, top = 0;
+    ui_ctx u;
+    if (gfx_init_window("Columns", 320, 140) < 0) return 1;
+    ui_init(&u);
+    while (ui_run(&u)) {
+        gfx_clear(u.s, GFX_RGB(40, 40, 40));
+        ui_list_font(gfx_font_default());
+        ui_do_list(&u, 10, 10, 300, 100, rows, 2, &sel, &top);
+        ui_list_font(NULL);
+        if (u.key == 'q') ui_quit(&u);
+    }
+    gfx_quit();
+    return 0;
+}
+@end
+
 @entry ui_menubar
 @also ui_menu ui_menuitem ui_shortcut_key UI_MENUBAR_H menu
 @header rozui.h

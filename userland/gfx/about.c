@@ -42,7 +42,8 @@ static void human(char *out, size_t n, unsigned long long v)
 int main(void)
 {
     static const char *const credits1 = "Limine, TinyCC, pdpmake, lwIP, BearSSL,";
-    static const char *const credits2 = "Lua, zlib, stb, sbase, DejaVu fonts";
+    static const char *const credits2 = "Lua, zlib, stb, sbase, FreeType, DejaVu,";
+    static const char *const credits3 = "Inter, JetBrains Mono, Noto and more fonts";   /* ধাপ ২৩ক */
     char lines[8][160], all[1400], cpu[64], a[24], b[24];
     int nl = 0, i;
     struct utsname un;
@@ -73,7 +74,7 @@ int main(void)
     for (i = 0; i < nl; i++) { strcat(all, lines[i]); strcat(all, "\n"); }
     strcat(all, "License: MIT   github.com/lutfehabib23-pixel/rozos\n");
 
-    if (gfx_init_window("About rozOS", 560, 440) < 0) {
+    if (gfx_init_window("About rozOS", 560, 470) < 0) {
         fputs(all, stdout);                      /* ডেস্কটপ ছাড়া: শুধু লেখা */
         return 0;
     }
@@ -97,12 +98,27 @@ int main(void)
         gfx_text(U.s, NULL, 200, 66, "built from scratch in C and assembly.", T->text_dim);
         gfx_text(U.s, NULL, 200, 98, un.release, T->text);
         y = 160;
-        for (i = 0; i < nl; i++, y += 22) gfx_text(U.s, NULL, 20, y, lines[i], T->text);
+        /* ধাপ ২৩ক: আনুপাতিক ফন্টে স্পেস দিয়ে সারি মেলে না — "নাম:" আর মান আলাদা কলামে */
+        for (i = 0; i < nl; i++, y += 22) {
+            char *v = strchr(lines[i], ':');
+            if (v) {
+                *v = '\0';
+                gfx_text(U.s, NULL, 20, y, lines[i], T->text_dim);
+                gfx_text(U.s, NULL, 20 + gfx_text_width(NULL, lines[i]), y, ":", T->text_dim);
+                *v = ':';
+                while (*++v == ' ') {
+                }
+                gfx_text(U.s, NULL, 100, y, v, T->text);
+            } else {
+                gfx_text(U.s, NULL, 20, y, lines[i], T->text);
+            }
+        }
         y += 8;
         gfx_text(U.s, NULL, 20, y, "License: MIT    github.com/lutfehabib23-pixel/rozos", T->text_dim);
         gfx_text(U.s, NULL, 20, y + 20, "Thanks to:", T->text_dim);
         gfx_text(U.s, NULL, 20, y + 38, credits1, T->text_dim);
         gfx_text(U.s, NULL, 20, y + 56, credits2, T->text_dim);
+        gfx_text(U.s, NULL, 20, y + 74, credits3, T->text_dim);
         if (ui_do_button(&U, U.w - 200, U.h - 42, 88, 28, "Copy")) ui_clip_set(all, (int)strlen(all));
         if (ui_do_button(&U, U.w - 104, U.h - 42, 88, 28, "Close") || U.key == GFX_KEY_ESC || U.key == '\n')
             ui_quit(&U);

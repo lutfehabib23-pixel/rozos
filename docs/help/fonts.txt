@@ -1,4 +1,4 @@
-# Fonts and screen resolution (phase 13)
+# Fonts and screen resolution (phase 13, smooth fonts phase 23a)
 == Console font ==
   `setfont`                  list the fonts in /usr/share/fonts
   `setfont rozos-mono-20`    10x20 pixels (bigger letters, fewer columns)
@@ -10,10 +10,30 @@ To keep one: `echo rozos-mono-20 > /etc/console-font` - init loads it
 at every boot. Only the framebuffer console changes; the serial
 terminal uses your PC's font. See [[setfont]].
 
-== TrueType ==
-/usr/share/fonts/DejaVuSans.ttf and DejaVuSansMono.ttf, for programs
-via [[rozgfx]] (gfx_ttf_text, any size, smooth edges). Licence:
-/usr/share/fonts/LICENSE-fonts.txt.
+== Smooth fonts on the desktop (phase 23a) ==
+Every window writes with smooth (anti-aliased) TrueType letters, drawn
+by FreeType with light hinting so small text stays sharp:
+  menus, buttons, titles   Inter 14 px
+  terminal, Code, cref     JetBrains Mono 15 px (equal-width cells)
+Change them in Settings > Fonts ([[settings]]): pick a font, a size,
+see a sample, Apply. New windows use it; Start > Restart for all.
+They are lines in /etc/rozos.conf:
+  ui_font=/usr/share/fonts/Inter-Regular.ttf      ui_font_size=14
+  mono_font=/usr/share/fonts/JetBrainsMono-Regular.ttf   mono_font_size=15
+Fonts in /usr/share/fonts (all free, SIL Open Font License; the
+LICENSE-*.txt files are next to them):
+  sans      Inter (Regular, Medium, SemiBold, Bold, Italic), Noto Sans,
+            Roboto, Open Sans, Source Sans 3, DejaVu Sans
+  serif     Noto Serif, Source Serif 4
+  mono      JetBrains Mono (Regular, Bold), Fira Code, DejaVu Sans Mono
+  Bengali   Noto Sans Bengali, Noto Serif Bengali, Hind Siliguri, Tiro
+            Bangla - joined letters need shaping, coming in phase 23b
+`fontview` shows every font at many sizes ([[fontview]]); `fontview -l`
+lists them. Add your own: copy a .ttf or .otf into /usr/share/fonts.
+In C: gfx_font_ui, gfx_font_mono, gfx_font_load_ttf ([[rozgfx]],
+`cref gfx_font_ui`); gfx_ttf_text still works too. Without FreeType
+(a build without ports/freetype) everything uses the bitmap font.
+The text console keeps the bitmap rozos-mono fonts above.
 
 == Resolution ==
 The screen size is chosen by Limine at boot, so it changes with a

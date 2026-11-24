@@ -37,13 +37,14 @@
 == Desktop ([[desktop]]) ==
   [[rozwm]]    the window server (starts at boot)
   [[rozterm]]  terminal window          [[desktop|desktop, textmode]] switch
-  [[settings]] wallpaper, icons, memory, processes, disks, network
+  [[settings]] wallpaper, icons, memory, processes, disks, network, fonts
   [[code]]     graphical C editor (menus, compile, run)
   [[filemanager|files]]    file manager (open, copy, rename, delete)
 
 == Graphics ([[graphics]]) ==
   [[gfxdemo]]  shapes, images, fonts     [[paint]]    draw with the mouse
   [[imgview]]  look at pictures          [[gcalc]]    calculator with buttons
+  [[fontview]] look at fonts at any size
   gfxevents   show keyboard/mouse events as text ([[rozgfx]])
 
 == Games ([[games]]) ==

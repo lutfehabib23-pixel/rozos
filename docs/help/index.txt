@@ -58,7 +58,7 @@ Type [[help|how to use this viewer]] if you are new here.
   [[rozgfx]]          the graphics library (shapes, pictures, fonts, mouse)
   [[games]]           Snake, Breakout, Tetris, Platformer - and [[rozgame]]:
                       make your own games in C, or in Lua with [[luagame]]
-  [[fonts]]           console fonts (setfont) and screen resolution
+  [[fonts]]           smooth desktop fonts, console fonts, screen resolution
   [[framebuffer]]     /dev/fb0      [[shm]] shared memory   [[pipes]] pipe(), poll()
 
 == Network ==
