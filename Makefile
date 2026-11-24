@@ -12,6 +12,7 @@
 #   ./toolchain/get-tcc.sh   TCC সোর্স আনা (ধাপ ৮) — তারপর make userland-এ /bin/tcc
 #   ./toolchain/get-lua.sh, get-zlib.sh   ধাপ ১৬খ-১: Lua ও zlib সোর্স — /bin/lua, gzip, liblua.a, libz.a
 #   ./toolchain/get-freetype.sh ধাপ ২৩ক: FreeType সোর্স — মসৃণ TrueType লেখা
+#   ./toolchain/get-kbts.sh    ধাপ ২৩খ: kb_text_shape — বাংলা যুক্তাক্ষর (shaping)
 #   ./toolchain/get-fonts.sh   ধাপ ২৩ক: Inter, JetBrains Mono, Noto, বাংলা ফন্ট ইত্যাদি
 #   ./toolchain/get-sbase.sh   ধাপ ১৯ছ: sbase সোর্স — grep, sed, sort, head, tail, find, xargs ...
 #   make userland   ইউজার প্রোগ্রাম (ধাপ ৬-৭): build/userland/bin/* (init, rozsh, edit, ls ...)
@@ -137,6 +138,9 @@ FT_OBJS      := $(if $(HAVE_FREETYPE),$(patsubst %,$(FT_BUILD)/%.o,$(FT_MODS)))
 FT_CFLAGS    := $(USER_CFLAGS) -w -DFT2_BUILD_LIBRARY -Iports/freetype/rozos -I$(FT_SRC)/include \
                 '-DFT_CONFIG_MODULES_H=<rozft-module.h>' '-DFT_CONFIG_OPTIONS_H=<rozft-option.h>'
 FONT_EXTRA   := $(wildcard ports/fonts/src/*.ttf ports/fonts/src/LICENSE-*.txt)
+# ধাপ ২৩খ: kb_text_shape (বাংলা যুক্তাক্ষর) — ./toolchain/get-kbts.sh → ports/kbts/src
+KBTS_SRC     := ports/kbts/src
+HAVE_KBTS    := $(if $(and $(HAVE_FREETYPE),$(wildcard $(KBTS_SRC)/kb_text_shape.h)),1,)
 
 # ---------- rozhttp (ধাপ ১০): http/https ক্লায়েন্ট লাইব্রেরি — http-get ও rozpkg ব্যবহার করে ----------
 ROZHTTP_SRCS := userland/lib/rozhttp.c    # শুধু এটা — পুরোনো ধাপ ৬-এর userland/lib/ulib.c (থাকলে) বাদ
@@ -144,7 +148,7 @@ ROZHTTP_OBJS := $(patsubst userland/lib/%.c,$(USER_BUILD)/lib/%.o,$(ROZHTTP_SRCS
 ROZHTTP_A    := $(USER_BUILD)/lib/librozhttp.a
 # ধাপ ১৩: librozgfx (গ্রাফিক্স; rozgfx_ttf.c-তে stb_truetype)
 ROZGFX_SRCS  := userland/lib/rozgfx.c userland/lib/rozgfx_ttf.c userland/lib/rozgfx_img.c \
-                $(if $(HAVE_FREETYPE),userland/lib/rozgfx_ft.c)
+                $(if $(HAVE_FREETYPE),userland/lib/rozgfx_ft.c) $(if $(HAVE_KBTS),userland/lib/rozgfx_shape.c)
 ROZGFX_OBJS  := $(patsubst userland/lib/%.c,$(USER_BUILD)/lib/%.o,$(ROZGFX_SRCS))
 ROZGFX_A     := $(USER_BUILD)/lib/librozgfx.a
 # ধাপ ১৪: rozui (3D UI) — rozgfx-এর ওপর
@@ -431,8 +435,9 @@ $(USER_BUILD)/lib/rozgfx_img.o: LIB_EXTRA_CFLAGS := -w
 # ধাপ ২৩ক: FreeType থাকলে rozgfx.c/rozgfx_ft.c সেটা ব্যবহার করে
 ifeq ($(HAVE_FREETYPE),1)
 $(USER_BUILD)/lib/rozgfx.o: LIB_EXTRA_CFLAGS := -DROZOS_HAVE_FREETYPE
-$(USER_BUILD)/lib/rozgfx_ft.o: LIB_EXTRA_CFLAGS := -DROZOS_HAVE_FREETYPE -I$(FT_SRC)/include
+$(USER_BUILD)/lib/rozgfx_ft.o: LIB_EXTRA_CFLAGS := -DROZOS_HAVE_FREETYPE -I$(FT_SRC)/include $(if $(HAVE_KBTS),-DROZOS_HAVE_KBTS)
 endif
+$(USER_BUILD)/lib/rozgfx_shape.o: LIB_EXTRA_CFLAGS := -w -I$(KBTS_SRC)
 
 $(FT_BUILD)/%.o: $(FT_SRC)/src/%.c ports/freetype/rozos/rozft-module.h ports/freetype/rozos/rozft-option.h
 	@mkdir -p $(dir $@)
@@ -615,6 +620,7 @@ tcc-check:
 	@test -n "$(HAVE_PDPMAKE)" || echo "  NOTE    pdpmake সোর্স নেই — /bin/make বাদ। আনতে: ./toolchain/get-pdpmake.sh"
 	@test -n "$(HAVE_BEARSSL)" || echo "  NOTE    BearSSL সোর্স নেই — https ও rozpkg চলবে না। আনতে: ./toolchain/get-bearssl.sh"
 	@test -n "$(HAVE_FREETYPE)" || echo "  NOTE    FreeType সোর্স নেই — লেখা আগের মতো বিটম্যাপে। আনতে: ./toolchain/get-freetype.sh"
+	@test -n "$(HAVE_KBTS)" || echo "  NOTE    kb_text_shape নেই — বাংলা যুক্তাক্ষর জোড়া লাগবে না। আনতে: ./toolchain/get-kbts.sh"
 	@test -n "$(FONT_EXTRA)" || echo "  NOTE    TrueType ফন্ট নেই (Inter, JetBrains Mono ...)। আনতে: ./toolchain/get-fonts.sh"
 	@test -n "$(HAVE_SBASE)" || echo "  NOTE    sbase সোর্স নেই — grep, sed, sort, head, tail ... বাদ। আনতে: ./toolchain/get-sbase.sh"
 	@test -n "$(HAVE_LUA)" || echo "  NOTE    Lua সোর্স নেই — /bin/lua বাদ। আনতে: ./toolchain/get-lua.sh"

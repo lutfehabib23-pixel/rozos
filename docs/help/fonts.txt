@@ -27,13 +27,24 @@ LICENSE-*.txt files are next to them):
   serif     Noto Serif, Source Serif 4
   mono      JetBrains Mono (Regular, Bold), Fira Code, DejaVu Sans Mono
   Bengali   Noto Sans Bengali, Noto Serif Bengali, Hind Siliguri, Tiro
-            Bangla - joined letters need shaping, coming in phase 23b
+            Bangla (phase 23b, see below)
 `fontview` shows every font at many sizes ([[fontview]]); `fontview -l`
 lists them. Add your own: copy a .ttf or .otf into /usr/share/fonts.
 In C: gfx_font_ui, gfx_font_mono, gfx_font_load_ttf ([[rozgfx]],
 `cref gfx_font_ui`); gfx_ttf_text still works too. Without FreeType
 (a build without ports/freetype) everything uses the bitmap font.
 The text console keeps the bitmap rozos-mono fonts above.
+
+== Bengali (phase 23b) ==
+Bengali text is shown with joined letters: the i-kar goes before its
+letter, reph sits on top, conjuncts like ksha, stra, jna become one
+shape. kb_text_shape (zlib licence, ./toolchain/get-kbts.sh) reads the
+font's OpenType rules; letters missing from the UI font come from the
+Bengali font: bengali_font=/usr/share/fonts/NotoSansBengali.ttf in
+/etc/rozos.conf, or the "Bengali:" button in Settings > Fonts.
+Works in every window text: file names in Files, titles, menus,
+dialogs, fontview. Not yet: the terminal and Code (they keep one byte
+per cell) and typing Bengali (an input method comes in phase 23c).
 
 == Resolution ==
 The screen size is chosen by Limine at boot, so it changes with a

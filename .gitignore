@@ -21,3 +21,4 @@ ports/sbase/src/
 ports/sqlite/src/
 ports/fonts/src/
 ports/freetype/src/
+ports/kbts/src/

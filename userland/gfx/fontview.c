@@ -3,7 +3,8 @@
  *   fontview              বাঁয়ে /usr/share/fonts-এর সব ফন্ট, ডানে বাছাইটা নানা মাপে
  *   fontview FILE         শুধু এই ফন্ট (.ttf / .otf)
  *   fontview -l           ফন্টের তালিকা টার্মিনালে (FreeType আছে কিনা সহ)
- * ওপরে লেখার ঘরে নিজের লেখা বসানো যায়; + / - মাপ বদলায়। ডেস্কটপ না থাকলে তালিকা ছাপে। */
+ * ওপরে লেখার ঘরে নিজের লেখা বসানো যায়; + / - মাপ বদলায়। ডেস্কটপ না থাকলে তালিকা ছাপে।
+ * ধাপ ২৩খ: প্রতিটা ফন্টের নিচে একটা বাংলা লাইন (যুক্তাক্ষর জোড়া লাগে কিনা দেখতে)। */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -117,7 +118,11 @@ int main(int argc, char **argv)
             gfx_text(U.s, f[2], px + 12, y, "ABCDEFGHIJKLMNOPQRSTUVWXYZ  abcdefghijklmnopqrstuvwxyz", T->field_text);
             y += gfx_font_height(f[2]);
             gfx_text(U.s, f[2], px + 12, y, "0123456789  !@#$%^&*()[]{}<>?/\\|+-=_~;:'\",.", T->field_text);
-            y += gfx_font_height(f[2]) + 10;
+            y += gfx_font_height(f[2]);
+            /* ধাপ ২৩খ: বাংলা — যুক্তাক্ষর, রেফ, ি-কার (ফন্টে বাংলা না থাকলে Noto Sans Bengali থেকে) */
+            gfx_text(U.s, f[2], px + 12, y + 2, "বাংলা: আমি, কি, ক্ষমা, শিক্ষা, স্ত্রী, রাষ্ট্র, জ্ঞান, সন্ধ্যা, কার্তিক, পৃথিবী",
+                     T->field_text);
+            y += gfx_font_height(f[2]) + 14;
             for (i = 0; i < 7 && y < H - 20; i++) {
                 snprintf(t, sizeof(t), "%d", sizes[i] + base);
                 gfx_text(U.s, NULL, px + 12, y + (gfx_font_height(f[i]) - 16) / 2, t, T->text_dim);

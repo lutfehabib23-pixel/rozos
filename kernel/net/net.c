@@ -21,6 +21,7 @@
 #include "lwip/netif.h"
 #include "lwip/etharp.h"
 #include "lwip/dhcp.h"
+#include "lwip/prot/dhcp.h"
 #include "lwip/dns.h"
 #include "lwip/timeouts.h"
 #include "lwip/pbuf.h"
@@ -58,6 +59,106 @@ uint32_t rozos_net_rand(void)
     return rand_state;
 }
 
+/* ---------- ধাপ ২২ঘ: ফ্রেম লগ (kmon `netlog`) ----------
+ * শেষ ৩২টা আসা/যাওয়া ফ্রেমের সারাংশ: ধরন, MAC, IP, পোর্ট, DHCP বার্তার ধরন।
+ * আসল PC-তে DHCP-র উত্তর আসছে কিনা দেখার জন্য। */
+#define FLOG_N 32
+struct flog {
+    uint32_t ms;
+    uint16_t len, type;                    /* type = ethertype */
+    uint8_t dir;                           /* 'R' / 'T' */
+    uint8_t proto, dhcp;                   /* IP প্রোটোকল; DHCP বার্তা (option 53) */
+    uint8_t dst[6], src[6];
+    uint8_t ip_src[4], ip_dst[4];
+    uint16_t sport, dport;
+};
+static struct flog flog[FLOG_N];
+static unsigned flog_pos, flog_total;
+extern unsigned long rozos_dhcp_stat[8];  /* lwip/core/ipv4/dhcp.c */
+
+static void flog_add(char dir, const uint8_t *f, size_t len)
+{
+    struct flog *e = &flog[flog_pos++ % FLOG_N];
+    memset(e, 0, sizeof(*e));
+    flog_total++;
+    e->ms = (uint32_t)timer_uptime_ms();
+    e->dir = (uint8_t)dir;
+    e->len = (uint16_t)len;
+    if (len < 14) return;
+    memcpy(e->dst, f, 6);
+    memcpy(e->src, f + 6, 6);
+    e->type = (uint16_t)(f[12] << 8 | f[13]);
+    if (e->type == 0x0806 && len >= 42) {                 /* ARP: প্রেরক আর খোঁজা IP */
+        memcpy(e->ip_src, f + 28, 4);
+        memcpy(e->ip_dst, f + 38, 4);
+        e->proto = (uint8_t)f[21];                        /* 1 = request, 2 = reply */
+    } else if (e->type == 0x0800 && len >= 34) {
+        const uint8_t *ip = f + 14;
+        size_t hl = (size_t)(ip[0] & 15) * 4;
+        e->proto = ip[9];
+        memcpy(e->ip_src, ip + 12, 4);
+        memcpy(e->ip_dst, ip + 16, 4);
+        if ((e->proto == 17 || e->proto == 6) && len >= 14 + hl + 4) {
+            const uint8_t *u = ip + hl;
+            e->sport = (uint16_t)(u[0] << 8 | u[1]);
+            e->dport = (uint16_t)(u[2] << 8 | u[3]);
+            /* DHCP: UDP 67/68, options 236+4 বাইট পরে (magic cookie) */
+            if (e->proto == 17 && (e->sport == 67 || e->sport == 68)) {
+                size_t o = 14 + hl + 8 + 240;
+                while (o + 2 < len && f[o] != 255) {
+                    if (f[o] == 0) { o++; continue; }
+                    if (f[o] == 53) { e->dhcp = f[o + 2]; break; }
+                    o += 2u + f[o + 1];
+                }
+            }
+        }
+    }
+}
+
+static void ip_str(char *b, const uint8_t *ip)
+{
+    ksnprintf(b, 16, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+}
+
+void net_log_dump(void)
+{
+    static const char *const dname[] = { "?", "DISCOVER", "OFFER", "REQUEST", "DECLINE", "ACK", "NAK",
+                                         "RELEASE", "INFORM" };
+    unsigned i, n = flog_total < FLOG_N ? flog_total : FLOG_N;
+    int k;
+    kprintf("  frames seen: %u (last %u below, oldest first)\n", flog_total, n);
+    for (i = flog_total - n; i < flog_total; i++) {
+        const struct flog *e = &flog[i % FLOG_N];
+        char a[16], b[16];
+        ip_str(a, e->ip_src);
+        ip_str(b, e->ip_dst);
+        kprintf("  %6u.%03u %c %4u  %02x:%02x:%02x>%02x:%02x:%02x ", e->ms / 1000, e->ms % 1000, e->dir, e->len,
+                e->src[3], e->src[4], e->src[5], e->dst[3], e->dst[4], e->dst[5]);
+        if (e->type == 0x0806) {
+            kprintf("ARP %s %s -> %s\n", e->proto == 1 ? "who-has" : "reply", a, b);
+        } else if (e->type == 0x0800) {
+            kprintf("IP %s -> %s ", a, b);
+            if (e->proto == 17) kprintf("UDP %u->%u", e->sport, e->dport);
+            else if (e->proto == 6) kprintf("TCP %u->%u", e->sport, e->dport);
+            else if (e->proto == 1) kprintf("ICMP");
+            else kprintf("proto %u", e->proto);
+            if (e->dhcp) kprintf("  DHCP %s", e->dhcp <= 8 ? dname[e->dhcp] : "?");
+            kprintf("\n");
+        } else {
+            kprintf("type %04x\n", e->type);
+        }
+    }
+    kprintf("  DHCP replies: got %lu, short %lu, other MAC %lu, old xid %lu, bad options %lu,\n"
+            "                offer taken %lu, ack->address %lu, nak/unexpected %lu\n",
+            rozos_dhcp_stat[0], rozos_dhcp_stat[1], rozos_dhcp_stat[2], rozos_dhcp_stat[3],
+            rozos_dhcp_stat[4], rozos_dhcp_stat[5], rozos_dhcp_stat[6], rozos_dhcp_stat[7]);
+    for (k = 0; k < nic_count; k++) {
+        struct dhcp *d = netif_dhcp_data(&nics[k].netif);
+        kprintf("  %s: DHCP state %d, tries %d%s\n", nics[k].dev->name, d ? d->state : -1, d ? d->tries : 0,
+                d ? " (6 selecting, 1 requesting, 10 bound, 12 backing off)" : " (DHCP off)");
+    }
+}
+
 /* ---------- netif ---------- */
 
 static err_t netif_output(struct netif *netif, struct pbuf *p)
@@ -70,6 +171,7 @@ static err_t netif_output(struct netif *netif, struct pbuf *p)
         return ERR_BUF;
     }
     len = pbuf_copy_partial(p, frame, p->tot_len, 0);
+    flog_add('T', frame, len);                   /* ধাপ ২২ঘ */
     if (n->dev->transmit(n->dev, frame, len) < 0) {
         return ERR_IF;
     }
@@ -166,6 +268,7 @@ static int netd(void *arg)
                 int budget = 64;
                 while (budget-- > 0 && (len = n->dev->poll(n->dev, rx_frame, sizeof(rx_frame))) > 0) {
                     struct pbuf *p = pbuf_alloc(PBUF_RAW, (u16_t)len, PBUF_POOL);
+                    flog_add('R', rx_frame, len);    /* ধাপ ২২ঘ */
                     random_add_entropy(cpu_rdtsc() ^ ((uint64_t)len << 48));
                     if (!p) {
                         n->dev->rx_dropped++;
@@ -244,6 +347,11 @@ int net_get_info(int index, struct rozos_netinfo *out)
     memcpy(out->mac, n->dev->mac, 6);
     out->link_up = (uint8_t)n->dev->link_up;
     out->dhcp = (uint8_t)n->dhcp;
+    {                                            /* ধাপ ২২ঘ */
+        struct dhcp *dd = netif_dhcp_data(&n->netif);
+        out->dhcp_state = dd ? dd->state : 0;
+        out->dhcp_tries = dd ? dd->tries : 0;
+    }
     out->ip = ip_2_ip4(&n->netif.ip_addr)->addr;
     out->netmask = ip_2_ip4(&n->netif.netmask)->addr;
     out->gateway = ip_2_ip4(&n->netif.gw)->addr;

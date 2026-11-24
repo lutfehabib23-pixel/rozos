@@ -36,6 +36,7 @@ int  e1000_init(void);                    /* পাওয়া কার্ড�
 int  rtl8168_init(void);                  /* ধাপ ২২: Realtek RTL8111/8168 */
 /* index-তম কার্ড (kmon `nic`); না থাকলে NULL */
 struct net_device *net_get_device(int index);
+void net_log_dump(void);                  /* ধাপ ২২ঘ: kmon `netlog` */
 
 /* বুটে: ড্রাইভার, lwIP, DHCP, netd থ্রেড। ফেরত NIC-এর সংখ্যা */
 int  net_init(void);
@@ -48,7 +49,9 @@ struct rozos_netinfo {
     uint8_t  link_up;
     uint8_t  configured;                  /* ঠিকানা আছে */
     uint8_t  dhcp;                        /* 1 = DHCP, 0 = হাতে বসানো */
-    uint8_t  reserved[3];
+    uint8_t  dhcp_state;                  /* ধাপ ২২ঘ: lwIP-এর DHCP অবস্থা (10 = ঠিকানা পেয়েছে) */
+    uint8_t  dhcp_tries;
+    uint8_t  reserved[1];
     uint32_t ip, netmask, gateway, dns;
     uint64_t rx_packets, tx_packets, rx_bytes, tx_bytes, rx_dropped, tx_errors;
 };

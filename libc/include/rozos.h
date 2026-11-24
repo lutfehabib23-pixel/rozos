@@ -24,7 +24,9 @@ struct rozos_netinfo {
     unsigned char link_up;
     unsigned char configured;
     unsigned char dhcp;
-    unsigned char reserved[3];
+    unsigned char dhcp_state;           /* ধাপ ২২ঘ: 6 খুঁজছে, 1 অনুরোধ, 10 ঠিকানা পেয়েছে, 12 অপেক্ষা */
+    unsigned char dhcp_tries;
+    unsigned char reserved[1];
     unsigned int ip, netmask, gateway, dns;
     unsigned long rx_packets, tx_packets, rx_bytes, tx_bytes, rx_dropped, tx_errors;
 };

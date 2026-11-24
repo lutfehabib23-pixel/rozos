@@ -31,7 +31,15 @@ static void show(const struct rozos_netinfo *n)
         printf("    inet %s  netmask %s  gateway %s  dns %s\n", ip_str(n->ip), ip_str(n->netmask),
                ip_str(n->gateway), ip_str(n->dns));
     } else {
-        printf("    no address yet%s\n", n->dhcp ? " (waiting for DHCP)" : "");
+        /* ধাপ ২২ঘ: DHCP কোথায় আছে (lwIP-এর অবস্থা) — বেশিক্ষণ আটকে থাকলে kmon → netlog */
+        static const char *const st[] = { "off", "requesting the offered address", "starting", "rebooting",
+                                           "rebinding", "renewing", "looking for a DHCP server", "informing",
+                                           "checking", "permanent", "bound", "releasing", "waiting to retry" };
+        if (n->dhcp)
+            printf("    no address yet (DHCP: %s, try %u) - `kmon` then `netlog` shows the frames\n",
+                   n->dhcp_state < 13 ? st[n->dhcp_state] : "?", (unsigned)n->dhcp_tries);
+        else
+            printf("    no address yet\n");
     }
     printf("    RX %lu packets, %lu bytes, %lu dropped\n", n->rx_packets, n->rx_bytes, n->rx_dropped);
     printf("    TX %lu packets, %lu bytes, %lu errors\n", n->tx_packets, n->tx_bytes, n->tx_errors);

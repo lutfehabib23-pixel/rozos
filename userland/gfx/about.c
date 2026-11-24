@@ -43,7 +43,7 @@ int main(void)
 {
     static const char *const credits1 = "Limine, TinyCC, pdpmake, lwIP, BearSSL,";
     static const char *const credits2 = "Lua, zlib, stb, sbase, FreeType, DejaVu,";
-    static const char *const credits3 = "Inter, JetBrains Mono, Noto and more fonts";   /* ধাপ ২৩ক */
+    static const char *const credits3 = "kb_text_shape, Inter, JetBrains Mono, Noto";   /* ধাপ ২৩ক/খ */
     char lines[8][160], all[1400], cpu[64], a[24], b[24];
     int nl = 0, i;
     struct utsname un;

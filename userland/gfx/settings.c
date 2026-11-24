@@ -10,7 +10,8 @@
  *   Processes      চলমান প্রসেস (rozos_proc_list), প্রতি সেকেন্ডে হালনাগাদ, End process
  *   Disks          mount করা ডিস্ক — মাপ, ব্যবহার, খালি (statvfs)
  *   Network        নেটওয়ার্ক কার্ড — ঠিকানা, MAC, প্যাকেট (rozos_netinfo)
- *   Fonts          ধাপ ২৩ক: UI ফন্ট আর টার্মিনাল/Code ফন্ট, মাপ, নমুনা → /etc/rozos.conf
+ *   Fonts          ধাপ ২৩ক: UI ফন্ট আর টার্মিনাল/Code ফন্ট, মাপ, নমুনা → /etc/rozos.conf;
+ *                  ধাপ ২৩খ: বাংলা ফন্ট (bengali_font) বোতামে বদলায়
  *                  (ui_font, ui_font_size, mono_font, mono_font_size; নতুন খোলা জানালায় লাগে)
  * ডেস্কটপে ডান-ক্লিক → "Change wallpaper..." / "Add icon..." / "Settings..." এটা খোলে। */
 
@@ -656,7 +657,8 @@ static void page_fonts(ui_ctx *u, int x, int y, int w, int h)
     size_box(u, x + lw + 16, y + 24, &ui_px, 11, 16);
     preview(u, &prev_ui, &prev_ui_key, ui_sel >= 0 ? ui_files[ui_sel] : NULL, ui_px, 0,
             x + lw + 16, y + 58, w - lw - 26, half - 64,
-            "The quick brown fox jumps over the lazy dog.\nFiles  Settings  Shut down  0123456789");
+            "The quick brown fox jumps over the lazy dog.\nFiles  Settings  Shut down  0123456789\n"
+            "বাংলা: আমি, ক্ষমা, শিক্ষা, স্ত্রী, রাষ্ট্র, কার্তিক");
 
     y += half;
     ui_label(u->s, x, y + 4, "Terminal and Code", T->text);
@@ -678,6 +680,29 @@ static void page_fonts(ui_ctx *u, int x, int y, int w, int h)
         ok &= conf_set("mono_font_size", v) == 0;
         snprintf(status, sizeof(status), ok ? "Saved. New windows use it; Start > Restart for the whole desktop."
                                             : "Could not write " CONF ": %s", strerror(errno));
+    }
+    {
+        /* ধাপ ২৩খ: বাংলা লেখার ফন্ট — বোতাম চাপলে পরেরটা, সাথে সাথে /etc/rozos.conf-এ */
+        static const char *const bn_file[] = { "NotoSansBengali.ttf", "NotoSerifBengali.ttf",
+                                               "HindSiliguri-Regular.ttf", "TiroBangla-Regular.ttf" };
+        static const char *const bn_name[] = { "Noto Sans Bengali", "Noto Serif Bengali", "Hind Siliguri",
+                                               "Tiro Bangla" };
+        static int bn = -1;
+        char lab[64], cur[200];
+        int i;
+        if (bn < 0) {
+            conf_get("bengali_font", cur, sizeof(cur), FONT_DIR "/NotoSansBengali.ttf");
+            bn = 0;
+            for (i = 0; i < 4; i++) if (strstr(cur, bn_file[i])) bn = i;
+        }
+        snprintf(lab, sizeof(lab), "Bengali: %s", bn_name[bn]);
+        if (ui_do_button(u, x + 260, y + 6, w - 270 > 300 ? 300 : w - 270, 28, lab)) {
+            char path[200];
+            bn = (bn + 1) % 4;
+            snprintf(path, sizeof(path), FONT_DIR "/%s", bn_file[bn]);
+            snprintf(status, sizeof(status), conf_set("bengali_font", path) == 0
+                     ? "Bengali text now uses %s in new windows." : "Could not write " CONF, bn_name[bn]);
+        }
     }
     if (ui_do_button(u, x + 130, y + 6, 120, 28, "Defaults")) {
         int i;

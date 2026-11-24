@@ -2103,6 +2103,17 @@ static void test_phase23a(void)
     check(ok, "fontview -l lists the TrueType fonts (15 or more)");
 }
 
+/* ধাপ ২৩খ: বাংলা shaping (kb_text_shape) — যুক্তাক্ষর এক glyph, তাই দুই অক্ষরের চেয়ে সরু */
+static void test_phase23b(void)
+{
+    gfx_font *f = gfx_font_load_ttf("/usr/share/fonts/NotoSansBengali.ttf", 20, 0);
+    int conj = f ? gfx_text_width(f, "ক্ষ") : 0, two = f ? gfx_text_width(f, "ক") + gfx_text_width(f, "ষ") : 0;
+    int ui = gfx_text_width(NULL, "বাংলা");
+    check(f && conj > 0 && conj < two, "Bengali shaping joins ক্ষ into one conjunct (kb_text_shape)");
+    check(ui > 10, "UI text with Bengali falls back to the Bengali font");
+    gfx_font_free(f);
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -2134,6 +2145,7 @@ int main(int argc, char **argv)
     test_phase19g();
     test_phase19h();
     test_phase23a();
+    test_phase23b();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

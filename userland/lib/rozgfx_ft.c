@@ -24,6 +24,10 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
+#ifdef ROZOS_HAVE_KBTS
+#include "rozgfx_shape.h"                     /* ধাপ ২৩খ: বাংলা shaping */
+#endif
+
 #define CACHE_SLOTS 512
 #define PROBE       8
 
@@ -43,6 +47,12 @@ struct rozft {
     int cell_w;                               /* mono: এক ঘরের চওড়া */
     struct rozft *fallback;
     int fallback_tried;
+    /* ধাপ ২৩খ: বাংলা — আলাদা ফন্ট (Noto Sans Bengali) আর shaping-এর context */
+    char *path;
+    struct rozft *bengali;
+    int bengali_tried;
+    void *shape;                              /* struct rozshape * */
+    int shape_tried;
     struct ft_glyph cache[CACHE_SLOTS];
 };
 
@@ -94,6 +104,8 @@ struct rozft *rozft_open(const char *path, int px, int mono)
         f->cell_w = (int)((f->face->glyph->advance.x + 32) >> 6);
     if (f->cell_w <= 0) f->cell_w = px * 6 / 10;
     for (i = 0; i < CACHE_SLOTS; i++) f->cache[i].cp = -1;
+    f->path = (char *)malloc(strlen(path) + 1);
+    if (f->path) strcpy(f->path, path);
     return f;
 }
 
@@ -103,6 +115,11 @@ void rozft_close(struct rozft *f)
     if (!f) return;
     for (i = 0; i < CACHE_SLOTS; i++) free(f->cache[i].bits);
     if (f->fallback) rozft_close(f->fallback);
+    if (f->bengali) rozft_close(f->bengali);
+#ifdef ROZOS_HAVE_KBTS
+    if (f->shape) rozshape_close((struct rozshape *)f->shape);
+#endif
+    free(f->path);
     FT_Done_Face(f->face);
     free(f);
 }
@@ -123,35 +140,82 @@ static struct rozft *fallback_of(struct rozft *f)
     return f->fallback;
 }
 
-static struct ft_glyph *get_glyph(struct rozft *f, int cp)
-{
-    unsigned h = ((unsigned)cp * 2654435761u) >> 23;          /* ৯ বিট = ৫১২ ঘর */
-    struct ft_glyph *g = NULL, *slot;
-    struct rozft *src = f;
-    FT_UInt idx;
-    FT_GlyphSlot gs;
-    int i, size;
+/* ধাপ ২৩খ: বাংলা ফন্ট (/etc/rozos.conf-এর bengali_font, ডিফল্ট Noto Sans Bengali), একই মাপে */
+static void conf_get(const char *key, char *out, size_t size);
 
+static struct rozft *bengali_of(struct rozft *f)
+{
+    if (!f->bengali_tried) {
+        char path[256] = "/usr/share/fonts/NotoSansBengali.ttf";
+        f->bengali_tried = 1;
+        conf_get("bengali_font", path, sizeof(path));
+        f->bengali = rozft_open(path, f->px, 0);
+    }
+    return f->bengali;
+}
+
+/* cache-এ key-এর ঘর (না থাকলে খালি করে দেয়, *fresh = 1) */
+static struct ft_glyph *cache_slot(struct rozft *f, int key, int *fresh)
+{
+    unsigned h = ((unsigned)key * 2654435761u) >> 23;         /* ৯ বিট = ৫১২ ঘর */
+    struct ft_glyph *g = NULL, *slot;
+    int i;
+    *fresh = 0;
     for (i = 0; i < PROBE; i++) {
         slot = &f->cache[(h + (unsigned)i) % CACHE_SLOTS];
-        if (slot->cp == cp) return slot;
+        if (slot->cp == key) return slot;
         if (slot->cp == -1 && !g) g = slot;
     }
     if (!g) g = &f->cache[h % CACHE_SLOTS];                    /* ভরা — প্রথমটা বদলাও */
     free(g->bits);
     memset(g, 0, sizeof(*g));
-    g->cp = cp;
+    g->cp = key;
+    *fresh = 1;
+    return g;
+}
 
+static void load_glyph(struct rozft *f, struct ft_glyph *g, struct rozft *src, FT_UInt idx);
+
+static struct ft_glyph *get_glyph(struct rozft *f, int cp)
+{
+    struct ft_glyph *g;
+    struct rozft *src = f;
+    FT_UInt idx;
+    int fresh;
+
+    g = cache_slot(f, cp, &fresh);
+    if (!fresh) return g;
     idx = FT_Get_Char_Index(f->face, (FT_ULong)cp);
     if (idx == 0 && cp > 32) {
         struct rozft *fb = fallback_of(f);
         FT_UInt fi = fb ? FT_Get_Char_Index(fb->face, (FT_ULong)cp) : 0;
         if (fi) { src = fb; idx = fi; }
+        else if (cp >= 0x0980 && cp <= 0x09FF && bengali_of(f)) {   /* ধাপ ২৩খ */
+            fi = FT_Get_Char_Index(f->bengali->face, (FT_ULong)cp);
+            if (fi) { src = f->bengali; idx = fi; }
+        }
     }
+    load_glyph(f, g, src, idx);
+    return g;
+}
+
+/* shaping-এর glyph নম্বর ধরে (which 0 = এই ফন্ট, 1 = বাংলা ফন্ট) */
+static struct ft_glyph *get_glyph_id(struct rozft *f, int which, unsigned id)
+{
+    int fresh;
+    struct ft_glyph *g = cache_slot(f, 0x40000000 | (which << 20) | (int)(id & 0xFFFFF), &fresh);
+    if (fresh) load_glyph(f, g, which && bengali_of(f) ? f->bengali : f, id);
+    return g;
+}
+
+static void load_glyph(struct rozft *f, struct ft_glyph *g, struct rozft *src, FT_UInt idx)
+{
+    FT_GlyphSlot gs;
+    int size;
     g->src = src;
     if (FT_Load_Glyph(src->face, idx, FT_LOAD_RENDER | FT_LOAD_TARGET_LIGHT) != 0) {
         g->adv = (short)(f->mono ? f->cell_w : f->px / 3);
-        return g;
+        return;
     }
     gs = src->face->glyph;
     g->adv = (short)((gs->advance.x + 32) >> 6);
@@ -169,7 +233,6 @@ static struct ft_glyph *get_glyph(struct rozft *f, int cp)
         }
     }
     if (!g->bits) g->w = g->h = 0;
-    return g;
 }
 
 /* বিটম্যাপ মেশানো (clip মেনে) */
@@ -224,6 +287,63 @@ static int baseline_in(const struct rozft *f, int box_h)
     return (box_h + f->cap + 1) / 2;
 }
 
+/* ---------- ধাপ ২৩খ: বাংলা লাইন (shaping) ---------- */
+#ifdef ROZOS_HAVE_KBTS
+struct shape_draw {
+    struct rozft *f;
+    gfx_surface *s;
+    int x, base;
+    uint32_t color;
+};
+
+static void shape_draw_cb(void *ud, int which, int glyph, long x, long y, int cp)
+{
+    struct shape_draw *d = (struct shape_draw *)ud;
+    struct ft_glyph *g;
+    (void)cp;
+    if (!d->s) return;
+    g = get_glyph_id(d->f, which, (unsigned)glyph);
+    blit_glyph(d->s, g, d->x + (int)((x + 32) >> 6), d->base - (int)((y + 32) >> 6), d->color);
+}
+
+static struct rozshape *shaper_of(struct rozft *f)
+{
+    if (!f->shape_tried) {
+        struct rozft *bn = bengali_of(f);
+        f->shape_tried = 1;
+        f->shape = rozshape_open(f->path, bn ? bn->path : NULL);
+    }
+    return (struct rozshape *)f->shape;
+}
+
+/* line-এর len বাইট সাজিয়ে আঁকা (s NULL = শুধু মাপা); ফেরত চওড়া (পিক্সেল), -1 = shaping নেই */
+static int shaped_line(struct rozft *f, gfx_surface *s, int x, int base, const char *line, int len,
+                       uint32_t color)
+{
+    struct rozshape *sh;
+    struct shape_draw d;
+    int upem[2];
+    long w;
+    if (!rozshape_has_complex(line, len) || !(sh = shaper_of(f))) return -1;
+    upem[0] = f->face->units_per_EM;
+    upem[1] = f->bengali ? f->bengali->face->units_per_EM : 1000;
+    d.f = f;
+    d.s = s;
+    d.x = x;
+    d.base = base;
+    d.color = color;
+    w = rozshape_run(sh, line, len, f->px, upem, shape_draw_cb, &d);
+    return (int)((w + 32) >> 6);
+}
+#else
+static int shaped_line(struct rozft *f, gfx_surface *s, int x, int base, const char *line, int len,
+                       uint32_t color)
+{
+    (void)f; (void)s; (void)x; (void)base; (void)line; (void)len; (void)color;
+    return -1;
+}
+#endif
+
 int rozft_text(struct rozft *f, gfx_surface *s, int x, int y, int box_h, const char *str,
                uint32_t fg, uint32_t bg, int with_bg)
 {
@@ -247,8 +367,20 @@ int rozft_text(struct rozft *f, gfx_surface *s, int x, int y, int box_h, const c
         }
     }
     while (*str) {
-        int cp = utf8_next(&str);
+        int cp, sw;
         struct ft_glyph *g;
+        if (x == x0) {                               /* ধাপ ২৩খ: লাইনে বাংলা থাকলে সাজিয়ে আঁকা */
+            const char *e = strchr(str, '\n');
+            int n = e ? (int)(e - str) : (int)strlen(str);
+            sw = shaped_line(f, s, x, base, str, n, fg);
+            if (sw >= 0) {
+                x += sw;
+                str += n;
+                if (*str == '\n') { str++; x = x0; base += box_h; }
+                continue;
+            }
+        }
+        cp = utf8_next(&str);
         if (cp == '\n') { x = x0; base += box_h; continue; }
         if (cp == '\t') cp = ' ';
         g = get_glyph(f, cp);
@@ -265,11 +397,23 @@ int rozft_text(struct rozft *f, gfx_surface *s, int x, int y, int box_h, const c
 
 int rozft_width(struct rozft *f, const char *str)
 {
-    int w = 0, best = 0;
+    int w = 0, best = 0, at_start = 1;
     if (!str) return 0;
     while (*str) {
-        int cp = utf8_next(&str);
-        if (cp == '\n') { if (w > best) best = w; w = 0; continue; }
+        int cp, sw;
+        if (at_start) {                              /* ধাপ ২৩খ */
+            const char *e = strchr(str, '\n');
+            int n = e ? (int)(e - str) : (int)strlen(str);
+            at_start = 0;
+            sw = shaped_line(f, NULL, 0, 0, str, n, 0);
+            if (sw >= 0) {
+                w = sw;
+                str += n;
+                continue;
+            }
+        }
+        cp = utf8_next(&str);
+        if (cp == '\n') { if (w > best) best = w; w = 0; at_start = 1; continue; }
         if (cp == '\t') cp = ' ';
         w += f->mono ? f->cell_w : get_glyph(f, cp)->adv;
     }

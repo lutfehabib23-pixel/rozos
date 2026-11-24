@@ -248,6 +248,11 @@ static void dhcp_set_state(struct dhcp *dhcp, u8_t new_state);
 /* receive, unfold, parse and free incoming messages */
 static void dhcp_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
 
+/* rozOS ধাপ ২২ঘ: DHCP উত্তর কোথায় বাদ পড়ে তার গণনা (kmon `netlog`):
+ * 0 পাওয়া, 1 ছোট/reply নয়, 2 MAC মেলেনি, 3 xid মেলেনি, 4 option নেই/ভাঙা,
+ * 5 OFFER নেওয়া, 6 ACK → ঠিকানা, 7 NAK বা ভুল অবস্থায় আসা */
+unsigned long rozos_dhcp_stat[8];
+
 /* set the DHCP timers */
 static void dhcp_timeout(struct netif *netif);
 static void dhcp_t1_timeout(struct netif *netif);
@@ -1786,12 +1791,15 @@ dhcp_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr,
   LWIP_UNUSED_ARG(addr);
   LWIP_UNUSED_ARG(port);
 
+  rozos_dhcp_stat[0]++;
   if (p->len < DHCP_MIN_REPLY_LEN) {
     LWIP_DEBUGF(DHCP_DEBUG | LWIP_DBG_TRACE | LWIP_DBG_LEVEL_WARNING, ("DHCP reply message or pbuf too short\n"));
+    rozos_dhcp_stat[1]++;
     goto free_pbuf_and_return;
   }
 
   if (reply_msg->op != DHCP_BOOTREPLY) {
+    rozos_dhcp_stat[1]++;
     LWIP_DEBUGF(DHCP_DEBUG | LWIP_DBG_TRACE | LWIP_DBG_LEVEL_WARNING, ("not a DHCP reply message, but type %"U16_F"\n", (u16_t)reply_msg->op));
     goto free_pbuf_and_return;
   }
@@ -1801,6 +1809,7 @@ dhcp_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr,
       LWIP_DEBUGF(DHCP_DEBUG | LWIP_DBG_TRACE | LWIP_DBG_LEVEL_WARNING,
                   ("netif->hwaddr[%"U16_F"]==%02"X16_F" != reply_msg->chaddr[%"U16_F"]==%02"X16_F"\n",
                    (u16_t)i, (u16_t)netif->hwaddr[i], (u16_t)i, (u16_t)reply_msg->chaddr[i]));
+      rozos_dhcp_stat[2]++;
       goto free_pbuf_and_return;
     }
   }
@@ -1808,12 +1817,14 @@ dhcp_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr,
   if (lwip_ntohl(reply_msg->xid) != dhcp->xid) {
     LWIP_DEBUGF(DHCP_DEBUG | LWIP_DBG_TRACE | LWIP_DBG_LEVEL_WARNING,
                 ("transaction id mismatch reply_msg->xid(%"X32_F")!=dhcp->xid(%"X32_F")\n", lwip_ntohl(reply_msg->xid), dhcp->xid));
+    rozos_dhcp_stat[3]++;
     goto free_pbuf_and_return;
   }
   /* option fields could be unfold? */
   if (dhcp_parse_reply(p, dhcp) != ERR_OK) {
     LWIP_DEBUGF(DHCP_DEBUG | LWIP_DBG_TRACE | LWIP_DBG_LEVEL_SERIOUS,
                 ("problem unfolding DHCP message - too short on memory?\n"));
+    rozos_dhcp_stat[4]++;
     goto free_pbuf_and_return;
   }
 
@@ -1821,6 +1832,7 @@ dhcp_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr,
   /* obtain pointer to DHCP message type */
   if (!dhcp_option_given(dhcp, DHCP_OPTION_IDX_MSG_TYPE)) {
     LWIP_DEBUGF(DHCP_DEBUG | LWIP_DBG_TRACE | LWIP_DBG_LEVEL_WARNING, ("DHCP_OPTION_MESSAGE_TYPE option not found\n"));
+    rozos_dhcp_stat[4]++;
     goto free_pbuf_and_return;
   }
 
@@ -1846,6 +1858,7 @@ dhcp_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr,
       /* bind interface to the acknowledged lease address */
       dhcp_bind(netif);
 #endif
+      rozos_dhcp_stat[6]++;
     }
     /* already bound to the given lease address and using it? */
     else if ((dhcp->state == DHCP_STATE_REBINDING) ||
@@ -1860,12 +1873,16 @@ dhcp_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr,
             (dhcp->state == DHCP_STATE_REBINDING) || (dhcp->state == DHCP_STATE_RENEWING  ))) {
     LWIP_DEBUGF(DHCP_DEBUG | LWIP_DBG_TRACE, ("DHCP_NAK received\n"));
     dhcp_handle_nak(netif);
+    rozos_dhcp_stat[7]++;
   }
   /* received a DHCP_OFFER in DHCP_STATE_SELECTING state? */
   else if ((msg_type == DHCP_OFFER) && (dhcp->state == DHCP_STATE_SELECTING)) {
     LWIP_DEBUGF(DHCP_DEBUG | LWIP_DBG_TRACE, ("DHCP_OFFER received in DHCP_STATE_SELECTING state\n"));
     /* remember offered lease */
     dhcp_handle_offer(netif, msg_in);
+    rozos_dhcp_stat[5]++;
+  } else if (msg_type == DHCP_OFFER || msg_type == DHCP_ACK) {
+    rozos_dhcp_stat[7]++;                       /* rozOS: অপেক্ষার অবস্থার বাইরে এল */
   }
 
 free_pbuf_and_return:

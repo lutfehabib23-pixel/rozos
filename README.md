@@ -6,7 +6,7 @@
 
 rozOS boots with Limine (BIOS and UEFI) into its own kernel and a small graphical desktop. It includes a C compiler, a text editor, `make`, a TCP/IP stack with HTTPS, and a package manager, so you can write, compile and even rebuild the rozOS kernel **from inside rozOS itself**.
 
-> Status: hobby / educational OS, under active development (current: **0.23.0-phase23a**).
+> Status: hobby / educational OS, under active development (current: **0.23.1-phase23b**).
 > It runs in QEMU. Real hardware has not been tested yet.
 
 ---
@@ -155,7 +155,7 @@ Contributions of all sizes are welcome: bug reports, help pages, drivers, ported
 - No `SIGWINCH`; resize a terminal window, then press Ctrl+L in the editor.
 - User signal handlers are not yet invoked (only default / ignore).
 - `kmon` (kernel monitor) works only on the text console or serial line.
-- The screen fonts have no Bengali glyphs yet (UTF-8 text is kept, shown as dots).
+- Bengali is shown with joined letters in window text (phase 23b); the terminal, Code and typing Bengali come later.
 
 ---
 
@@ -176,6 +176,7 @@ rozOS is released under the [MIT License](LICENSE). Third-party components keep 
 | [stb_truetype / stb_image](https://github.com/nothings/stb) | fonts, images | MIT / public domain |
 | [DejaVu fonts](https://dejavu-fonts.github.io) | UI and console fonts | Bitstream Vera / DejaVu license |
 | [FreeType](https://freetype.org) | smooth font rendering (`./toolchain/get-freetype.sh`) | FreeType License (BSD-style) |
+| [kb_text_shape](https://github.com/JimmyLefevre/kb) | Bengali shaping (`./toolchain/get-kbts.sh`) | zlib |
 | Inter, JetBrains Mono, Fira Code, Noto Sans/Serif (+ Bengali), Roboto, Open Sans, Source Sans 3 / Serif 4, Hind Siliguri, Tiro Bangla | desktop fonts (`./toolchain/get-fonts.sh`) | SIL Open Font License 1.1 |
 
 ---

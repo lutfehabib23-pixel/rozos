@@ -8,7 +8,7 @@
  * ধাপ ৬: ps, run, spawn, kill
  * ধাপ ৭: shell থেকে /bin/kmon দিয়ে ডাকা যায় (kmon_session) — "exit" দিলে shell-এ ফেরে
  * ধাপ ৯: net
- * ধাপ ২২: nic */
+ * ধাপ ২২: nic; ধাপ ২২ঘ: netlog */
 
 #include <stdint.h>
 #include <stddef.h>
@@ -884,6 +884,7 @@ static void cmd_help(void)
             "  exit           back to the shell (when started as /bin/kmon)\n"
             "  net            network cards, addresses and counters\n"
             "  nic            network driver details: chip, registers, link, init log\n"
+            "  netlog         last 32 network frames (ARP, IP, DHCP type) and DHCP counters\n"
             "  echo <text>    print text\n"
             "  int3           breakpoint exception test (returns)\n"
             "  fault          invalid opcode test (panics)\n"
@@ -1041,6 +1042,8 @@ static void run_command(int argc, char **argv)
         cmd_net();
     } else if (!strcmp(cmd, "nic")) {
         cmd_nic();                               /* ধাপ ২২ */
+    } else if (!strcmp(cmd, "netlog")) {
+        net_log_dump();                          /* ধাপ ২২ঘ */
     } else if (!strcmp(cmd, "ps")) {
         cmd_ps();
     } else if (!strcmp(cmd, "run")) {

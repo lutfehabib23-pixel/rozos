@@ -38,3 +38,9 @@ If there is no network, run `kmon` then `nic`: it shows the chip (XID),
 its registers, the link (PHYstatus, BMCR/BMSR) and the driver's init
 log. If no driver is active it lists the PCI network devices instead.
 Take a photo of that screen - it shows where the card stopped.
+No address from the router? `ifconfig` tells where DHCP is (looking for
+a server, requesting, waiting to retry). `kmon` then `netlog` (phase 22d)
+lists the last 32 frames - ARP, IP, ports and the DHCP message type
+(DISCOVER, OFFER, REQUEST, ACK) - and counts DHCP replies that were
+dropped (other MAC, old transaction id, bad options). A photo of it
+shows whether the router's OFFER arrives.
