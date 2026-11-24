@@ -46,7 +46,9 @@
 #define R_PMCH          0x6F
 #define R_ERIDR         0x70
 #define R_ERIAR         0x74
+#define R_OCPDR         0xB0               /* MAC OCP (ধাপ ২২খ) */
 #define R_GPHY_OCP      0xB8
+#define R_DLLPR         0xD0
 #define R_RXMAXSIZE     0xDA
 #define R_CPLUSCMD      0xE0
 #define R_INTRMITIGATE  0xE2
@@ -54,6 +56,7 @@
 #define R_RXDESC_HI     0xE8
 #define R_MAXTXPKT      0xEC
 #define R_MISC          0xF0
+#define R_MISC_1        0xF2
 
 #define CMD_RESET       0x10
 #define CMD_RX_EN       0x08
@@ -64,6 +67,13 @@
 #define CONFIG2_CLKREQ  0x80
 #define CONFIG5_ASPM    0x01
 #define MISC_RXDV_GATE  (1u << 19)
+#define DLLPR_PFM_EN    0x40               /* ধাপ ২২খ: power saving বন্ধ করতে */
+#define DLLPR_TX_10M_PS 0x80
+#define MISC1_PFM_D3COLD 0x40
+
+/* IntrStatus */
+#define IS_RX_OK        0x0001
+#define IS_RX_DESC_UNAV 0x0010             /* 8168-এ "RxOverflow" = descriptor নেই */
 
 #define PHY_TBI         0x80
 #define PHY_1000F       0x10
@@ -109,6 +119,10 @@
 /* MII */
 #define MII_BMCR        0
 #define MII_BMSR        1
+#define MII_ANAR        4
+#define MII_GBCR        9
+#define ANAR_ALL        0x05E1             /* 10/100 half+full, pause, 802.3 */
+#define GBCR_1000F      0x0200
 #define BMCR_ANENABLE   0x1000
 #define BMCR_ANRESTART  0x0200
 #define BMCR_PDOWN      0x0800
@@ -143,6 +157,8 @@ struct rtl {
     int an_restarts;
     uint64_t rx_errors;
     uint16_t last_istatus;
+    uint16_t istatus_seen;                /* ধাপ ২২খ: চালুর পর থেকে সব বিটের OR */
+    int rx_restarts;
     char log[LOG_SIZE];
     size_t log_len;
 };
@@ -222,6 +238,23 @@ static uint32_t eri_read(struct rtl *t, uint32_t addr)
     return r32(t, R_ERIDR);
 }
 
+/* ---------- MAC OCP (8168G+; ধাপ ২২খ) ---------- */
+static uint16_t mac_ocp_read(struct rtl *t, uint32_t reg)
+{
+    w32(t, R_OCPDR, reg << 15);
+    return (uint16_t)r32(t, R_OCPDR);
+}
+
+static void mac_ocp_write(struct rtl *t, uint32_t reg, uint16_t val)
+{
+    w32(t, R_OCPDR, 0x80000000u | (reg << 15) | val);
+}
+
+static void mac_ocp_modify(struct rtl *t, uint32_t reg, uint16_t mask, uint16_t set)
+{
+    mac_ocp_write(t, reg, (uint16_t)((mac_ocp_read(t, reg) & ~mask) | set));
+}
+
 /* ---------- PHY (MII) ---------- */
 /* 8168G থেকে PHY OCP দিয়ে (GPHY_OCP, ঠিকানা 0xa400 + reg*2); পুরোনোয় PHYAR */
 static int phy_read(struct rtl *t, unsigned reg)
@@ -257,6 +290,9 @@ static void phy_restart_an(struct rtl *t)
         tlog(t, "PHY: BMCR read failed");
         return;
     }
+    /* ধাপ ২২খ: Windows বন্ধের পর PHY শুধু 10M ঘোষণা করে (WoL power saving) — সব গতি */
+    phy_write(t, MII_ANAR, ANAR_ALL);
+    phy_write(t, MII_GBCR, GBCR_1000F);
     phy_write(t, MII_BMCR, (uint16_t)((bmcr & ~BMCR_PDOWN) | BMCR_ANENABLE | BMCR_ANRESTART));
     t->an_restarts++;
 }
@@ -344,7 +380,23 @@ static size_t rtl_poll(struct net_device *dev, void *buf, size_t max)
     /* poll-মোডে স্ট্যাটাস বিট জমতে না দেওয়া (RxOverflow ইত্যাদি) */
     if (is) {
         t->last_istatus = is;
+        t->istatus_seen |= is;
         w16(t, R_INTRSTATUS, is);
+        /* ধাপ ২২খ: descriptor নেই বলে চিপ থেমেছে অথচ সব descriptor চিপের হাতে —
+         * RX বন্ধ করে ring শুরু থেকে আবার চালু (চিপের ভেতরের পয়েন্টার 0-তে ফেরে) */
+        if ((is & IS_RX_DESC_UNAV) && (t->rx[t->rx_next].opts1 & D_OWN)) {
+            unsigned k;
+            w8(t, R_CHIPCMD, CMD_TX_EN);
+            for (k = 0; k < NUM_RX; k++) {
+                rx_give_back(t, k);
+            }
+            t->rx_next = 0;
+            w8(t, R_CHIPCMD, CMD_TX_EN | CMD_RX_EN);
+            t->rx_restarts++;
+            if (t->rx_restarts <= 5) {
+                tlog(t, "RX stalled (IntrStatus %04x): ring restarted #%d", is, t->rx_restarts);
+            }
+        }
     }
     for (;;) {
         unsigned i = t->rx_next;
@@ -402,10 +454,13 @@ static void rtl_diag(struct net_device *dev)
     struct rtl *t = (struct rtl *)dev->priv;
     uint8_t ps = r8(t, R_PHYSTATUS);
     int bmcr = phy_read(t, MII_BMCR), bmsr = phy_read(t, MII_BMSR);
-    unsigned own = 0, i;
+    unsigned own = 0, town = 0, i;
 
     for (i = 0; i < NUM_RX; i++) {
         if (t->rx[i].opts1 & D_OWN) own++;
+    }
+    for (i = 0; i < NUM_TX; i++) {
+        if (t->tx[i].opts1 & D_OWN) town++;
     }
     kprintf("     chip %s  PCI %02x:%02x.%u rev %02x  XID %03x  %s\n", t->chip, t->pci->bus,
             t->pci->slot, t->pci->func, t->pci->revision, t->xid,
@@ -417,9 +472,12 @@ static void rtl_diag(struct net_device *dev)
             (ps & PHY_LINK) ? "up" : "down",
             (ps & PHY_1000F) ? "1000" : (ps & PHY_100) ? "100" : (ps & PHY_10) ? "10" : "-",
             bmcr & 0xFFFF, bmsr & 0xFFFF, t->an_restarts);
-    kprintf("     rx next %u (chip owns %u/%u)  tx next %u  rx errors %llu  last IntrStatus %04x\n",
-            t->rx_next, own, NUM_RX, t->tx_next, (unsigned long long)t->rx_errors,
-            t->last_istatus);
+    kprintf("     rx next %u (chip owns %u/%u)  tx next %u (chip owns %u/%u)  rx errors %llu\n",
+            t->rx_next, own, NUM_RX, t->tx_next, town, NUM_TX, (unsigned long long)t->rx_errors);
+    kprintf("     IntrStatus last %04x, seen %04x (01 RxOK 04 TxOK 08 TxErr 10 RxDescUnavail)"
+            "  rx restarts %d\n", t->last_istatus, t->istatus_seen, t->rx_restarts);
+    kprintf("     DLLPR %02x  MISC_1 %02x  ANAR %04x  GBCR %04x\n", r8(t, R_DLLPR),
+            r8(t, R_MISC_1), phy_read(t, MII_ANAR) & 0xFFFF, phy_read(t, MII_GBCR) & 0xFFFF);
     if (t->log_len) {
         kprintf("     init log:\n%s", t->log);
     }
@@ -520,6 +578,23 @@ static int setup_chip(struct rtl *t)
         w32(t, R_MISC, r32(t, R_MISC) & ~MISC_RXDV_GATE);           /* RXDV gate বন্ধ */
         eri_write(t, 0xC0, ERIAR_MASK_0011, 0);
         eri_write(t, 0xB8, ERIAR_MASK_0011, 0);
+        /* ধাপ ২২খ: rtl_hw_start_8168h_1-এর বাকিটা (EEE আর rg_saw_cnt বাদে) */
+        eri_write(t, 0xDC, ERIAR_MASK_1111, eri_read(t, 0xDC) | 0x1C);
+        eri_write(t, 0x5F0, ERIAR_MASK_0011, 0x4F87);
+        w8(t, R_DLLPR, r8(t, R_DLLPR) & ~DLLPR_PFM_EN);
+        w8(t, R_MISC_1, r8(t, R_MISC_1) & ~MISC1_PFM_D3COLD);
+        w8(t, R_DLLPR, r8(t, R_DLLPR) & ~DLLPR_TX_10M_PS);         /* 10M power save বন্ধ */
+        eri_write(t, 0x1B0, ERIAR_MASK_1111, eri_read(t, 0x1B0) & ~(1u << 12));
+        mac_ocp_modify(t, 0xE056, 0x00F0, 0x0070);
+        mac_ocp_modify(t, 0xE052, 0x6000, 0x8008);
+        mac_ocp_modify(t, 0xE0D6, 0x01FF, 0x017F);
+        mac_ocp_modify(t, 0xD420, 0x0FFF, 0x047F);
+        mac_ocp_write(t, 0xE63E, 0x0001);
+        mac_ocp_write(t, 0xE63E, 0x0000);
+        mac_ocp_write(t, 0xC094, 0x0000);
+        mac_ocp_write(t, 0xC09E, 0x0000);
+        tlog(t, "8168H extra: DLLPR %02x MISC_1 %02x (power saving off), MAC OCP", r8(t, R_DLLPR),
+             r8(t, R_MISC_1));
         tlog(t, "8168G+ setup: FIFO, packet filter, RXDV gate off (MISC %08x)", r32(t, R_MISC));
     }
 
@@ -565,9 +640,13 @@ static int setup_chip(struct rtl *t)
         int bmcr = phy_read(t, MII_BMCR);
         tlog(t, "PHY BMCR %04x BMSR %04x PHYstatus %02x", bmcr & 0xFFFF,
              phy_read(t, MII_BMSR) & 0xFFFF, r8(t, R_PHYSTATUS));
-        if (bmcr >= 0 && ((bmcr & BMCR_PDOWN) || !(bmcr & BMCR_ANENABLE))) {
+        /* ধাপ ২২খ: সবসময় সব গতি ঘোষণা করে autoneg আবার (আগে শুধু PDOWN/autoneg বন্ধ
+         * থাকলে) — Windows-এর WoL অবস্থায় ANAR-এ শুধু 10M থাকে, লিংক 10M-এ আসত */
+        if (bmcr >= 0) {
+            tlog(t, "PHY ANAR %04x GBCR %04x -> advertise 10/100/1000, autoneg restart",
+                 phy_read(t, MII_ANAR) & 0xFFFF, phy_read(t, MII_GBCR) & 0xFFFF);
             phy_restart_an(t);
-            tlog(t, "PHY was powered down/autoneg off: restarted");
+            t->an_restarts = 0;           /* শুরুরটা গোনা হয় না */
         }
     }
     t->link_check_ms = timer_uptime_ms();
