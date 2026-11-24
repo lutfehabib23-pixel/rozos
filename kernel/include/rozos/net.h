@@ -36,7 +36,7 @@ int  e1000_init(void);                    /* পাওয়া কার্ড�
 int  rtl8168_init(void);                  /* ধাপ ২২: Realtek RTL8111/8168 */
 /* index-তম কার্ড (kmon `nic`); না থাকলে NULL */
 struct net_device *net_get_device(int index);
-void net_log_dump(void);                  /* ধাপ ২২ঘ: kmon `netlog` */
+void net_log_dump(int only_dhcp);         /* ধাপ ২২ঘ/ঙ: kmon `netlog [dhcp]` */
 
 /* বুটে: ড্রাইভার, lwIP, DHCP, netd থ্রেড। ফেরত NIC-এর সংখ্যা */
 int  net_init(void);

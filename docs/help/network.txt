@@ -39,7 +39,13 @@ its registers, the link (PHYstatus, BMCR/BMSR) and the driver's init
 log. If no driver is active it lists the PCI network devices instead.
 Take a photo of that screen - it shows where the card stopped.
 No address from the router? `ifconfig` tells where DHCP is (looking for
-a server, requesting, waiting to retry). `kmon` then `netlog` (phase 22d)
+a server, requesting, waiting to retry). `kmon` then `netlog dhcp`
+(phase 22e) shows what happened since boot (DHCP started, link up/down,
+address set by hand, address received) and the last 16 DHCP frames,
+kept apart so that a busy network cannot push them out. Setting an
+address by hand turns DHCP off on purpose (`ifconfig eth0 dhcp` turns
+it on again); if DHCP is found off without that, it starts again by
+itself. `kmon` then `netlog` (phase 22d)
 lists the last 32 frames - ARP, IP, ports and the DHCP message type
 (DISCOVER, OFFER, REQUEST, ACK) - and counts DHCP replies that were
 dropped (other MAC, old transaction id, bad options). A photo of it

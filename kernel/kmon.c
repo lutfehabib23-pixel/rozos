@@ -884,7 +884,7 @@ static void cmd_help(void)
             "  exit           back to the shell (when started as /bin/kmon)\n"
             "  net            network cards, addresses and counters\n"
             "  nic            network driver details: chip, registers, link, init log\n"
-            "  netlog         last 32 network frames (ARP, IP, DHCP type) and DHCP counters\n"
+            "  netlog [dhcp]  network events, DHCP frames, last 32 frames, DHCP counters\n"
             "  echo <text>    print text\n"
             "  int3           breakpoint exception test (returns)\n"
             "  fault          invalid opcode test (panics)\n"
@@ -1043,7 +1043,7 @@ static void run_command(int argc, char **argv)
     } else if (!strcmp(cmd, "nic")) {
         cmd_nic();                               /* ধাপ ২২ */
     } else if (!strcmp(cmd, "netlog")) {
-        net_log_dump();                          /* ধাপ ২২ঘ */
+        net_log_dump(argc > 1 && !strcmp(argv[1], "dhcp"));   /* ধাপ ২২ঘ/ঙ */
     } else if (!strcmp(cmd, "ps")) {
         cmd_ps();
     } else if (!strcmp(cmd, "run")) {

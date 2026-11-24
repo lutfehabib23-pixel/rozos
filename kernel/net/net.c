@@ -5,6 +5,7 @@
  * DHCP-তে ঠিকানা পেলে DNS সার্ভার /etc/resolv.conf-এ লেখা হয় (rozlibc-র resolver পড়ে)। */
 
 #include <stdint.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <rozos/net.h>
 #include <rozos/sched.h>
@@ -34,6 +35,7 @@ struct nic {
     struct netif netif;
     int dhcp;
     int announced;                         /* ঠিকানা পাওয়ার বার্তা দেখানো হয়েছে */
+    uint64_t dhcp_check_ms;                /* ধাপ ২২ঙ */
 };
 
 static struct nic nics[NET_MAX_DEVICES];
@@ -74,6 +76,24 @@ struct flog {
 };
 static struct flog flog[FLOG_N];
 static unsigned flog_pos, flog_total;
+/* ধাপ ২২ঙ: DHCP-র ফ্রেম আলাদা (ব্যস্ত নেটওয়ার্কে অন্য ফ্রেমের ভিড়ে হারিয়ে যায়) আর
+ * DHCP-র ঘটনার ইতিহাস (কখন চালু/বন্ধ, লিংক ওঠা-নামা, ঠিকানা পাওয়া) */
+#define DLOG_N 16
+#define EVT_N  16
+static struct flog dlog[DLOG_N];
+static unsigned dlog_pos, dlog_total;
+static struct { uint32_t ms; char text[56]; } evt[EVT_N];
+static unsigned evt_total;
+
+static void net_event(const char *fmt, ...)
+{
+    va_list ap;
+    unsigned i = evt_total++ % EVT_N;
+    evt[i].ms = (uint32_t)timer_uptime_ms();
+    va_start(ap, fmt);
+    kvsnprintf(evt[i].text, sizeof(evt[i].text), fmt, ap);
+    va_end(ap);
+}
 extern unsigned long rozos_dhcp_stat[8];  /* lwip/core/ipv4/dhcp.c */
 
 static void flog_add(char dir, const uint8_t *f, size_t len)
@@ -110,6 +130,8 @@ static void flog_add(char dir, const uint8_t *f, size_t len)
                     if (f[o] == 53) { e->dhcp = f[o + 2]; break; }
                     o += 2u + f[o + 1];
                 }
+                dlog[dlog_pos++ % DLOG_N] = *e;          /* ধাপ ২২ঙ */
+                dlog_total++;
             }
         }
     }
@@ -120,15 +142,11 @@ static void ip_str(char *b, const uint8_t *ip)
     ksnprintf(b, 16, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
 }
 
-void net_log_dump(void)
+static void flog_print(const struct flog *e)
 {
     static const char *const dname[] = { "?", "DISCOVER", "OFFER", "REQUEST", "DECLINE", "ACK", "NAK",
                                          "RELEASE", "INFORM" };
-    unsigned i, n = flog_total < FLOG_N ? flog_total : FLOG_N;
-    int k;
-    kprintf("  frames seen: %u (last %u below, oldest first)\n", flog_total, n);
-    for (i = flog_total - n; i < flog_total; i++) {
-        const struct flog *e = &flog[i % FLOG_N];
+    {
         char a[16], b[16];
         ip_str(a, e->ip_src);
         ip_str(b, e->ip_dst);
@@ -147,6 +165,25 @@ void net_log_dump(void)
         } else {
             kprintf("type %04x\n", e->type);
         }
+    }
+}
+
+/* only_dhcp = 1: শুধু ঘটনা, DHCP ফ্রেম আর গণনা (kmon `netlog dhcp`) */
+void net_log_dump(int only_dhcp)
+{
+    unsigned i, n;
+    int k;
+    n = evt_total < EVT_N ? evt_total : EVT_N;
+    kprintf("  events (since boot, oldest first):\n");
+    for (i = evt_total - n; i < evt_total; i++)
+        kprintf("  %6u.%03u  %s\n", evt[i % EVT_N].ms / 1000, evt[i % EVT_N].ms % 1000, evt[i % EVT_N].text);
+    n = dlog_total < DLOG_N ? dlog_total : DLOG_N;
+    kprintf("  DHCP frames: %u (last %u below)\n", dlog_total, n);
+    for (i = dlog_total - n; i < dlog_total; i++) flog_print(&dlog[i % DLOG_N]);
+    if (!only_dhcp) {
+        n = flog_total < FLOG_N ? flog_total : FLOG_N;
+        kprintf("  all frames: %u (last %u below, oldest first)\n", flog_total, n);
+        for (i = flog_total - n; i < flog_total; i++) flog_print(&flog[i % FLOG_N]);
     }
     kprintf("  DHCP replies: got %lu, short %lu, other MAC %lu, old xid %lu, bad options %lu,\n"
             "                offer taken %lu, ack->address %lu, nak/unexpected %lu\n",
@@ -242,6 +279,7 @@ static void announce(struct nic *n)
         }
         kprintf("[net] %s: %s/%u via %s (%s)\n", n->dev->name, ip, bits, gw,
                 n->dhcp ? "DHCP" : "static");
+        net_event("%s: address %s (%s)", n->dev->name, ip, n->dhcp ? "DHCP" : "by hand");
     }
     write_resolv_conf();
 }
@@ -260,8 +298,18 @@ static int netd(void *arg)
 
             if (link != n->dev->link_up) {
                 n->dev->link_up = link;
+                net_event("%s: link %s", n->dev->name, link ? "up" : "down");   /* ধাপ ২২ঙ */
                 if (link) netif_set_link_up(&n->netif);
                 else netif_set_link_down(&n->netif);
+            }
+            /* ধাপ ২২ঙ: DHCP চাওয়া হয়েছে অথচ বন্ধ (হাতে ঠিকানা নয়) — প্রতি ৫ সেকেন্ডে দেখে আবার চালু */
+            if (n->dhcp && link && timer_uptime_ms() - n->dhcp_check_ms >= 5000) {
+                struct dhcp *dd = netif_dhcp_data(&n->netif);
+                n->dhcp_check_ms = timer_uptime_ms();
+                if (!dd || dd->state == DHCP_STATE_OFF) {
+                    net_event("%s: DHCP was off - started again", n->dev->name);
+                    dhcp_start(&n->netif);
+                }
             }
             /* এক ঘুরে সর্বোচ্চ 64টা ফ্রেম, যাতে টাইমারও সময় পায় */
             {
@@ -316,7 +364,8 @@ int net_init(void)
             netif_set_link_up(&n->netif);
         }
         n->dhcp = 1;
-        dhcp_start(&n->netif);
+        net_event("%s: DHCP start at boot (link %s)", n->dev->name, n->dev->link_up ? "up" : "down");
+        if (dhcp_start(&n->netif) != ERR_OK) net_event("%s: dhcp_start failed", n->dev->name);
     }
     if (!sched_create_kthread("netd", netd, NULL)) {
         kprintf("[WARN] net: could not start netd\n");
@@ -380,11 +429,13 @@ int net_configure(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns)
         n->dhcp = 1;
         n->announced = 0;
         netif_set_addr(&n->netif, IP4_ADDR_ANY4, IP4_ADDR_ANY4, IP4_ADDR_ANY4);
+        net_event("%s: DHCP restarted (ifconfig dhcp)", n->dev->name);
         dhcp_start(&n->netif);
         return 0;
     }
     dhcp_release_and_stop(&n->netif);
     n->dhcp = 0;
+    net_event("%s: address set by hand - DHCP off", n->dev->name);
     a.addr = ip;
     m.addr = netmask;
     g.addr = gateway;
