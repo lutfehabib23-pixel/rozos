@@ -5,6 +5,9 @@
  * মিল খোঁজা backtracking দিয়ে, সবচেয়ে বাঁয়ের মিল আর তার মধ্যে সবচেয়ে লম্বা (POSIX-এর মতো)। */
 #ifndef _REGEX_H
 #define _REGEX_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <stddef.h>
 
 typedef long regoff_t;
@@ -50,4 +53,7 @@ int    regexec(const regex_t *re, const char *s, size_t nmatch, regmatch_t m[], 
 size_t regerror(int err, const regex_t *re, char *buf, size_t size);
 void   regfree(regex_t *re);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -5,10 +5,16 @@
  * মাপ: ioctl(m, TIOCSWINSZ, &ws) (struct winsize, <sys/ioctl.h>)। name সবসময় খালি। */
 #ifndef _PTY_H
 #define _PTY_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <termios.h>
 #include <sys/ioctl.h>
 
 int openpty(int *master, int *slave, char *name, const struct termios *tp, const struct winsize *wp);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

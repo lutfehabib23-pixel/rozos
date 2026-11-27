@@ -1,6 +1,9 @@
 /* rozlibc — stdint.h (x86-64, LP64)। gcc নিজেরটাও দেয়, কিন্তু TCC দেয় না — তাই এখানে। */
 #ifndef _ROZLIBC_STDINT_H
 #define _ROZLIBC_STDINT_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef signed char        int8_t;
 typedef short              int16_t;
@@ -98,4 +101,7 @@ typedef uint64_t uint_fast64_t;
 #endif
 #define WINT_MIN         0U
 #define WINT_MAX         UINT32_MAX
+#ifdef __cplusplus
+}
+#endif
 #endif

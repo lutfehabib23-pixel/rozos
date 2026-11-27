@@ -8,6 +8,9 @@
  * sigset_t = ৬৪ বিট: signal n মানে বিট n-1 (Linux-এর মতো)। */
 #ifndef _SIGNAL_H
 #define _SIGNAL_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <_rozlibc.h>
 #include <time.h>
@@ -199,4 +202,7 @@ void psiginfo(const siginfo_t *info, const char *msg);
 int tgkill(pid_t tgid, pid_t tid, int sig);
 extern const char *const sys_siglist[];
 
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -1,6 +1,9 @@
 /* rozlibc — sys/select.h (ধাপ ১৬ক): select() — কার্নেলে poll-এর ওপর বানানো */
 #ifndef _SYS_SELECT_H
 #define _SYS_SELECT_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <_rozlibc.h>
 #include <time.h>
 #include <signal.h>
@@ -28,4 +31,7 @@ int select(int nfds, fd_set *rd, fd_set *wr, fd_set *ex, struct timeval *tv);
 int pselect(int nfds, fd_set *rd, fd_set *wr, fd_set *ex, const struct timespec *ts,
             const sigset_t *mask);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

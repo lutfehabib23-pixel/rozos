@@ -1,6 +1,9 @@
 /* rozlibc — semaphore.h (ধাপ ১৬খ-২): futex দিয়ে; নামওয়ালা (sem_open) এখনো নেই */
 #ifndef _SEMAPHORE_H
 #define _SEMAPHORE_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <time.h>
 
 typedef struct {
@@ -22,4 +25,7 @@ sem_t *sem_open(const char *name, int oflag, ...);
 int    sem_close(sem_t *s);
 int    sem_unlink(const char *name);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

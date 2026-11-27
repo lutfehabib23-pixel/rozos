@@ -1,6 +1,9 @@
 /* rozlibc — sys/ioctl.h (শুধু কনসোলের মাপ) */
 #ifndef _SYS_IOCTL_H
 #define _SYS_IOCTL_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define TCGETS     0x5401
 #define TIOCGWINSZ 0x5413
@@ -37,4 +40,7 @@ int ioctl(int fd, unsigned long req, ...);
 #define FS_IOC_SETFLAGS 0x40086602UL
 #define FS_IMMUTABLE_FL 0x00000010
 
+#ifdef __cplusplus
+}
+#endif
 #endif

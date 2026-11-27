@@ -1,6 +1,9 @@
 /* rozlibc — netdb.h: নাম থেকে ঠিকানা (DNS, /etc/hosts; শুধু IPv4) */
 #ifndef _NETDB_H
 #define _NETDB_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <netinet/in.h>
 
@@ -46,4 +49,7 @@ int  getaddrinfo(const char *node, const char *service, const struct addrinfo *h
 void freeaddrinfo(struct addrinfo *res);
 const char *gai_strerror(int err);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

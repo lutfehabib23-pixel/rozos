@@ -18,3 +18,12 @@ on the PC boots it. Everything is explained in [[kernel-build]].
 == Step 4 (done, phase 11b): install and boot it ==
 `kinstall` then `reboot`: the new kernel is on the FAT boot partition
 and in the boot menu, older ones stay as a fallback ([[kinstall]]).
+
+== Step 5 (phase 17a): GNU tools ==
+`rozpkg install binutils` gives GNU as, ld, ar, objdump ... inside rozOS
+([[binutils]]). On the PC, GCC and G++ now target rozOS directly
+([[toolchain]]).
+
+== Step 6 (phase 17b): GCC inside rozOS ==
+`rozpkg install binutils gcc`, then `gcc` and `g++` work in rozOS
+([[gcc]]).

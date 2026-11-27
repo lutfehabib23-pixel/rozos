@@ -1,6 +1,9 @@
 /* rozlibc — fcntl.h (মান Linux-এর একই) */
 #ifndef _FCNTL_H
 #define _FCNTL_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <_rozlibc.h>
 
@@ -57,4 +60,7 @@ int creat(const char *path, mode_t mode);
 #define AT_EACCESS          0x200
 #define AT_SYMLINK_FOLLOW   0x400
 
+#ifdef __cplusplus
+}
+#endif
 #endif

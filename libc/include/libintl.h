@@ -1,6 +1,9 @@
 /* rozlibc — libintl.h (ধাপ ১৬ক): অনুবাদ নেই — gettext মূল লেখাটাই ফেরত দেয় */
 #ifndef _LIBINTL_H
 #define _LIBINTL_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #define gettext(s)                ((char *)(s))
 #define dgettext(d, s)            ((char *)(s))
 #define dcgettext(d, s, c)        ((char *)(s))
@@ -10,4 +13,7 @@
 #define textdomain(d)             ((char *)"messages")
 #define bindtextdomain(d, dir)    ((char *)(dir))
 #define bind_textdomain_codeset(d, c) ((char *)(c))
+#ifdef __cplusplus
+}
+#endif
 #endif

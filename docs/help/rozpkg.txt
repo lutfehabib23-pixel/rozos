@@ -33,6 +33,8 @@ A folder works too, without the internet (phase 19g):
 It is saved in /etc/rozpkg.conf. Making your own repo: [[packages]].
 
 == Safety ==
+Packages are .tar or (since phase 17b) .tar.gz files; while unpacking
+rozpkg shows how many MiB are done.
 Every download is checked against the sha256 in the index; a
 mismatch is refused and deleted. The index itself comes over https,
 so its certificate is verified. Paths with ".." or a leading / in a

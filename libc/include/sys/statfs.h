@@ -1,6 +1,9 @@
 /* rozlibc — sys/statfs.h (ধাপ ১৯চ): একটা file system-এর মাপ আর খালি জায়গা (Linux-এর মতো) */
 #ifndef _SYS_STATFS_H
 #define _SYS_STATFS_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef struct { int __val[2]; } fsid_t;
 
@@ -20,4 +23,7 @@ struct statfs {
 
 int statfs(const char *path, struct statfs *buf);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

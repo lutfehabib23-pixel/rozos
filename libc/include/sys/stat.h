@@ -1,6 +1,9 @@
 /* rozlibc — sys/stat.h (Linux x86-64-এর struct stat) */
 #ifndef _SYS_STAT_H
 #define _SYS_STAT_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <_rozlibc.h>
 #include <time.h>
@@ -82,4 +85,7 @@ int chmod(const char *path, mode_t mode);
 struct timespec;
 int utimensat(int dirfd, const char *path, const struct timespec times[2], int flags);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

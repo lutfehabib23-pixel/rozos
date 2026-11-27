@@ -285,6 +285,39 @@ int main(void)
 }
 @end
 
+@entry vfork
+@header unistd.h
+@syntax pid_t vfork(void);
+@summary Start a child process (in rozOS: exactly the same as fork).
+@desc
+Older Unix code (and GCC's driver) uses vfork before an exec, because on
+some systems it is cheaper than fork. rozOS's fork already copies memory
+lazily (copy on write), so vfork simply calls fork; the child gets its own
+memory. Portable code should only call an exec function or _exit in the
+child of vfork.
+@returns
+0 in the child, the child's pid in the parent, -1 on failure.
+@see fork execvp _exit waitpid
+@example
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/wait.h>
+
+int main(void)
+{
+    int status;
+    pid_t pid = vfork();
+    if (pid == 0) {
+        char *argv[] = { "echo", "hello from the child", NULL };
+        execvp("echo", argv);
+        _exit(127);
+    }
+    waitpid(pid, &status, 0);
+    printf("child ended with %d\n", WEXITSTATUS(status));
+    return 0;
+}
+@end
+
 @entry execvp
 @also exec execl execle execlp execv execve execvpe
 @header unistd.h

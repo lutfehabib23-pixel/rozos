@@ -1,6 +1,9 @@
 /* rozlibc — pwd.h (ধাপ ১৬ক): /etc/passwd থেকে; ফাইল না থাকলে শুধু root (uid 0) */
 #ifndef _PWD_H
 #define _PWD_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <_rozlibc.h>
 
 struct passwd {
@@ -21,4 +24,7 @@ struct passwd *getpwent(void);
 void setpwent(void);
 void endpwent(void);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -2,6 +2,9 @@
  * আচরণ সবসময় C-র (দশমিক বিন্দু '.'), অক্ষর-এনকোডিং সবসময় UTF-8 */
 #ifndef _LOCALE_H
 #define _LOCALE_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <stddef.h>
 
 #define LC_CTYPE    0
@@ -39,4 +42,7 @@ locale_t      duplocale(locale_t l);
 void          freelocale(locale_t l);
 locale_t      uselocale(locale_t l);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

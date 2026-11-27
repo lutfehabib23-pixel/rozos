@@ -1,6 +1,9 @@
 /* rozlibc — langinfo.h (ধাপ ১৬ক) */
 #ifndef _LANGINFO_H
 #define _LANGINFO_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <locale.h>
 
 typedef int nl_item;
@@ -63,4 +66,7 @@ typedef int nl_item;
 char *nl_langinfo(nl_item item);
 char *nl_langinfo_l(nl_item item, locale_t l);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

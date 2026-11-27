@@ -12,6 +12,9 @@
  * সাথে মিলতে হবে। */
 #ifndef _SYS_FB_H
 #define _SYS_FB_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <stdint.h>
 
@@ -32,4 +35,7 @@ struct rozos_fb_info {
     uint32_t reserved[8];
 };
 
+#ifdef __cplusplus
+}
+#endif
 #endif

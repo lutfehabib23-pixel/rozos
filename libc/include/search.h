@@ -2,6 +2,9 @@
  * hsearch (একটাই টেবিল), insque/remque */
 #ifndef _SEARCH_H
 #define _SEARCH_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <stddef.h>
 
 typedef enum { FIND, ENTER } ACTION;
@@ -23,4 +26,7 @@ ENTRY *hsearch(ENTRY e, ACTION a);
 void   insque(void *elem, void *prev);
 void   remque(void *elem);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

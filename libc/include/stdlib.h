@@ -1,6 +1,9 @@
 /* rozlibc — stdlib.h */
 #ifndef _STDLIB_H
 #define _STDLIB_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <stddef.h>
 
@@ -22,6 +25,8 @@ void   exit(int code) __attribute__((noreturn));
 void   _Exit(int code) __attribute__((noreturn));
 void   abort(void) __attribute__((noreturn));
 int    atexit(void (*fn)(void));
+int    __cxa_atexit(void (*fn)(void *), void *arg, void *dso);
+void   __cxa_finalize(void *dso);
 
 int    atoi(const char *s);
 long   atol(const char *s);
@@ -106,4 +111,7 @@ size_t wcstombs(char *dst, const wchar_t *src, size_t n);
 extern char *__progname;
 extern char *program_invocation_short_name;
 
+#ifdef __cplusplus
+}
+#endif
 #endif

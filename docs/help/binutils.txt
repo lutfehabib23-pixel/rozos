@@ -1,0 +1,42 @@
+# binutils - GNU assembler, linker and object tools
+GNU binutils 2.46, built for rozOS (phase 17a). Not on the ISO: it is a
+[[rozpkg]] package (about 18 MB).
+  `rozpkg install binutils`
+The programs go to /usr/bin (in PATH after /bin).
+
+== Programs ==
+  `as`        GNU assembler: AT&T syntax .s files -> .o
+  `ld`        GNU linker: .o and .a -> program
+  `ar`        make or list .a libraries (`ar rcs libx.a a.o b.o`, `ar t`)
+  `nm`        symbols of a .o / .a / program
+  `objdump`   `-d` disassemble, `-h` sections, `-x` all headers
+  `readelf`   ELF details: `-h` header, `-l` segments, `-S` sections, `-s` symbols
+  `objcopy`   copy/convert (`-O binary`, `--only-section`)
+  `strip`     remove symbols (smaller files)
+  `size`      text/data/bss sizes
+  `strings`   printable text in a file (GNU one is /usr/bin/strings;
+              /bin/strings is the small built-in one)
+  `addr2line` address -> source line (needs -g)
+  `c++filt`   turn C++ names like _ZNSt6vectorIiE back into readable ones
+  `ranlib`, `elfedit`
+
+== Assemble and link by hand ==
+  .globl main
+  main:  mov $42, %eax
+         ret
+  `as t.s -o t.o`
+  `ld /usr/lib/crt0.o /usr/lib/crti.o t.o -lc /usr/lib/crtn.o -o t`
+  `./t ; echo $?`        prints 42
+ld finds libc.a in /usr/lib by itself. A hand-written .s gets a warning
+about "executable stack"; add the line
+  .section .note.GNU-stack,"",@progbits
+to the file to silence it.
+
+== Look inside a program ==
+  `readelf -l /bin/hello`     where it is loaded (0x400000)
+  `objdump -d /bin/true | head -30`
+  `nm -n /usr/lib/libc.a | grep printf`
+
+[[tcc]] keeps working as before (it has its own assembler and linker).
+GCC and G++ inside rozOS: [[gcc]] (`rozpkg install gcc`). On the PC the same tools
+come with the rozOS cross toolchain: [[toolchain]]. See [[rozpkg]].

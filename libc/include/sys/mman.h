@@ -1,6 +1,9 @@
 /* rozlibc — sys/mman.h */
 #ifndef _SYS_MMAN_H
 #define _SYS_MMAN_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <_rozlibc.h>
 
@@ -31,4 +34,7 @@ int   mprotect(void *addr, size_t len, int prot);
 int   shm_open(const char *name, int oflag, mode_t mode);
 int   shm_unlink(const char *name);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

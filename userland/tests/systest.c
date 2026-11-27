@@ -54,6 +54,7 @@
 #include <wctype.h>
 #include <regex.h>
 #include <getopt.h>
+#include <fnmatch.h>
 #include <iconv.h>
 #include <locale.h>
 #include <math.h>
@@ -2142,8 +2143,59 @@ static void test_phase24a(void)
     struct rozos_netinfo ni;
     check(access("/bin/deldlg", X_OK) == 0 && system("deldlg 2>/dev/null") != 0,
           "deldlg exists and refuses to run without a path");
-    check(uname(&un) == 0 && !strncmp(un.release, "0.24.", 5), "kernel version 0.24.x");
+    /* ধাপ ১৭ক: ০.২৫ এসেছে — "০.২৪ বা পরের" (আগে শুধু 0.24.x) */
+    check(uname(&un) == 0 && !strncmp(un.release, "0.", 2) && atoi(un.release + 2) >= 24,
+          "kernel version 0.24 or later");
     check(rozos_netinfo(0, &ni) != 0 || ni.link_up <= 1, "netinfo reports the link state (LAN icon)");
+}
+
+/* ধাপ ১৭ক: GCC/C++-এর জন্য libc — __cxa_atexit, vfork, DT_*, আলাদা fnmatch/err, PATH */
+static int p17_order[4], p17_n;
+static void p17_cxa(void *a) { p17_order[p17_n++] = (int)(long)a; }
+static void p17_plain(void) { p17_order[p17_n++] = 9; }
+/* সবার আগে নিবন্ধিত → সবার শেষে চলে; ক্রম 9,2,1 হলে কোড 0 */
+static void p17_last(void) { _exit(p17_n == 3 && p17_order[0] == 9 && p17_order[1] == 2 && p17_order[2] == 1 ? 0 : 1); }
+static void test_phase17a(void)
+{
+    pid_t pid;
+    int st = -1;
+    /* সন্তান-প্রসেসে exit()-এর ক্রম: শেষে নিবন্ধিত আগে চলে, atexit আর __cxa_atexit মিশিয়ে */
+    pid = fork();
+    if (pid == 0) {
+        p17_n = 0;
+        atexit(p17_last);
+        __cxa_atexit(p17_cxa, (void *)1, 0);
+        __cxa_atexit(p17_cxa, (void *)2, 0);
+        atexit(p17_plain);
+        exit(5);
+    }
+    check(pid > 0 && waitpid(pid, &st, 0) == pid && WIFEXITED(st) && WEXITSTATUS(st) == 0,
+          "__cxa_atexit + atexit run at exit, newest first");
+    p17_n = 0;
+    pid = vfork();
+    if (pid == 0) _exit(17);
+    check(pid > 0 && waitpid(pid, &st, 0) == pid && WIFEXITED(st) && WEXITSTATUS(st) == 17,
+          "vfork() works (same as fork)");
+    check(DT_LNK == 10 && DT_FIFO == 1 && DT_SOCK == 12 && DT_BLK == 6, "dirent DT_* constants");
+    check(fnmatch("*.c", "a.c", 0) == 0 && fnmatch("a?[0-9]", "ab7", 0) == 0 &&
+          fnmatch("*.c", "a.h", 0) == FNM_NOMATCH, "fnmatch (own object now)");
+    check(system("unset PATH; ls / >/dev/null") == 0, "programs still run with no PATH (default list)");
+    (void)p17_order;
+}
+
+/* ধাপ ১৭খ: GCC-র জন্য IPv6-এর হেডার; কার্নেলে IPv6 নেই — socket() পরিষ্কার ভাবে ব্যর্থ */
+static void test_phase17b(void)
+{
+    struct sockaddr_in6 a6;
+    int fd;
+    memset(&a6, 0, sizeof(a6));
+    a6.sin6_family = AF_INET6;
+    a6.sin6_addr.s6_addr[15] = 1;
+    check(AF_INET6 == 10 && sizeof(struct in6_addr) == 16 && sizeof(a6) == 28 && a6.sin6_addr.s6_addr32[3] != 0,
+          "IPv6 types (sockaddr_in6, in6_addr)");
+    fd = socket(AF_INET6, SOCK_STREAM, 0);
+    check(fd < 0, "socket(AF_INET6) is refused (no IPv6 yet)");
+    if (fd >= 0) close(fd);
 }
 
 int main(int argc, char **argv)
@@ -2180,6 +2232,8 @@ int main(int argc, char **argv)
     test_phase23b();
     test_phase23c();
     test_phase24a();
+    test_phase17a();
+    test_phase17b();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

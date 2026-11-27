@@ -4,6 +4,9 @@
  * mbstate_t-তে অর্ধেক পড়া UTF-8 অক্ষর জমা থাকে (mbrtowc টুকরো টুকরো পেলেও চলে)। */
 #ifndef _WCHAR_H
 #define _WCHAR_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <stddef.h>
 #include <stdarg.h>
@@ -103,4 +106,7 @@ int      swscanf(const wchar_t *s, const wchar_t *fmt, ...);
 int      vswscanf(const wchar_t *s, const wchar_t *fmt, va_list ap);
 size_t   wcsftime(wchar_t *s, size_t n, const wchar_t *fmt, const struct tm *tm);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

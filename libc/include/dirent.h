@@ -1,13 +1,21 @@
 /* rozlibc — dirent.h (getdents64-এর ওপর) */
 #ifndef _DIRENT_H
 #define _DIRENT_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <_rozlibc.h>
 
 #define DT_UNKNOWN 0
+#define DT_FIFO    1
 #define DT_CHR     2
 #define DT_DIR     4
+#define DT_BLK     6
 #define DT_REG     8
+#define DT_LNK     10
+#define DT_SOCK    12
+#define DT_WHT     14
 
 struct dirent {
     ino_t d_ino;
@@ -26,4 +34,7 @@ void           rewinddir(DIR *d);
 int            dirfd(DIR *d);
 DIR           *fdopendir(int fd);     /* ধাপ ১৯ছ: খোলা ডিরেক্টরির fd থেকে (fd DIR-এর হয়ে যায়) */
 
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -2,6 +2,9 @@
  * rozOS-এ st_rdev প্রায় সবসময় 0; sbase-এর ls/tar এগুলো ডাকে। */
 #ifndef _SYS_SYSMACROS_H
 #define _SYS_SYSMACROS_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <sys/types.h>
 
@@ -12,4 +15,7 @@
                                (((unsigned long long)(y) & 0xffffff00ull) << 12) | \
                                ((unsigned long long)(y) & 0x000000ffull)))
 
+#ifdef __cplusplus
+}
+#endif
 #endif

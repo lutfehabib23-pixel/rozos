@@ -25,7 +25,7 @@
 
 #define SHELL "/bin/rozsh"
 
-static char *const shell_envp[] = { "PATH=/bin:/usr/local/bin:/home/bin", "HOME=/home", "TERM=rozos",
+static char *const shell_envp[] = { "PATH=/bin:/usr/bin:/usr/local/bin:/home/bin", "HOME=/home", "TERM=rozos",
                                     "USER=root", "SHELL=/bin/rozsh", NULL };
 
 /* ধাপ ১৪: /etc/rozos.conf-এর mode= (না থাকলে desktop) */
@@ -98,7 +98,7 @@ static pid_t start_shell(void)
 {
     static char *const argv[] = { "rozsh", "-l", NULL };
     /* ধাপ ১২: PATH-এ নিজের প্রোগ্রামের জায়গাও (/usr/local/bin, ~/bin = /home/bin) */
-    static char *const envp[] = { "PATH=/bin:/usr/local/bin:/home/bin", "HOME=/home", "TERM=rozos", "USER=root",
+    static char *const envp[] = { "PATH=/bin:/usr/bin:/usr/local/bin:/home/bin", "HOME=/home", "TERM=rozos", "USER=root",
                                   "SHELL=/bin/rozsh", NULL };
     pid_t pid = fork();
     if (pid == 0) {

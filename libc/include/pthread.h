@@ -6,6 +6,9 @@
  * signal mask প্রসেসের সব থ্রেডের একটাই (pthread_sigmask = sigprocmask)। */
 #ifndef _PTHREAD_H
 #define _PTHREAD_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <_rozlibc.h>
 #include <time.h>
@@ -212,4 +215,7 @@ void __roz_cleanup_pop(struct __roz_cleanup_frame *f, int run);
 
 #include <signal.h>
 
+#ifdef __cplusplus
+}
+#endif
 #endif

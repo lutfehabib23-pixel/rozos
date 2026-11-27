@@ -4,6 +4,9 @@
  * stderr বাফারহীন। exit()-এ সব খোলা FILE ফ্লাশ হয়। */
 #ifndef _STDIO_H
 #define _STDIO_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <stddef.h>
 #include <stdarg.h>
@@ -135,4 +138,7 @@ typedef struct {
 } cookie_io_functions_t;
 FILE  *fopencookie(void *cookie, const char *mode, cookie_io_functions_t io);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

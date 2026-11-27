@@ -1,6 +1,9 @@
 /* rozlibc — sys/statvfs.h (ধাপ ১৯চ): POSIX-এর statvfs — ডিস্কের মাপ আর খালি জায়গা */
 #ifndef _SYS_STATVFS_H
 #define _SYS_STATVFS_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef unsigned long fsblkcnt_t;
 typedef unsigned long fsfilcnt_t;
@@ -20,4 +23,7 @@ struct statvfs {
 
 int statvfs(const char *path, struct statvfs *buf);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

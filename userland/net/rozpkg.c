@@ -14,7 +14,9 @@
  *   /var/lib/rozpkg/installed/<name>.list  প্যাকেজের বসানো ফাইলের তালিকা
  *   /var/lib/rozpkg/installed/<name>.ver   বসানো সংস্করণ
  *
- * প্যাকেজের .tar-এর পথগুলো "/" থেকে আপেক্ষিক (usr/lib/libcjson.a ...)। */
+ * প্যাকেজের .tar-এর পথগুলো "/" থেকে আপেক্ষিক (usr/lib/libcjson.a ...)।
+ * ধাপ ১৭খ: প্যাকেজ .tar.gz-ও হতে পারে (zlib-এর gzread সংকুচিত আর সাধারণ দুটোই পড়ে),
+ * আর খোলার সময় কত MiB হলো তা দেখায়। */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +27,24 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include "rozhttp.h"
+
+/* ধাপ ১৭খ: tar পড়ার উৎস — zlib থাকলে gz* (.tar আর .tar.gz দুটোই), না থাকলে সাধারণ fd */
+#ifdef ROZPKG_ZLIB
+#include <zlib.h>
+typedef gzFile tarin_t;
+#define TIN_OPEN(p)       gzopen((p), "rb")
+#define TIN_OK(t)         ((t) != NULL)
+#define TIN_READ(t, b, n) ((long)gzread((t), (b), (unsigned)(n)))
+#define TIN_SKIP(t, n)    gzseek((t), (z_off_t)(n), SEEK_CUR)
+#define TIN_CLOSE(t)      gzclose(t)
+#else
+typedef int tarin_t;
+#define TIN_OPEN(p)       open((p), O_RDONLY)
+#define TIN_OK(t)         ((t) >= 0)
+#define TIN_READ(t, b, n) ((long)read((t), (b), (size_t)(n)))
+#define TIN_SKIP(t, n)    lseek((t), (off_t)(n), SEEK_CUR)
+#define TIN_CLOSE(t)      close(t)
+#endif
 
 #define CONF_FILE   "/etc/rozpkg.conf"
 #define CACHE_DIR   "/var/cache/rozpkg"
@@ -412,17 +432,19 @@ static int safe_path(const char *p)
 /* list_fd-এ প্রতিটি বসানো ফাইল/ডিরেক্টরির আপেক্ষিক পথ */
 static int extract_tar(const char *tarfile, int list_fd, int *nfiles)
 {
-    int fd = open(tarfile, O_RDONLY), out;
+    tarin_t fd = TIN_OPEN(tarfile);
+    int out;
+    long done = 0, shown = -1;            /* ধাপ ১৭খ: খোলার অগ্রগতি (MiB) */
     unsigned char hdr[512];
     char name[256], dest[1200], *buf;
     long size, left;
 
-    if (fd < 0) return -1;
+    if (!TIN_OK(fd)) return -1;
     buf = (char *)malloc(16384);
-    if (!buf) { close(fd); return -1; }
+    if (!buf) { TIN_CLOSE(fd); return -1; }
     *nfiles = 0;
     for (;;) {
-        if (read(fd, hdr, 512) != 512) break;
+        if (TIN_READ(fd, hdr, 512) != 512) break;
         if (!hdr[0]) break;                                   /* শেষের ফাঁকা ব্লক */
         if (memcmp(hdr + 257, "ustar", 5)) {
             fprintf(stderr, "rozpkg: %s: not a USTAR archive\n", tarfile);
@@ -433,7 +455,7 @@ static int extract_tar(const char *tarfile, int list_fd, int *nfiles)
         size = octal((char *)hdr + 124, 12);
         while (!strncmp(name, "./", 2)) memmove(name, name + 2, strlen(name + 2) + 1);
         if (name[0] && name[strlen(name) - 1] == '/') name[strlen(name) - 1] = '\0';
-        if (!name[0]) { lseek(fd, (size + 511) / 512 * 512, SEEK_CUR); continue; }
+        if (!name[0]) { TIN_SKIP(fd, (size + 511) / 512 * 512); continue; }
         if (!safe_path(name)) {
             fprintf(stderr, "rozpkg: refusing unsafe path '%s'\n", name);
             goto fail;
@@ -446,7 +468,7 @@ static int extract_tar(const char *tarfile, int list_fd, int *nfiles)
         }
         if (hdr[156] != '0' && hdr[156] != '\0') {
             fprintf(stderr, "rozpkg: skipping '%s' (unsupported tar entry type '%c')\n", name, hdr[156]);
-            lseek(fd, (size + 511) / 512 * 512, SEEK_CUR);
+            TIN_SKIP(fd, (size + 511) / 512 * 512);
             continue;
         }
         {
@@ -462,25 +484,33 @@ static int extract_tar(const char *tarfile, int list_fd, int *nfiles)
         left = size;
         while (left > 0) {
             long want = left > 16384 ? 16384 : left;
-            ssize_t n = read(fd, buf, (size_t)want);
+            long n = TIN_READ(fd, buf, want);
             if (n <= 0 || write(out, buf, (size_t)n) != n) {
                 close(out);
                 fprintf(stderr, "rozpkg: %s: short read/write\n", dest);
                 goto fail;
             }
             left -= n;
+            done += n;
+            if (done >> 20 != shown) {     /* প্রতি MiB-এ এক লাইন হালনাগাদ */
+                shown = done >> 20;
+                printf("\r  unpacking %ld MiB", shown);
+                fflush(stdout);
+            }
         }
         close(out);
-        if (size % 512) lseek(fd, 512 - size % 512, SEEK_CUR);
+        if (size % 512) TIN_SKIP(fd, 512 - size % 512);
         dprintf(list_fd, "%s\n", name);
         (*nfiles)++;
     }
+    if (shown >= 0) printf("\r  unpacked %ld MiB   \n", shown);
     free(buf);
-    close(fd);
+    TIN_CLOSE(fd);
     return 0;
 fail:
+    if (shown >= 0) printf("\n");
     free(buf);
-    close(fd);
+    TIN_CLOSE(fd);
     return -1;
 }
 

@@ -1,6 +1,9 @@
 /* rozlibc — limits.h (x86-64, LP64) */
 #ifndef _LIMITS_H
 #define _LIMITS_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define CHAR_BIT   8
 #define SCHAR_MIN  (-128)
@@ -52,4 +55,7 @@
 #define CHARCLASS_NAME_MAX 14
 #define FILESIZEBITS 64
 
+#ifdef __cplusplus
+}
+#endif
 #endif

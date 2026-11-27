@@ -1,6 +1,9 @@
 /* rozlibc — sys/time.h */
 #ifndef _SYS_TIME_H
 #define _SYS_TIME_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <time.h>
 
@@ -39,4 +42,7 @@ int getitimer(int which, struct itimerval *v);
 int utimes(const char *path, const struct timeval tv[2]);
 #include <sys/select.h>
 
+#ifdef __cplusplus
+}
+#endif
 #endif

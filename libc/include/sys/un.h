@@ -5,6 +5,9 @@
  * নামগুলো কার্নেলের তালিকায় থাকে (ডিস্কে ফাইল হয় না); listen করা socket বন্ধ হলে মুছে যায়। */
 #ifndef _SYS_UN_H
 #define _SYS_UN_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <sys/socket.h>
 
@@ -13,4 +16,7 @@ struct sockaddr_un {
     char sun_path[108];
 };
 
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -1,6 +1,9 @@
 /* rozlibc — ভেতরের সাধারণ সংজ্ঞা (সব হেডার এটা নেয়) */
 #ifndef _ROZLIBC_H
 #define _ROZLIBC_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <stddef.h>
 #include <stdint.h>
@@ -20,4 +23,7 @@ typedef long time_t;
 typedef long clock_t;
 typedef long suseconds_t;
 
+#ifdef __cplusplus
+}
+#endif
 #endif

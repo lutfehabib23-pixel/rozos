@@ -1,6 +1,9 @@
 /* rozlibc — ar.h (ধাপ ১১): .a আর্কাইভের হেডার (pdpmake "lib.a(member.o)" এর জন্য) */
 #ifndef _AR_H
 #define _AR_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define ARMAG   "!<arch>\n"
 #define SARMAG  8
@@ -16,4 +19,7 @@ struct ar_hdr {
     char ar_fmag[2];
 };
 
+#ifdef __cplusplus
+}
+#endif
 #endif

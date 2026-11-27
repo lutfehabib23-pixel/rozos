@@ -1,6 +1,9 @@
 /* rozlibc — sched.h (ধাপ ১৬খ-২) */
 #ifndef _SCHED_H
 #define _SCHED_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <_rozlibc.h>
 #include <time.h>
 
@@ -33,4 +36,7 @@ int sched_getaffinity(pid_t pid, size_t size, cpu_set_t *set);
 int sched_setaffinity(pid_t pid, size_t size, const cpu_set_t *set);
 int sched_getcpu(void);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

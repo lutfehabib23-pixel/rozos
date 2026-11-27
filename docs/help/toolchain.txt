@@ -1,0 +1,41 @@
+# toolchain - GCC and binutils for rozOS (x86_64-rozos)
+Phase 17a: GCC 15.3 and binutils 2.46 know rozOS as an operating system,
+target name "x86_64-rozos". The compiler knows rozOS's start files
+(crt0.o crti.o crtn.o), the C library (-lc, [[rozlibc]]), static linking
+at 0x400000 and defines __rozos__. So on the PC:
+  `x86_64-rozos-gcc prog.c -o prog`
+  `x86_64-rozos-g++ -std=c++20 prog.cpp -o prog -pthread`
+make programs that run in rozOS directly - no extra flags.
+
+== Build it (on the PC, once, 1-2 hours) ==
+In the rozOS folder:
+  `make CROSS= libc`
+  `./toolchain/build-rozos-toolchain.sh cross`
+It downloads binutils and GCC (gnu.org, or Ubuntu's archive / GitHub if
+gnu.org is down), adds the rozOS target (toolchain/rozos-target-patch.py)
+and installs to ~/opt/rozos-cross. Put ~/opt/rozos-cross/bin in PATH.
+If rozlibc changes later: `./toolchain/build-rozos-toolchain.sh sysroot`.
+
+== C++ ==
+The C++ library (libstdc++) is complete: iostream, string, vector, map,
+algorithm, memory, exceptions (throw/catch), fstream, sstream,
+std::thread and std::mutex (over [[threads]]), static constructors and
+destructors. thread_local works through "emulated TLS".
+Copy the program to rozOS (USB stick, [[disks]], or the disk image) and
+run it there.
+
+== Inside rozOS ==
+  `./toolchain/build-rozos-toolchain.sh native`
+builds binutils that run IN rozOS and makes the [[binutils]] package
+(dist/packages).
+  `./toolchain/build-rozos-toolchain.sh native-gcc`
+builds GMP, MPFR and MPC for rozOS and then GCC itself (about an hour)
+and makes the [[gcc]] package (gcc-15.3.0.tar.gz).
+
+== Notes ==
+- The rozlibc headers are C++-ready (extern "C") since phase 17a, so
+  C++ code can call any libc function.
+- [[tcc]] stays the default C compiler of Code and edit.
+- The kernel is still built with the x86_64-elf compiler
+  (toolchain/build-cross.sh) or TCC; see [[kernel-build]].
+See [[c-programming]], [[packages]].

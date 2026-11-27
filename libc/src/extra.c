@@ -884,29 +884,7 @@ void syslog(int pri, const char *fmt, ...)
     va_end(ap);
 }
 
-/* ================= err.h ================= */
-
-void vwarn(const char *fmt, va_list ap)
-{
-    int e = errno;
-    fprintf(stderr, "%s: ", __progname);
-    if (fmt) { vfprintf(stderr, fmt, ap); fputs(": ", stderr); }
-    fprintf(stderr, "%s\n", strerror(e));
-}
-
-void vwarnx(const char *fmt, va_list ap)
-{
-    fprintf(stderr, "%s: ", __progname);
-    if (fmt) vfprintf(stderr, fmt, ap);
-    fputc('\n', stderr);
-}
-
-void verr(int code, const char *fmt, va_list ap) { vwarn(fmt, ap); exit(code); }
-void verrx(int code, const char *fmt, va_list ap) { vwarnx(fmt, ap); exit(code); }
-void warn(const char *fmt, ...) { va_list ap; va_start(ap, fmt); vwarn(fmt, ap); va_end(ap); }
-void warnx(const char *fmt, ...) { va_list ap; va_start(ap, fmt); vwarnx(fmt, ap); va_end(ap); }
-void err(int code, const char *fmt, ...) { va_list ap; va_start(ap, fmt); vwarn(fmt, ap); va_end(ap); exit(code); }
-void errx(int code, const char *fmt, ...) { va_list ap; va_start(ap, fmt); vwarnx(fmt, ap); va_end(ap); exit(code); }
+/* err.h (warn/err …) এখন err.c-তে — ধাপ ১৭ক: binutils নিজের warn() দেয়, আলাদা object লাগে */
 
 /* ================= dlfcn.h (stub) ================= */
 

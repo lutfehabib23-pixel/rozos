@@ -1,6 +1,9 @@
 /* rozlibc — netinet/in.h */
 #ifndef _NETINET_IN_H
 #define _NETINET_IN_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <stdint.h>
 #include <sys/socket.h>
@@ -29,6 +32,30 @@ struct sockaddr_in {
 #define INADDR_NONE      ((in_addr_t)0xffffffff)
 #define INADDR_LOOPBACK  ((in_addr_t)0x7f000001)   /* host order */
 
+/* ধাপ ১৭খ: IPv6-এর ধরন (শুধু হেডার — rozOS-এর নেটওয়ার্ক এখনো IPv4) */
+struct in6_addr {
+    union {
+        uint8_t  __s6_addr[16];
+        uint16_t __s6_addr16[8];
+        uint32_t __s6_addr32[4];
+    } __in6_union;
+};
+#define s6_addr   __in6_union.__s6_addr
+#define s6_addr16 __in6_union.__s6_addr16
+#define s6_addr32 __in6_union.__s6_addr32
+
+struct sockaddr_in6 {
+    sa_family_t     sin6_family;
+    in_port_t       sin6_port;
+    uint32_t        sin6_flowinfo;
+    struct in6_addr sin6_addr;
+    uint32_t        sin6_scope_id;
+};
+#define IPPROTO_IPV6 41
+#define INET6_ADDRSTRLEN 46
+#define IN6ADDR_ANY_INIT      { { { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 } } }
+#define IN6ADDR_LOOPBACK_INIT { { { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1 } } }
+
 #define INET_ADDRSTRLEN 16
 
 uint16_t htons(uint16_t v);
@@ -36,4 +63,7 @@ uint16_t ntohs(uint16_t v);
 uint32_t htonl(uint32_t v);
 uint32_t ntohl(uint32_t v);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

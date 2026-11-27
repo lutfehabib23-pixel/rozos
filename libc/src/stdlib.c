@@ -387,7 +387,7 @@ int execvpe(const char *file, char *const argv[], char *const envp[])
     char buf[PATH_MAX];
     if (strchr(file, '/')) return execve(file, argv, envp);
     path = getenv("PATH");
-    if (!path) path = "/bin";
+    if (!path) path = "/bin:/usr/bin:/usr/local/bin";   /* ধাপ ১৭ক: /usr/bin (binutils/GCC প্যাকেজ) */
     for (p = path; ; ) {
         const char *colon = strchr(p, ':');
         size_t n = colon ? (size_t)(colon - p) : strlen(p);

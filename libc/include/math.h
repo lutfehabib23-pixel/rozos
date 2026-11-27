@@ -5,6 +5,9 @@
  * cbrt, fma, erf/erfc, tgamma/lgamma, asinh/acosh/atanh, nextafter, remquo ইত্যাদি। */
 #ifndef _MATH_H
 #define _MATH_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #if defined(__GNUC__) && !defined(__TINYC__)
 #define HUGE_VAL  __builtin_huge_val()
@@ -125,4 +128,7 @@ double significand(double x);
 #undef __ROZ_M1
 #undef __ROZ_M2
 
+#ifdef __cplusplus
+}
+#endif
 #endif

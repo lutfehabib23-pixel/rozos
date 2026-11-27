@@ -1,6 +1,9 @@
 /* rozlibc — sys/socket.h (BSD socket, Linux-এর মান; ধাপ ৯: শুধু IPv4) */
 #ifndef _SYS_SOCKET_H
 #define _SYS_SOCKET_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <_rozlibc.h>
 
@@ -24,6 +27,9 @@ struct sockaddr_storage {
 #define AF_INET   2
 #define PF_INET   AF_INET
 #define PF_UNSPEC AF_UNSPEC
+/* ধাপ ১৭খ: IPv6-এর নাম (GCC-র libcody চায়); কার্নেলে IPv6 নেই — socket() EAFNOSUPPORT দেয় */
+#define AF_INET6  10
+#define PF_INET6  AF_INET6
 
 #define SOCK_STREAM   1
 #define SOCK_DGRAM    2
@@ -65,4 +71,7 @@ int     getpeername(int fd, struct sockaddr *addr, socklen_t *len);
 int     setsockopt(int fd, int level, int name, const void *val, socklen_t len);
 int     getsockopt(int fd, int level, int name, void *val, socklen_t *len);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

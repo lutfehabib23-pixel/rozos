@@ -1,6 +1,9 @@
 /* rozlibc — grp.h (ধাপ ১৬ক): /etc/group থেকে; না থাকলে শুধু root (gid 0) */
 #ifndef _GRP_H
 #define _GRP_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <_rozlibc.h>
 
 struct group {
@@ -20,4 +23,7 @@ void endgrent(void);
 int  initgroups(const char *user, gid_t gid);
 int  setgroups(size_t n, const gid_t *list);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

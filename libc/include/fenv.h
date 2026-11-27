@@ -1,6 +1,9 @@
 /* rozlibc — fenv.h (ধাপ ১৬ক): x87 আর SSE দুটোরই rounding mode ও exception ফ্ল্যাগ */
 #ifndef _FENV_H
 #define _FENV_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define FE_INVALID    0x01
 #define FE_DIVBYZERO  0x04
@@ -37,4 +40,7 @@ int feholdexcept(fenv_t *env);
 int fesetenv(const fenv_t *env);
 int feupdateenv(const fenv_t *env);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

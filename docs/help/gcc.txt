@@ -1,0 +1,32 @@
+# gcc - GCC and G++ inside rozOS
+GCC 15.3 (C and C++) running in rozOS itself (phase 17b). It is a
+[[rozpkg]] package (40 MB download, 111 MB installed) and needs
+[[binutils]] for assembling and linking:
+  `rozpkg install binutils gcc`
+
+== Use ==
+  `gcc hello.c -o hello`            C
+  `g++ -O2 prog.cpp -o prog`        C++ (iostream, vector, map, string ...)
+  `g++ -std=c++20 -pthread t.cpp`   std::thread, std::mutex ([[threads]])
+  `gcc -Wall -g -c a.c`             only compile to a.o
+  `gcc a.o b.o -o prog -lm`         link several files
+  `gcc -S prog.c`                   the assembly, in prog.s
+  `gcc -E prog.c | less`            after the preprocessor
+Everything is linked statically (like [[tcc]]); programs start at 0x400000
+and run like any other rozOS program. __rozos__ is defined, so
+  #ifdef __rozos__
+works in portable code.
+
+== Speed ==
+GCC is much bigger and slower than [[tcc]] but makes faster programs and
+knows modern C and C++. A small C program takes about a second on a real
+PC, a C++ program with iostream a few seconds (in QEMU without KVM much
+longer). [[tcc]] stays the compiler that Code and edit use.
+
+== Problems ==
+  "cannot execute 'as'" / "ld: not found"   `rozpkg install binutils`
+  "virtual memory exhausted"                 large C++ needs RAM: 1 GB+
+  undefined reference to a libc function      rozlibc lacks it ([[posix]])
+
+Package files: `rozpkg info gcc`. Building it: [[toolchain]].
+See [[c-programming]], [[self-hosting]].

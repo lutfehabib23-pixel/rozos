@@ -1,6 +1,9 @@
 /* rozlibc — string.h */
 #ifndef _STRING_H
 #define _STRING_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <stddef.h>
 
@@ -50,4 +53,7 @@ size_t strxfrm(char *dst, const char *src, size_t n);
 int    strverscmp(const char *a, const char *b);
 void   explicit_bzero(void *s, size_t n);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -6,6 +6,9 @@
  * বাকি ফিল্ড আর বিট রাখা হয় Linux-এর মাপে, যাতে বাইরের কোড কম্পাইল হয়। */
 #ifndef _TERMIOS_H
 #define _TERMIOS_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <_rozlibc.h>
 
@@ -44,4 +47,7 @@ void  cfmakeraw(struct termios *t);
 pid_t tcgetpgrp(int fd);
 int   tcsetpgrp(int fd, pid_t pgrp);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

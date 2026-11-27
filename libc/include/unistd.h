@@ -1,6 +1,9 @@
 /* rozlibc — unistd.h (POSIX-এর যা rozOS-এ আছে) */
 #ifndef _UNISTD_H
 #define _UNISTD_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <_rozlibc.h>
 
@@ -37,6 +40,7 @@ int     access(const char *path, int mode);
 int     isatty(int fd);
 
 pid_t   fork(void);
+pid_t   vfork(void);
 int     execve(const char *path, char *const argv[], char *const envp[]);
 int     execv(const char *path, char *const argv[]);
 int     execvp(const char *file, char *const argv[]);
@@ -139,4 +143,7 @@ extern char *optarg;
 extern int optind, opterr, optopt;
 int     getopt(int argc, char *const argv[], const char *opts);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

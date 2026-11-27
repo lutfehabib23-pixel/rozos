@@ -1,6 +1,9 @@
 /* rozlibc — sys/sysinfo.h (ধাপ ১৯চ): মোট/খালি RAM, চালু থাকার সময়, প্রসেসের সংখ্যা (Linux-এর মতো) */
 #ifndef _SYS_SYSINFO_H
 #define _SYS_SYSINFO_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 struct sysinfo {
     long          uptime;          /* বুট থেকে সেকেন্ড */
@@ -17,4 +20,7 @@ struct sysinfo {
 
 int sysinfo(struct sysinfo *info);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

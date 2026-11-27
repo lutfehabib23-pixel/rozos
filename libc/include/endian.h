@@ -1,6 +1,9 @@
 /* rozlibc — endian.h (ধাপ ১৬ক): x86-64 = little endian */
 #ifndef _ENDIAN_H
 #define _ENDIAN_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <stdint.h>
 
 #define __LITTLE_ENDIAN 1234
@@ -31,4 +34,7 @@ static __inline uint64_t __roz_bswap64(uint64_t x)
 #define be64toh(x) __roz_bswap64(x)
 #define le64toh(x) (uint64_t)(x)
 
+#ifdef __cplusplus
+}
+#endif
 #endif

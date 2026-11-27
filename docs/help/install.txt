@@ -15,4 +15,4 @@ print something).
   /bin             rozOS's own programs
   /usr/local/bin   programs you install (for everybody)
   /home/bin        your personal programs (~/bin)
-PATH is /bin:/usr/local/bin:/home/bin. See [[files]], [[c-programming]].
+PATH is /bin:/usr/bin:/usr/local/bin:/home/bin. See [[files]], [[c-programming]].

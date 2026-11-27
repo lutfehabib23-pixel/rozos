@@ -1,6 +1,9 @@
 /* rozlibc — errno (মান Linux-এর একই, কার্নেলের rozos/errno.h অনুযায়ী) */
 #ifndef _ERRNO_H
 #define _ERRNO_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* ধাপ ১৬খ-২: প্রতিটা থ্রেডের নিজের errno (TLS-এ); পুরনো প্রোগ্রামের জন্য `errno` নামের
  * সাধারণ চলকও থাকে (মূল থ্রেডের মান) */
@@ -98,4 +101,7 @@ extern int *__errno_location(void);
 #define ENOTSUP         EOPNOTSUPP
 #define EDEADLOCK       EDEADLK
 
+#ifdef __cplusplus
+}
+#endif
 #endif

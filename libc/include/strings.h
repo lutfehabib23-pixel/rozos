@@ -1,6 +1,9 @@
 /* rozlibc — strings.h */
 #ifndef _STRINGS_H
 #define _STRINGS_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <string.h>
 /* ধাপ ১৬ক */
 #include <stddef.h>
@@ -13,4 +16,7 @@ int   ffs(int v);
 int   ffsl(long v);
 int   ffsll(long long v);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

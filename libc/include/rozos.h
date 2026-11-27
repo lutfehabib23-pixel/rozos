@@ -1,6 +1,9 @@
 /* rozlibc — rozOS-এর নিজস্ব সুবিধা (POSIX নয়) */
 #ifndef _ROZOS_H
 #define _ROZOS_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* সরাসরি syscall: ফলাফল কাঁচা (ত্রুটি হলে -ERRNO, errno বসায় না) */
 long __syscall6(long n, long a, long b, long c, long d, long e, long f);
@@ -45,4 +48,7 @@ int  rozos_diskwrite(const char *dev, int on);
 /* ধাপ ১৯চ: চলমান প্রসেস — প্রতি সারি "pid ppid state cpu_ms threads mem_kib name\n" (লেখা বাইট) */
 long rozos_proc_list(char *buf, unsigned long len);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

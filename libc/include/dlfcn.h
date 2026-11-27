@@ -2,6 +2,9 @@
  * ব্যর্থ হয় (dlerror বলে দেয় কেন); প্রোগ্রাম যেন কম্পাইল হয় সেজন্য */
 #ifndef _DLFCN_H
 #define _DLFCN_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define RTLD_LAZY     1
 #define RTLD_NOW      2
@@ -25,4 +28,7 @@ int   dlclose(void *handle);
 char *dlerror(void);
 int   dladdr(const void *addr, Dl_info *info);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

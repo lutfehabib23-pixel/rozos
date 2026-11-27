@@ -1,6 +1,9 @@
 /* rozlibc — arpa/inet.h */
 #ifndef _ARPA_INET_H
 #define _ARPA_INET_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <netinet/in.h>
 
@@ -10,4 +13,7 @@ char       *inet_ntoa(struct in_addr a);
 int         inet_pton(int af, const char *s, void *dst);
 const char *inet_ntop(int af, const void *src, char *dst, socklen_t size);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -2,6 +2,9 @@
  * সিরিলিক, বাংলা ও CJK-র মোটামুটি শ্রেণি; বড়/ছোট হাতের রূপান্তর ইউরোপীয় বর্ণমালায় */
 #ifndef _WCTYPE_H
 #define _WCTYPE_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <stddef.h>
 
 #ifndef _ROZLIBC_WINT
@@ -33,4 +36,7 @@ int      iswctype(wint_t c, wctype_t t);
 wctrans_t wctrans(const char *name);
 wint_t   towctrans(wint_t c, wctrans_t t);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

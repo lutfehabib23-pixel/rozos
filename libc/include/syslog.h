@@ -2,6 +2,9 @@
  * /tmp/messages); LOG_PERROR দিলে stderr-এও; LOG_CONS-এ ফাইল না খুললে /dev/console */
 #ifndef _SYSLOG_H
 #define _SYSLOG_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <stdarg.h>
 
 #define LOG_EMERG   0
@@ -54,4 +57,7 @@ void vsyslog(int pri, const char *fmt, va_list ap);
 void closelog(void);
 int  setlogmask(int mask);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

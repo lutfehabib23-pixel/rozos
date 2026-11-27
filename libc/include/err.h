@@ -1,6 +1,9 @@
 /* rozlibc — err.h (ধাপ ১৬ক, BSD): "প্রোগ্রাম: বার্তা: strerror" লিখে (err) বেরিয়ে যাওয়া */
 #ifndef _ERR_H
 #define _ERR_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <stdarg.h>
 
 void err(int code, const char *fmt, ...) __attribute__((noreturn));
@@ -12,4 +15,7 @@ void verrx(int code, const char *fmt, va_list ap) __attribute__((noreturn));
 void vwarn(const char *fmt, va_list ap);
 void vwarnx(const char *fmt, va_list ap);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

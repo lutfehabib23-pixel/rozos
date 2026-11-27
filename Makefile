@@ -541,6 +541,19 @@ $(USER_BUILD)/bin/lua: $(LUA_BUILD)/lua.o $(LUA_A) $(LIBC_A) $(LIBC_CRT0)
 	@echo "  LD      $@"
 	@$(CC) $(USER_LDFLAGS) $(LIBC_CRT0) $(LUA_BUILD)/lua.o $(LUA_A) $(LIBC_A) -lgcc -o $@
 
+# ধাপ ১৭খ: rozpkg zlib দিয়ে (.tar.gz প্যাকেজ); zlib না থাকলে সাধারণ নিয়মেই (শুধু .tar)
+ifeq ($(HAVE_ZLIB),1)
+$(USER_BUILD)/obj/rozpkg.o: userland/net/rozpkg.c $(ZLIB_ZCONF) config.mk
+	@mkdir -p $(dir $@)
+	@echo "  CC      $< (user, zlib)"
+	@$(CC) $(USER_CFLAGS) -Iuserland/lib -DROZPKG_ZLIB -I$(ZLIB_BUILD)/include -I$(ZLIB_SRC) -MMD -MP -c $< -o $@
+
+$(USER_BUILD)/bin/rozpkg: $(USER_BUILD)/obj/rozpkg.o $(ZLIB_A) $(USER_LIBS) $(LIBC_A) $(LIBC_CRT0)
+	@mkdir -p $(dir $@)
+	@echo "  LD      $@"
+	@$(CC) $(USER_LDFLAGS) $(LIBC_CRT0) $< $(USER_LIBS) $(ZLIB_A) $(LIBC_A) -lgcc -o $@
+endif
+
 $(USER_BUILD)/obj/luagame.o: userland/lua/luagame.c userland/lib/rozgame.h userland/lib/rozgfx.h config.mk
 	@mkdir -p $(dir $@)
 	@echo "  CC      $<"

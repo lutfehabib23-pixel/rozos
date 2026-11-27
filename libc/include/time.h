@@ -1,6 +1,9 @@
 /* rozlibc — time.h */
 #ifndef _TIME_H
 #define _TIME_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <_rozlibc.h>
 
@@ -57,4 +60,7 @@ int        clock_settime(clockid_t clk, const struct timespec *ts);
 int        clock_nanosleep(clockid_t clk, int flags, const struct timespec *req, struct timespec *rem);
 int        timespec_get(struct timespec *ts, int base);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -924,7 +924,7 @@ int main(int argc, char **argv)
     if (argc > 2 && !strcmp(argv[1], "-c")) {
         /* ধাপ ১১: rozsh -c "command; command" — system() আর make এভাবে চালায় */
         interactive = 0;
-        if (!getenv("PATH")) setenv("PATH", "/bin:/usr/local/bin:/home/bin", 1);
+        if (!getenv("PATH")) setenv("PATH", "/bin:/usr/bin:/usr/local/bin:/home/bin", 1);
         run_line(argv[2]);
         return last_status;
     }
@@ -944,7 +944,7 @@ int main(int argc, char **argv)
     if (uname(&u) == 0 && u.nodename[0]) {
         strncpy(hostname, u.nodename, sizeof(hostname) - 1);
     }
-    if (!getenv("PATH")) setenv("PATH", "/bin:/usr/local/bin:/home/bin", 1);
+    if (!getenv("PATH")) setenv("PATH", "/bin:/usr/bin:/usr/local/bin:/home/bin", 1);
     if (!getenv("HOME")) setenv("HOME", "/home", 1);
     if (interactive) {
         history_load();

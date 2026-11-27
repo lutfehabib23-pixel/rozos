@@ -8,6 +8,8 @@ has one line per package:
   `./ports/packages/build-cjson.sh`   build the cjson package
   `ports/packages/mkpkg.sh NAME VERSION DIR "description"`
        any folder DIR -> dist/packages/NAME-VERSION.tar + index.txt
+  `MKPKG_GZ=1 ports/packages/mkpkg.sh ...`   the same as .tar.gz
+       (smaller downloads; needs rozpkg from phase 17b)
 Libraries are built with the same cross compiler and flags as rozOS
 programs, against rozlibc (see build-cjson.sh as an example).
 

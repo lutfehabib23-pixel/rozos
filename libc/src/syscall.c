@@ -152,6 +152,8 @@ pid_t fork(void)
     }
     return r;
 }
+/* ধাপ ১৭ক: vfork — rozOS-এ fork-ই (copy-on-write), GCC driver/libiberty এটা চায় */
+pid_t vfork(void) { return fork(); }
 pid_t   getpid(void)                             { return (pid_t)SC3(SYS_getpid, 0, 0, 0); }
 pid_t   getppid(void)                            { return (pid_t)SC3(SYS_getppid, 0, 0, 0); }
 int     kill(pid_t pid, int sig)                 { return (int)SC3(SYS_kill, pid, sig, 0); }

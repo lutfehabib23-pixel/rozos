@@ -1,6 +1,9 @@
 /* rozlibc — getopt.h (ধাপ ১৬ক): GNU getopt_long / getopt_long_only */
 #ifndef _GETOPT_H
 #define _GETOPT_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 extern char *optarg;
 extern int optind, opterr, optopt;
@@ -22,4 +25,7 @@ int getopt_long(int argc, char *const argv[], const char *opts,
 int getopt_long_only(int argc, char *const argv[], const char *opts,
                      const struct option *longopts, int *longindex);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

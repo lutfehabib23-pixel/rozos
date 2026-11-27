@@ -1,6 +1,9 @@
 /* rozlibc — sys/resource.h (ধাপ ১৬ক): সীমা সবসময় "অসীম"; getrusage-এ শুধু সময় */
 #ifndef _SYS_RESOURCE_H
 #define _SYS_RESOURCE_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <sys/time.h>
 
 typedef unsigned long rlim_t;
@@ -37,4 +40,7 @@ int getrusage(int who, struct rusage *u);
 int getpriority(int which, int who);
 int setpriority(int which, int who, int prio);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

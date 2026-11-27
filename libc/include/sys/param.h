@@ -1,6 +1,9 @@
 /* rozlibc — sys/param.h (ধাপ ১৬ক) */
 #ifndef _SYS_PARAM_H
 #define _SYS_PARAM_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <limits.h>
 #include <endian.h>
 
@@ -25,4 +28,7 @@
 #define isset(a, i)   (((const unsigned char *)(a))[(i) / NBBY] & (1 << ((i) % NBBY)))
 #define isclr(a, i)   (!isset(a, i))
 
+#ifdef __cplusplus
+}
+#endif
 #endif
