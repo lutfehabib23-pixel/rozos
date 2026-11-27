@@ -355,4 +355,4 @@ static int tmpfs_statfs(struct vnode *r, struct vfs_statfs *out)
     return 0;
 }
 
-const struct filesystem tmpfs_filesystem = { "tmpfs", tmpfs_mount, tmpfs_statfs, NULL, NULL };
+const struct filesystem tmpfs_filesystem = { "tmpfs", tmpfs_mount, tmpfs_statfs, NULL, NULL, NULL };

@@ -323,20 +323,51 @@ static int remove_tree(const char *p)
     return unlink(p);
 }
 
+/* ধাপ ২৪ঘ: কপি চলার সময় নিচের status বারে অগ্রগতি (উইন্ডো "আটকে" না দেখায়) */
+static long copy_last_draw;
+static unsigned long long copy_done_total;
+
+static void copy_progress(const char *name, unsigned long long done, unsigned long long size)
+{
+    char t[300];
+    long now = gfx_ticks_ms();
+    if (now - copy_last_draw < 250) return;
+    copy_last_draw = now;
+    if (size) snprintf(t, sizeof(t), "Copying %.60s ... %llu of %llu KB (%llu%%)", name, done / 1024, size / 1024,
+                       done * 100 / size);
+    else snprintf(t, sizeof(t), "Copying %.60s ...", name);
+    ui_statusbar(U.s, 0, U.h - STATUS_H, U.w, STATUS_H, t);
+    gfx_present_rect(0, U.h - STATUS_H, U.w, STATUS_H);
+}
+
 static int copy_file(const char *src, const char *dst)
 {
     int in = open(src, O_RDONLY), out;
-    char buf[8192];
+    static char *buf;
+    const size_t bsz = 256 * 1024;                   /* ধাপ ২৪ঘ: বড় বাফার = কম, বড় লেখা */
     ssize_t n;
     struct stat st;
-    if (in < 0) return -1;
-    if (fstat(in, &st) != 0) st.st_mode = 0644;
-    out = open(dst, O_WRONLY | O_CREAT | O_TRUNC, st.st_mode & 0777);
+    unsigned long long done = 0;
+    const char *base = strrchr(src, '/');
+    base = base ? base + 1 : src;
+    if (!buf) buf = (char *)malloc(bsz);
+    if (!buf || in < 0) { if (in >= 0) close(in); return -1; }
+    if (fstat(in, &st) != 0) { st.st_mode = 0644; st.st_size = 0; }
+    out = open(dst, O_WRONLY | O_CREAT | O_TRUNC, (st.st_mode & 0777) | 0200);
     if (out < 0) { close(in); return -1; }
-    while ((n = read(in, buf, sizeof(buf))) > 0)
+    copy_progress(base, 0, (unsigned long long)st.st_size);
+    while ((n = read(in, buf, bsz)) > 0) {
         if (write(out, buf, (size_t)n) != n) { n = -1; break; }
-    close(in);
-    close(out);
+        done += (unsigned long long)n;
+        copy_done_total += (unsigned long long)n;
+        copy_progress(base, done, (unsigned long long)st.st_size);
+    }
+    {
+        int e = errno;
+        close(in);
+        close(out);
+        errno = e;
+    }
     if (n >= 0 && rozlock_is_protected(src)) rozlock_protect(dst, 1);   /* ধাপ ১৯ছ: লক-ফাইলের কপিও মোছা-রোধী */
     return n < 0 ? -1 : 0;
 }
@@ -699,10 +730,15 @@ static void frame(void)
             if (n > 0) {
                 mbuf[n] = '\0';
                 for (line = strtok_r(mbuf, "\n", &save); line && nd < 12; line = strtok_r(NULL, "\n", &save)) {
-                    char dev[32], mp[64], fs[16];
-                    if (sscanf(line, "%31s %63s %15s", dev, mp, fs) != 3 || strncmp(mp, "/mnt/", 5)) continue;
+                    char dev[32], mp[64], fs[16], kind[16] = "-", label[48] = "-";
+                    const char *k;
+                    if (sscanf(line, "%31s %63s %15s %15s %47[^\n]", dev, mp, fs, kind, label) < 3 ||
+                        strncmp(mp, "/mnt/", 5)) continue;
+                    /* ধাপ ২৪ঘ: নাম থাকলে নাম ("My Passport"), নইলে ধরন; পাশে USB/NVMe/SATA */
+                    k = !strcmp(kind, "nvme") ? "NVMe" : !strcmp(kind, "sata") ? "SATA" : !strcmp(kind, "usb") ? "USB" : fs;
                     snprintf(dpath[nd], sizeof(dpath[nd]), "%s", mp);
-                    snprintf(dlabel[nd], sizeof(dlabel[nd]), "%s (%s)", mp + 5, fs);
+                    if (strcmp(label, "-")) snprintf(dlabel[nd], sizeof(dlabel[nd]), "%s (%s)", label, k);
+                    else snprintf(dlabel[nd], sizeof(dlabel[nd]), "%s %s (%s)", k, mp + 5, fs);
                     nd++;
                 }
             }

@@ -417,6 +417,19 @@ static int64_t ntfs_write(struct vnode *vn, uint64_t off, const void *buf, size_
 
 static int ntfs_truncate(struct vnode *vn, uint64_t size) { (void)vn; (void)size; return -EROFS; }
 
+/* ধাপ ২৪ঘ: Windows অনেক সময় ডিরেক্টরির index-এ ফাইলের মাপ হালনাগাদ করে না (০ থাকে) —
+ * তখন ফাইলের নিজের record-এর $DATA থেকে আসল মাপ */
+static uint64_t real_size(struct ntfs_fs *fs, uint64_t mft)
+{
+    struct ntfs_runs r;
+    uint64_t sz = 0;
+    if (load_attr(fs, mft, AT_DATA, NULL, &r) == 0) {
+        sz = r.size;
+        runs_free(&r);
+    }
+    return sz;
+}
+
 /* ---------- ডিরেক্টরি ---------- */
 
 struct dent {
@@ -427,6 +440,8 @@ struct dent {
 };
 
 typedef int (*dent_fn)(const struct dent *d, void *ctx);   /* ১ = থামো */
+
+static struct ntfs_fs *walk_fs;                  /* walk_entries-এর জন্য (real_size) */
 
 /* একসারি index entry (index header-এর পরে) দেখা */
 static int walk_entries(const uint8_t *p, const uint8_t *end, dent_fn fn, void *ctx)
@@ -446,6 +461,7 @@ static int walk_entries(const uint8_t *p, const uint8_t *end, dent_fn fn, void *
                 d.size = rd64(k + 48);
                 d.mtime = ntfs_time(rd64(k + 16));
                 name_to_utf8(k + 66, nl, d.name, sizeof(d.name));
+                if (!d.isdir && d.size == 0 && walk_fs) d.size = real_size(walk_fs, ref);   /* ধাপ ২৪ঘ */
                 if (strcmp(d.name, ".") && fn(&d, ctx)) return 1;
             }
         }
@@ -462,6 +478,7 @@ static int walk_dir(struct ntfs_vnode *dir, dent_fn fn, void *ctx)
     uint8_t *blk = NULL;
     int err, stop;
     uint64_t off;
+    walk_fs = fs;
     err = load_attr(fs, dir->mftno, AT_INDEX_ROOT, "$I30", &root);
     if (err < 0) return err;
     if (!root.resident || root.size < 32) { runs_free(&root); return -EIO; }
@@ -689,4 +706,4 @@ static int ntfs_umount(struct vnode *root)
 /* ধাপ ২৪গ: ভলিউমের নাম (Files-এ দেখাতে) */
 const char *ntfs_label(struct vnode *root) { return NV(root)->fs->label; }
 
-const struct filesystem ntfs_filesystem = { "ntfs", ntfs_mount, ntfs_statfs, ntfs_info, ntfs_umount };
+const struct filesystem ntfs_filesystem = { "ntfs", ntfs_mount, ntfs_statfs, ntfs_info, ntfs_umount, ntfs_label };

@@ -35,6 +35,7 @@
 #define EXT2_NDIR_BLOCKS        12
 
 #define EXT2_INCOMPAT_FILETYPE  0x0002
+#define EXT2_INCOMPAT_FLEX_BG   0x0200   /* ধাপ ২৪ঘ: bitmap/inode table যেকোনো group-এ (আমরা শুধু ঠিকানা পড়ি) */
 #define EXT2_RO_SPARSE_SUPER    0x0001
 #define EXT2_RO_LARGE_FILE      0x0002
 #define EXT2_RO_BTREE_DIR       0x0004
@@ -1064,7 +1065,7 @@ static int ext2_mount(const void *arg, struct vnode **root)
         kfree(fs);
         return -EINVAL;
     }
-    if (fs->sb->feature_incompat & ~EXT2_INCOMPAT_FILETYPE) {
+    if (fs->sb->feature_incompat & ~(EXT2_INCOMPAT_FILETYPE | EXT2_INCOMPAT_FLEX_BG)) {
         kfree(fs);
         return -EINVAL;                                 /* ext3 journal recovery, ext4 extents ইত্যাদি */
     }
@@ -1193,7 +1194,17 @@ static int ext2_umount(struct vnode *root)
     return 0;
 }
 
-const struct filesystem ext2_filesystem = { "ext2", ext2_mount, ext2_statfs, ext2_info, ext2_umount };
+/* ধাপ ২৪ঘ: volume name */
+static const char *ext2_label(struct vnode *root)
+{
+    struct ext2_fs *fs = EV(root)->fs;
+    static char name[17];
+    memcpy(name, fs->sb->volume_name, 16);
+    name[16] = '\0';
+    return name;
+}
+
+const struct filesystem ext2_filesystem = { "ext2", ext2_mount, ext2_statfs, ext2_info, ext2_umount, ext2_label };
 
 /* ---------- ধাপ ২৪খ: ext2 বানানো (mkfs) ----------
  * পেন ড্রাইভের স্থায়ী জায়গার জন্য: block 4096, প্রতি group 32768 block (128 MiB) আর
@@ -1228,7 +1239,7 @@ static int mkfs_zero(struct block_device *dev, uint64_t off, uint64_t len, uint8
 int ext2_mkfs(struct block_device *dev, const char *label, void (*progress)(unsigned done, unsigned total))
 {
     uint64_t bytes = dev->sector_count * dev->sector_size;
-    uint32_t blocks, groups, gdt_blocks, g, first_meta, root_blk, lf_blk;
+    uint32_t blocks, groups, gdt_blocks, g, meta_start, meta_end, root_blk, lf_blk;
     uint32_t free_blocks_total = 0, free_inodes_total = 0;
     struct ext2_gd *gdt;
     uint8_t *buf, *zero;
@@ -1250,44 +1261,70 @@ int ext2_mkfs(struct block_device *dev, const char *label, void (*progress)(unsi
         gdt_blocks = (groups * 32 + MKFS_BS - 1) / MKFS_BS;
     }
     if (groups == 0 || blocks < 1 + gdt_blocks + 2 + MKFS_ITB + 64) return -ENOSPC;
+    /* ধাপ ২৪ঘ: সব metadata group 0-তে ধরতে হবে (~১২০ GB পর্যন্ত); বড় হলে ফাইলসিস্টেম ছোট */
+    while (groups > 1 && 1 + gdt_blocks + groups * (2 + MKFS_ITB) + 2 + 64 > MKFS_BPG) {
+        groups--;
+        blocks = groups * MKFS_BPG;
+        gdt_blocks = (groups * 32 + MKFS_BS - 1) / MKFS_BS;
+    }
 
     gdt = (struct ext2_gd *)kzalloc((size_t)gdt_blocks * MKFS_BS);
     buf = (uint8_t *)kmalloc(MKFS_BS);
     zero = (uint8_t *)kzalloc(zlen);
     if (!gdt || !buf || !zero) { err = -ENOMEM; goto out; }
 
-    /* group-গুলোর বিন্যাস আর bitmap */
+    /* ধাপ ২৪ঘ: flex_bg বিন্যাস — সব group-এর block bitmap, inode bitmap আর inode table
+     * group 0-তে পাশাপাশি। আগে প্রতি ১২৮ MiB-তে ছড়িয়ে ছিল: ধীর পেন ড্রাইভে ছড়ানো ছোট
+     * লেখা খুব ধীর (প্রতিটায় erase block), এখন একটানা বড় লেখা। */
+    meta_start = 1 + gdt_blocks;
+    meta_end = meta_start + groups * (2 + MKFS_ITB);
+    for (g = 0; g < groups; g++) {
+        gdt[g].block_bitmap = meta_start + g;
+        gdt[g].inode_bitmap = meta_start + groups + g;
+        gdt[g].inode_table = meta_start + 2 * groups + g * MKFS_ITB;
+    }
+    block_batch_begin(dev);
     for (g = 0; g < groups; g++) {
         uint32_t start = g * MKFS_BPG;
         uint32_t nblk = (g == groups - 1) ? blocks - start : MKFS_BPG;
-        uint32_t used, i;
-        first_meta = start + (mkfs_has_super(g) ? 1 + gdt_blocks : 0);
-        gdt[g].block_bitmap = first_meta;
-        gdt[g].inode_bitmap = first_meta + 1;
-        gdt[g].inode_table = first_meta + 2;
-        used = first_meta - start + 2 + MKFS_ITB;
-        if (g == 0) used += 2;                                  /* root আর lost+found-এর ডিরেক্টরি block */
+        uint32_t used = 0, i, lo, hi;
+        memset(buf, 0, MKFS_BS);
+        if (mkfs_has_super(g)) {                              /* superblock (কপি) + GDT */
+            for (i = 0; i < 1 + gdt_blocks; i++) buf[i >> 3] |= (uint8_t)(1u << (i & 7));
+            used += 1 + gdt_blocks;
+        }
+        if (g == 0) {                                         /* metadata এলাকা + root/lost+found */
+            lo = meta_start;
+            hi = meta_end + 2;
+            for (i = lo; i < hi; i++) buf[i >> 3] |= (uint8_t)(1u << (i & 7));
+            used += hi - lo;
+        }
+        for (i = nblk; i < MKFS_BPG; i++) buf[i >> 3] |= (uint8_t)(1u << (i & 7));
         gdt[g].free_blocks = (uint16_t)(nblk - used);
         gdt[g].free_inodes = (uint16_t)(g == 0 ? MKFS_IPG - 11 : MKFS_IPG);
         gdt[g].used_dirs = (uint16_t)(g == 0 ? 2 : 0);
         free_blocks_total += nblk - used;
         free_inodes_total += gdt[g].free_inodes;
-
-        /* block bitmap: শুরুর used টা বিট, আর group-এর বাইরের বিট (শেষ group) */
-        memset(buf, 0, MKFS_BS);
-        for (i = 0; i < used; i++) buf[i >> 3] |= (uint8_t)(1u << (i & 7));
-        for (i = nblk; i < MKFS_BPG; i++) buf[i >> 3] |= (uint8_t)(1u << (i & 7));
-        if ((err = block_write_bytes(dev, (uint64_t)gdt[g].block_bitmap * MKFS_BS, buf, MKFS_BS)) < 0) goto out;
-        /* inode bitmap: group 0-তে ১-১১ ব্যবহৃত; IPG-র পরের বিট সব ১ */
+        if ((err = block_write_bytes(dev, (uint64_t)gdt[g].block_bitmap * MKFS_BS, buf, MKFS_BS)) < 0) break;
         memset(buf, 0, MKFS_BS);
         if (g == 0) for (i = 0; i < 11; i++) buf[i >> 3] |= (uint8_t)(1u << (i & 7));
         for (i = MKFS_IPG; i < MKFS_BS * 8; i++) buf[i >> 3] |= (uint8_t)(1u << (i & 7));
-        if ((err = block_write_bytes(dev, (uint64_t)gdt[g].inode_bitmap * MKFS_BS, buf, MKFS_BS)) < 0) goto out;
-        if ((err = mkfs_zero(dev, (uint64_t)gdt[g].inode_table * MKFS_BS, (uint64_t)MKFS_ITB * MKFS_BS, zero, zlen)) < 0)
-            goto out;
-        if (progress) progress(g + 1, groups);           /* ধাপ ২৪গ: অগ্রগতি */
+        if ((err = block_write_bytes(dev, (uint64_t)gdt[g].inode_bitmap * MKFS_BS, buf, MKFS_BS)) < 0) break;
+        if (progress && g % 16 == 0) progress(g / 4, groups);   /* bitmap: প্রথম ২৫% */
     }
-    root_blk = gdt[0].inode_table + MKFS_ITB;
+    if (block_batch_end(dev) < 0 && !err) err = -EIO;
+    if (err < 0) goto out;
+    /* সব inode table একটানা শূন্য (টুকরো করে, অগ্রগতি দেখিয়ে) */
+    {
+        uint64_t off = (uint64_t)gdt[0].inode_table * MKFS_BS, total = (uint64_t)groups * MKFS_ITB * MKFS_BS, done = 0;
+        while (done < total) {
+            uint64_t n = total - done > 4ull * 1024 * 1024 ? 4ull * 1024 * 1024 : total - done;
+            if ((err = mkfs_zero(dev, off + done, n, zero, zlen)) < 0) goto out;
+            done += n;
+            if (progress) progress((unsigned)(groups / 4 + (uint64_t)(groups - groups / 4) * done / total), groups);
+        }
+    }
+    root_blk = meta_end;
     lf_blk = root_blk + 1;
 
     /* root ডিরেক্টরি: . .. lost+found */
@@ -1343,7 +1380,8 @@ int ext2_mkfs(struct block_device *dev, const char *label, void (*progress)(unsi
     sb->rev_level = 1;
     sb->first_ino = 11;
     sb->inode_size = 128;
-    sb->feature_incompat = EXT2_INCOMPAT_FILETYPE;
+    sb->feature_incompat = EXT2_INCOMPAT_FILETYPE | EXT2_INCOMPAT_FLEX_BG;
+    sbraw[0x174] = 4;                                   /* s_log_groups_per_flex (e2fsck-এর জন্য) */
     sb->feature_ro_compat = EXT2_RO_SPARSE_SUPER | EXT2_RO_LARGE_FILE;
     random_get(sb->uuid, sizeof(sb->uuid));
     strncpy(sb->volume_name, label ? label : "", sizeof(sb->volume_name));

@@ -61,7 +61,7 @@
 #include <arch/x86_64/pit.h>
 #include <arch/x86_64/apic.h>
 
-#define ROZOS_VERSION "0.24.2-phase24c"
+#define ROZOS_VERSION "0.24.5-phase24f"
 
 #ifdef __TINYC__
 /* ধাপ ১১: TCC-র লিংকারে linker.ld নেই — শুরু = Limine-এর দেওয়া virtual base,
@@ -685,7 +685,9 @@ static void persist_fill(void)
     if (!persist_created) print_warn("this ISO is a different build: updating the system files (your files and settings stay)");
     prog_begin(persist_created ? "Copying the system files" : "Updating the system files");
     initrd_set_progress(prog_copy);
+    block_batch_begin(persist_dev);                  /* ধাপ ২৪ঘ: ছোট লেখাগুলো জমিয়ে, ক্রম অনুযায়ী বড় করে */
     err = initrd_load_keep("/", &st, persist_created ? NULL : persist_keep);
+    if (block_batch_end(persist_dev) < 0 && err >= 0) err = -EIO;
     initrd_set_progress(NULL);
     prog_end();
     if (err < 0 || st.errors) {

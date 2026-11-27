@@ -430,6 +430,20 @@ int block_write_direct(struct block_device *dev, uint64_t offset, const void *bu
     return err;
 }
 
+/* ধাপ ২৪চ: batch (২৪ঘ-এ লেখা জমিয়ে পরে একসাথে) আসল পিসিতে ডেস্কটপ আটকে দিত, তাই
+ * ২৪গ-এর পরীক্ষিত write-through-এ ফেরা। API থাকছে (ext2/FAT/exFAT/mkfs ডাকে), এখন
+ * কিছু করে না — পরে আলাদা করে, আসল পিসিতে যাচাই করে ফেরানো যাবে। */
+void block_batch_begin(struct block_device *dev)
+{
+    (void)dev;
+}
+
+int block_batch_end(struct block_device *dev)
+{
+    (void)dev;
+    return 0;
+}
+
 int block_is_read_only(struct block_device *dev)
 {
     while (dev && dev->parent) dev = dev->parent;

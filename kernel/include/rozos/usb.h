@@ -16,6 +16,7 @@
 int usb_init(void);                              /* পাওয়া কন্ট্রোলারের সংখ্যা */
 /* lsusb-এর জন্য: "port speed vid:pid class নাম\n" সারি; ফেরত লেখা বাইট */
 int64_t usb_list(char *buf, size_t len);
-void usb_storage_ready(void);                     /* main.c: "/" mount হয়েছে — এখন auto-mount */
+void usb_storage_ready(void);
+void usb_stat_dump(int reset);                   /* ধাপ ২৪ঘ: kmon usbstat [reset] */                     /* main.c: "/" mount হয়েছে — এখন auto-mount */
 
 #endif

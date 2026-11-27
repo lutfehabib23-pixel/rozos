@@ -139,6 +139,8 @@ struct filesystem {
     void (*info)(struct vnode *root);
     /* ঐচ্ছিক (ধাপ ১৫ক): umount-এর আগে — কোনো ফাইল খোলা থাকলে -EBUSY */
     int (*umount)(struct vnode *root);
+    /* ঐচ্ছিক (ধাপ ২৪ঘ): ভলিউমের নাম ("My Passport", "Windows") — না থাকলে NULL/"" */
+    const char *(*label)(struct vnode *root);
 };
 
 struct mount {

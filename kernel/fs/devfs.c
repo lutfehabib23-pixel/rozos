@@ -189,7 +189,7 @@ static int devfs_statfs(struct vnode *r, struct vfs_statfs *out)
     return 0;
 }
 
-const struct filesystem devfs_filesystem = { "devfs", devfs_mount, devfs_statfs, NULL, NULL };
+const struct filesystem devfs_filesystem = { "devfs", devfs_mount, devfs_statfs, NULL, NULL, NULL };
 
 /* ---------- ডিফল্ট ডিভাইস ---------- */
 

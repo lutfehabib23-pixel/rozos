@@ -23,6 +23,16 @@ How it works:
     /home and /etc/rozos.conf, rozpkg.conf, hosts, resolv.conf, passwd,
     group, console-font stay as you left them.
 
+Phase 24d made it faster on slow pen drives: all bookkeeping of the
+file system is in one place at the start (not spread every 128 MB).
+A storage made by phase 24b/24c keeps working; `persistreset` makes it
+in the new layout. (24d also collected small writes and read ahead -
+on a real PC that froze the desktop, so phase 24f went back to the
+tested way of writing every change at once.)
+Phase 24e fixed the real cause of the very slow first boot (10-30
+minutes) and of the frozen mouse and keyboard in 24d: the USB driver
+did not mark big transfers that wrap around its ring buffer, so real
+USB controllers cut them and rozOS waited for a timeout each time.
 Needs a drive of at least 1.5 GiB. The boot menu entry "rozOS (live: do
 not use or save the persistent storage)" (boot option `nopersist`) runs
 only from memory once.

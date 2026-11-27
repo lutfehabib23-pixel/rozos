@@ -22,11 +22,15 @@ int main(int argc, char **argv)
         {
             char *line = buf;
             while (*line) {
-                char dev[64] = "", path[256] = "", fs[32] = "";
+                char dev[64] = "", path[256] = "", fs[32] = "", kind[16] = "", label[64] = "";
                 char *nl = strchr(line, '\n');
                 if (nl) *nl = '\0';
-                sscanf(line, "%63s %255s %31s", dev, path, fs);
-                printf("%-10s on %-16s type %s\n", dev, path, fs);
+                sscanf(line, "%63s %255s %31s %15s %63[^\n]", dev, path, fs, kind, label);
+                /* ধাপ ২৪ঘ: ধরন (nvme/sata/usb/rozos-usb) আর ভলিউমের নাম */
+                if (kind[0] && strcmp(kind, "ram"))
+                    printf("%-10s on %-16s type %-6s %-9s %s\n", dev, path, fs, kind, strcmp(label, "-") ? label : "");
+                else
+                    printf("%-10s on %-16s type %s\n", dev, path, fs);
                 if (!nl) break;
                 line = nl + 1;
             }
@@ -35,7 +39,7 @@ int main(int argc, char **argv)
     }
     if (argc > 2 && !strcmp(argv[1], "-t")) { type = argv[2]; a = 3; }
     if (argc - a != 2) {
-        fprintf(stderr, "usage: mount [-t ext2|fat|tmpfs] DEVICE FOLDER   (mount alone lists)\n");
+        fprintf(stderr, "usage: mount [-t ext2|fat|exfat|ntfs|tmpfs] DEVICE FOLDER   (mount alone lists)\n");
         return 2;
     }
     if (stat(argv[a + 1], &st) != 0) {

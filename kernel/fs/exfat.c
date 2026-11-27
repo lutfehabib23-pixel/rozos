@@ -970,4 +970,4 @@ static int exfat_umount(struct vnode *root)
 
 const char *exfat_label(struct vnode *root) { return XV(root)->fs->label; }
 
-const struct filesystem exfat_filesystem = { "exfat", exfat_mount, exfat_statfs, exfat_info, exfat_umount };
+const struct filesystem exfat_filesystem = { "exfat", exfat_mount, exfat_statfs, exfat_info, exfat_umount, exfat_label };

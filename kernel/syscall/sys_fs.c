@@ -553,7 +553,18 @@ static int64_t sys_mounts(struct interrupt_frame *f, uint64_t ubuf, uint64_t len
     if (!k) return -ENOMEM;
     for (i = 0; i < vfs_mount_count() && o + 1 < len; i++) {
         const struct mount *m = vfs_mount_at(i);
-        o += (size_t)ksnprintf(k + o, len - o, "%s %s %s\n", m->source[0] ? m->source : "-", m->path, m->fs->name);
+        /* ধাপ ২৪ঘ: চতুর্থ ঘর = ধরন (nvme, sata, usb, rozos-usb, ram), বাকিটা = ভলিউমের নাম
+         * (আগের প্রোগ্রাম প্রথম তিনটা পড়ে — বদলায়নি) */
+        const char *kind = "ram", *label = m->fs->label && m->root ? m->fs->label(m->root) : "";
+        struct block_device *bd = m->source[0] ? block_find(m->source) : NULL;
+        if (bd) {
+            struct block_device *top = bd;
+            while (top->parent) top = top->parent;
+            kind = !strcmp(bd->part_label, "rozOS persist") ? "rozos-usb" : top->removable ? "usb" :
+                   !strncmp(top->name, "nvme", 4) ? "nvme" : "sata";
+        }
+        o += (size_t)ksnprintf(k + o, len - o, "%s %s %s %s %s\n", m->source[0] ? m->source : "-", m->path,
+                               m->fs->name, kind, label && label[0] ? label : "-");
     }
     if (o >= len) o = len - 1;
     if (copy_to_user((void *)(uintptr_t)ubuf, k, o + 1) < 0) o = (size_t)-EFAULT;

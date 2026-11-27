@@ -1257,7 +1257,14 @@ static int fat_umount(struct vnode *root)
     return 0;
 }
 
-const struct filesystem fat_filesystem = { "fat", fat_mount, fat_statfs, fat_info, fat_umount };
+/* ধাপ ২৪ঘ: ভলিউমের নাম ("NO NAME" = নেই) */
+static const char *fat_label(struct vnode *root)
+{
+    const char *l = FV(root)->fs->label;
+    return strcmp(l, "NO NAME") ? l : "";
+}
+
+const struct filesystem fat_filesystem = { "fat", fat_mount, fat_statfs, fat_info, fat_umount, fat_label };
 
 /* ---------- kmon-এর জন্য: কোনো ডিভাইসে কী ফাইলসিস্টেম (mount না করেই) ---------- */
 

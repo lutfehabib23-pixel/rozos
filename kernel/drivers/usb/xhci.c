@@ -62,7 +62,7 @@
 
 /* TRB ধরন */
 enum {
-    TRB_NORMAL = 1, TRB_SETUP = 2, TRB_DATA = 3, TRB_STATUS = 4, TRB_LINK = 6,
+    TRB_NORMAL = 1, TRB_SETUP = 2, TRB_DATA = 3, TRB_STATUS = 4, TRB_LINK = 6, TRB_NOOP = 8,
     TRB_ENABLE_SLOT = 9, TRB_DISABLE_SLOT = 10, TRB_ADDRESS = 11, TRB_CONFIG_EP = 12,
     TRB_EVAL_CTX = 13, TRB_RESET_EP = 14, TRB_SET_DEQ = 16,
     TRB_EV_TRANSFER = 32, TRB_EV_CMD = 33, TRB_EV_PORT = 34
@@ -108,6 +108,9 @@ struct usb_dev {
     int registered, mount_tried;
     int need_scan, need_umount;          /* usbd lock-এর বাইরে করে (deadlock এড়াতে) */
     char mountpoint[24];
+    /* ধাপ ২৪ঘ: গতি মাপা (kmon usbstat) */
+    uint64_t st_cmds, st_rd, st_wr, st_bytes, st_ns, st_max_ns, st_lock_ns, st_lock_max_ns;
+    uint64_t st_timeouts, st_stalls, st_errors, st_last_ms;
     /* HID */
     int iin, queued;
     uint8_t last[8];
@@ -181,11 +184,16 @@ static uint64_t ring_push(struct ring *r, uint32_t d0, uint32_t d1, uint32_t d2,
     r->enq++;
     if (r->enq == RING_TRBS - 1) {               /* শেষ ঘর: Link TRB → শুরুতে, cycle উল্টো */
         volatile struct trb *l = &r->t[r->enq];
+        uint32_t type = (d3 >> 10) & 0x3F;
+        /* ধাপ ২৪ঙ: TD (একাধিক TRB-এর কাজ) Link পেরিয়ে চললে Link-এও Chain (বিট ৪) — xHCI
+         * নিয়ম (4.11.5.1)। আগে ছিল না: আসল কন্ট্রোলার তখন কাজ মাঝপথে শেষ ধরত → timeout,
+         * পেন ড্রাইভে খুব ধীর লেখা আর ২৪ঘ-তে মাউস/কিবোর্ড আটকে যাওয়া। QEMU এটা মাফ করে। */
+        uint32_t chain = (type >= TRB_NORMAL && type <= TRB_STATUS) ? (d3 & (1u << 4)) : 0;
         l->d0 = (uint32_t)r->phys;
         l->d1 = (uint32_t)(r->phys >> 32);
         l->d2 = 0;
         __asm__ __volatile__("" : : : "memory");
-        l->d3 = (TRB_LINK << 10) | (1u << 1) | r->cycle;
+        l->d3 = (TRB_LINK << 10) | (1u << 1) | chain | r->cycle;
         r->enq = 0;
         r->cycle ^= 1;
     }
@@ -301,8 +309,20 @@ static int get_desc(struct usb_dev *d, uint8_t type, uint8_t index, uint16_t lan
 static int transfer(struct usb_dev *d, int dci, uint64_t phys, uint32_t len, uint64_t ms)
 {
     struct usb_ep *ep = &d->ep[dci];
-    uint32_t off = 0;
+    uint32_t off = 0, ntrb = 0, o;
     ep->done = 0;
+    /* ধাপ ২৪ঙ: পুরো TD ring-এর শেষে না আঁটলে আগে No-Op TRB দিয়ে শুরুতে ঘুরে আসা —
+     * তাহলে TD কখনো Link পেরোয় না (chain বিটের ওপরও পুরো নির্ভর নয়) */
+    for (o = 0; o < len || (len == 0 && ntrb == 0);) {
+        uint32_t n = (uint32_t)(VMM_PAGE_SIZE - ((phys + o) & (VMM_PAGE_SIZE - 1)));
+        if (n > len - o) n = len - o;
+        ntrb++;
+        o += n;
+        if (!n) break;
+    }
+    if (ntrb > 1 && ep->ring.enq + ntrb > RING_TRBS - 1) {
+        while (ep->ring.enq != 0) ring_push(&ep->ring, 0, 0, 0, (TRB_NOOP << 10));
+    }
     do {
         uint32_t n = (uint32_t)(VMM_PAGE_SIZE - ((phys + off) & (VMM_PAGE_SIZE - 1)));
         int last;
@@ -390,17 +410,20 @@ static int bot(struct usb_dev *d, const uint8_t *cdb, int cdblen, int in, uint32
     cbw[14] = (uint8_t)cdblen;
     memcpy(cbw + 15, cdb, (size_t)cdblen);
     cc = transfer(d, d->bout, d->buf_phys, 31, 5000);
-    if (cc == CC_STALL) { clear_halt(d, d->bout, d->bout_addr); return -EIO; }
+    if (cc == -ETIMEDOUT) d->st_timeouts++;
+    if (cc == CC_STALL) { d->st_stalls++; clear_halt(d, d->bout, d->bout_addr); return -EIO; }
     if (cc != CC_SUCCESS) return -EIO;
     if (len) {
         cc = transfer(d, in ? d->bin : d->bout, data_phys, len, 10000);
-        if (cc == CC_STALL) clear_halt(d, in ? d->bin : d->bout, in ? d->bin_addr : d->bout_addr);
+        if (cc == -ETIMEDOUT) d->st_timeouts++;
+        if (cc == CC_STALL) { d->st_stalls++; clear_halt(d, in ? d->bin : d->bout, in ? d->bin_addr : d->bout_addr); }
         else if (cc != CC_SUCCESS && cc != CC_SHORT) return -EIO;
     }
     for (tries = 0; tries < 2; tries++) {
         memset(csw, 0, 13);
         cc = transfer(d, d->bin, d->buf_phys + 512, 13, 5000);
-        if (cc == CC_STALL) { clear_halt(d, d->bin, d->bin_addr); continue; }
+        if (cc == -ETIMEDOUT) d->st_timeouts++;
+        if (cc == CC_STALL) { d->st_stalls++; clear_halt(d, d->bin, d->bin_addr); continue; }
         break;
     }
     if (cc != CC_SUCCESS && cc != CC_SHORT) return -EIO;
@@ -416,7 +439,11 @@ static int scsi_rw(struct usb_dev *d, int write, uint64_t lba, uint32_t count, u
     uint32_t ss = d->bdev.sector_size, max = MSC_PAGES * VMM_PAGE_SIZE / ss;
     struct xhci *hc = d->hc;
     int err = 0;
+    uint64_t t0 = timer_uptime_ns(), t1;
     kmutex_lock(&hc->lock);
+    t1 = timer_uptime_ns();                      /* ধাপ ২৪ঘ: lock-এর জন্য কত অপেক্ষা */
+    d->st_lock_ns += t1 - t0;
+    if (t1 - t0 > d->st_lock_max_ns) d->st_lock_max_ns = t1 - t0;
     while (count && !err) {
         uint32_t n = count < max ? count : max;
         uint8_t cdb[10];
@@ -426,7 +453,18 @@ static int scsi_rw(struct usb_dev *d, int write, uint64_t lba, uint32_t count, u
         cdb[2] = (uint8_t)(lba >> 24); cdb[3] = (uint8_t)(lba >> 16); cdb[4] = (uint8_t)(lba >> 8); cdb[5] = (uint8_t)lba;
         cdb[7] = (uint8_t)(n >> 8); cdb[8] = (uint8_t)n;
         if (write) memcpy(msc_data(d), buf, (size_t)n * ss);
-        err = bot(d, cdb, 10, !write, n * ss);
+        {
+            uint64_t c0 = timer_uptime_ns(), dt;
+            err = bot(d, cdb, 10, !write, n * ss);
+            dt = timer_uptime_ns() - c0;
+            d->st_cmds++;
+            if (write) d->st_wr++; else d->st_rd++;
+            d->st_bytes += (uint64_t)n * ss;
+            d->st_ns += dt;
+            if (dt > d->st_max_ns) d->st_max_ns = dt;
+            if (err) d->st_errors++;
+            d->st_last_ms = timer_uptime_ms();
+        }
         if (!err && !write) memcpy(buf, msc_data(d), (size_t)n * ss);
         buf += (size_t)n * ss;
         lba += n;
@@ -955,6 +993,38 @@ static int hc_setup(struct xhci *hc, struct pci_device *pd)
     }
     hc->lock = (struct kmutex)KMUTEX_INIT("xhci");
     return 0;
+}
+
+/* ধাপ ২৪ঘ: kmon "usbstat" — পেন ড্রাইভ/USB ডিস্কের কমান্ড, সময়, ভুল; reset = শূন্য থেকে */
+void usb_stat_dump(int reset)
+{
+    int i, any = 0;
+    for (i = 0; i < MAX_DEVS; i++) {
+        struct usb_dev *d = &devs[i];
+        if (!d->used || d->kind != 1) continue;
+        any = 1;
+        if (reset) {
+            d->st_cmds = d->st_rd = d->st_wr = d->st_bytes = d->st_ns = d->st_max_ns = 0;
+            d->st_lock_ns = d->st_lock_max_ns = d->st_timeouts = d->st_stalls = d->st_errors = 0;
+            continue;
+        }
+        kprintf("/dev/%s  %s  (%s)\n", d->bdev.name, d->product,
+                d->speed == 4 ? "5 Gb/s" : d->speed == 3 ? "480 Mb/s" : d->speed == 1 ? "12 Mb/s" : "slow");
+        kprintf("  commands %llu (read %llu, write %llu), %llu KiB\n", (unsigned long long)d->st_cmds,
+                (unsigned long long)d->st_rd, (unsigned long long)d->st_wr, (unsigned long long)(d->st_bytes / 1024));
+        kprintf("  time in commands %llu ms, average %llu us, longest %llu ms\n",
+                (unsigned long long)(d->st_ns / 1000000),
+                (unsigned long long)(d->st_cmds ? d->st_ns / d->st_cmds / 1000 : 0),
+                (unsigned long long)(d->st_max_ns / 1000000));
+        kprintf("  speed %llu KiB/s while busy\n",
+                (unsigned long long)(d->st_ns ? d->st_bytes * 1000000000ull / d->st_ns / 1024 : 0));
+        kprintf("  waiting for the USB lock %llu ms (longest %llu ms)\n", (unsigned long long)(d->st_lock_ns / 1000000),
+                (unsigned long long)(d->st_lock_max_ns / 1000000));
+        kprintf("  timeouts %llu, stalls %llu, failed commands %llu\n", (unsigned long long)d->st_timeouts,
+                (unsigned long long)d->st_stalls, (unsigned long long)d->st_errors);
+    }
+    if (reset) kprintf("usbstat: counters cleared\n");
+    else if (!any) kprintf("no USB storage\n");
 }
 
 /* usbd: ২০ ms পরপর (কিবোর্ড/মাউস থাকলে ৮ ms) — রিপোর্ট, লাগানো/খোলা, auto-mount */

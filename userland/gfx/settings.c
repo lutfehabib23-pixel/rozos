@@ -505,15 +505,21 @@ static void page_disks(ui_ctx *u, int x, int y, int w, int h)
     if (n < 0) { ui_label(u->s, x, yy, "cannot read the mount list", T->text); return; }
     buf[n] = '\0';
     for (line = strtok_r(buf, "\n", &save); line && yy + 70 < y + h; line = strtok_r(NULL, "\n", &save)) {
-        char dev[64], path[128], fs[32], t[200], a[32], b[32], c[32];
+        char dev[64], path[128], fs[32], kind[16] = "ram", label[64] = "-", t[260], a[32], b[32], c[32];
+        const char *kname;
         struct statvfs v;
         unsigned long long total, freeb;
-        if (sscanf(line, "%63s %127s %31s", dev, path, fs) != 3) continue;
+        if (sscanf(line, "%63s %127s %31s %15s %63[^\n]", dev, path, fs, kind, label) < 3) continue;
         if (statvfs(path, &v) < 0) continue;
         total = (unsigned long long)v.f_blocks * v.f_frsize;
         freeb = (unsigned long long)v.f_bfree * v.f_frsize;
-        snprintf(t, sizeof(t), "%s  (%s, %s)%s", path, strcmp(dev, "-") ? dev : "memory", fs,
-                 v.f_flag & ST_RDONLY ? "  read-only" : "");
+        /* ধাপ ২৪ঘ: Windows-এর মতো পরিচয় — ভলিউমের নাম আর ডিস্কের ধরন */
+        kname = !strcmp(kind, "nvme") ? "NVMe SSD" : !strcmp(kind, "sata") ? "SATA disk" :
+                !strcmp(kind, "usb") ? "USB drive" : !strcmp(kind, "rozos-usb") ? "rozOS pen drive - your files" :
+                "memory";
+        snprintf(t, sizeof(t), "%s%s%s  -  %s  (%s, %s)%s", strcmp(label, "-") ? "\"" : "",
+                 strcmp(label, "-") ? label : "", strcmp(label, "-") ? "\"  " : "", kname, path,
+                 strcmp(dev, "-") ? dev : fs, v.f_flag & ST_RDONLY ? "  read-only" : "");
         ui_label(u->s, x, yy, t, T->text);
         /* ধাপ ২৪গ: ডিস্কে লেখা চালু/বন্ধ (NTFS সবসময় শুধু পড়া; "/" বদলানো যায় না) */
         if (strcmp(dev, "-") && strcmp(path, "/") && strcmp(path, "/boot") && strcmp(fs, "ntfs") && strcmp(fs, "tmpfs") && strcmp(fs, "devfs")) {

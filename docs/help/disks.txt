@@ -15,7 +15,11 @@ only - Windows disks and drives like WD My Passport; compressed and
 encrypted NTFS files cannot be read yet). Disks of another OS on a real
 computer are read-only; Settings > Disks has an "Allow writing" /
 "Make read-only" switch for each disk (C: rozos_diskwrite). Files shows
-the mounted disks under "Disks" on the left. Boot option
+the mounted disks under "Disks" on the left by their volume label and
+kind (phase 24d: "My Passport (USB)", "NVMe", "SATA"); Settings > Disks
+and `mount` show the same, and "rozOS pen drive - your files" for the
+persistent storage. `kmon` then `usbstat` shows how fast a USB disk is
+(commands, average and longest time, timeouts) - `usbstat reset` clears. Boot option
 `noautomount` turns the boot-time mounting off. The ISO pen drive keeps
 your files: [[persistence]].
 

@@ -234,7 +234,9 @@ int main(void)
 @syntax long rozos_usb_list(char *buf, unsigned long len);
 @summary Lists of mounted file systems and USB devices (mount, lsusb).
 @desc
-rozos_mounts writes one line per mount: "device path filesystem".
+rozos_mounts writes one line per mount: "device path filesystem kind
+label" (phase 24d added kind = nvme, sata, usb, rozos-usb or ram, and the
+volume label, "-" when there is none; the label may contain spaces).
 rozos_usb_list writes the USB devices as lsusb shows them.
 @returns
 Bytes written, or -1.

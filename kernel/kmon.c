@@ -35,6 +35,7 @@
 #include <rozos/net.h>
 #include <rozos/pci.h>
 #include <rozos/block.h>
+#include <rozos/usb.h>
 #include <rozos/fat.h>
 #include <rozos/clock.h>
 #include <arch/x86_64/pic.h>
@@ -884,6 +885,7 @@ static void cmd_help(void)
             "  exit           back to the shell (when started as /bin/kmon)\n"
             "  net            network cards, addresses and counters\n"
             "  nic            network driver details: chip, registers, link, init log\n"
+            "  usbstat [reset] USB disk speed: commands, time, waits, errors\n"
             "  bootlog        everything the kernel printed while booting (quiet boot)\n"
             "  netlog [dhcp]  network events, DHCP frames, last 32 frames, DHCP counters\n"
             "  echo <text>    print text\n"
@@ -1043,6 +1045,8 @@ static void run_command(int argc, char **argv)
         cmd_net();
     } else if (!strcmp(cmd, "nic")) {
         cmd_nic();                               /* ধাপ ২২ */
+    } else if (!strcmp(cmd, "usbstat")) {
+        usb_stat_dump(argc > 1 && !strcmp(argv[1], "reset"));   /* ধাপ ২৪ঘ */
     } else if (!strcmp(cmd, "bootlog")) {
         size_t bl;                               /* ধাপ ২৪ক: শান্ত বুটের পুরো লেখা */
         const char *b = tty_bootlog(&bl);
