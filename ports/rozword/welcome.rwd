@@ -1,0 +1,29 @@
+rozword 1
+p 1 1 0 115 0
+r Noto_Sans 52 0 000000 Welcome to rozword
+p 2 0 0 115 0
+r Noto_Sans 40 1 2F5496 Heading one
+p 0 3 0 115 0
+r Noto_Sans 22 0 000000 This is a normal paragraph with 
+r Noto_Sans 22 1 000000 bold
+r Noto_Sans 22 0 000000 , 
+r Noto_Sans 22 2 000000 italic
+r Noto_Sans 22 0 000000 , 
+r Noto_Sans 22 4 000000 underlined
+r Noto_Sans 22 0 000000  and 
+r Noto_Sans 22 0 C00000 red
+r Noto_Sans 22 0 000000  words. It is justified, so both edges of the text are straight, the way a printed book looks. Long lines wrap by themselves.
+p 0 0 1 115 0
+r Noto_Sans 22 0 000000 First bullet point
+p 0 0 1 115 0
+r Noto_Sans 22 0 000000 Second bullet point
+p 0 0 2 115 0
+r Noto_Sans 22 0 000000 Numbered one
+p 0 0 2 115 0
+r Noto_Sans 22 0 000000 Numbered two
+p 3 0 0 115 0
+r Noto_Sans 32 1 2F5496 বাংলা লেখা
+p 0 0 0 115 0
+r Noto_Sans 26 0 000000 আমি বাংলায় লিখি। শিক্ষা, সন্ধ্যা, ক্ষমা, বন্ধু, রাষ্ট্র — যুক্তাক্ষর ঠিক দেখায় কিনা।
+p 0 2 0 115 0
+r Inter 24 3 7030A0 Right aligned, Inter bold italic.

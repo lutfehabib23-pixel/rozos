@@ -640,7 +640,10 @@ static int64_t kbd_read(void *ctx, uint64_t off, void *buf, size_t len)
         while (n < max && keyboard_try_getkey(&key)) {
             /* ধাপ ১৪: বিশেষ কী-র সাথে modifier: বিট 16-18 = Shift/Ctrl/Alt (KEYMOD_*) */
             /* ধাপ ২৩গ: স্পেসের সাথেও (Ctrl+Space = বাংলা/ইংরেজি টাইপ বদল) */
-            if (key >= 0x100 || key == ' ') key |= (int)(keyboard_modifiers() & 7) << 16;
+            /* ধাপ ২৬ক: Ctrl-এর কন্ট্রোল কোডেও (Ctrl+I ≠ Tab, Ctrl+J ≠ Enter, Ctrl+H ≠ Backspace),
+             * আর Ctrl বা Alt চেপে যেকোনো কী (Ctrl+1, Ctrl+=) — শুধু Shift-এর সাধারণ অক্ষর আগের মতো */
+            if (key >= 0x100 || key == ' ' || key < 0x20 || (keyboard_modifiers() & (KEYMOD_CTRL | KEYMOD_ALT)))
+                key |= (int)(keyboard_modifiers() & 7) << 16;
             out[n++] = key;
         }
         if (n == 0) {

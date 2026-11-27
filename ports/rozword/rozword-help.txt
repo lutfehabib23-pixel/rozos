@@ -1,0 +1,52 @@
+# rozword - the word processor
+A word processor like MS Word, for rozOS (phase 26a). Install it with
+  `rozpkg install rozword`
+then Start > Office > rozword, or `rozword` in the terminal, or double-
+click a .rwd file in [[filemanager|Files]].
+
+== The window ==
+White A4 pages with 1 inch margins; text flows onto the next page by
+itself. Menu (F10), toolbar, and at the bottom: page, word count, zoom,
+Bangla/English.
+
+== Formatting ==
+  Toolbar     font, size, style (Normal, Title, Heading 1-3), B I U S,
+              color, alignment (left, center, right, justify),
+              bullets, numbering
+  Ctrl+B/I/U  bold, italic, underline
+  Ctrl+L/E/R/J  left, center, right, justify
+  Ctrl+0..3   Normal, Heading 1, 2, 3
+  Ctrl+> Ctrl+<  bigger / smaller text
+  Format > Line spacing 1.0 / 1.15 / 1.5 / 2.0
+  Insert > Page break, Date and time
+Select text first to change it; without a selection the change is for
+what you type next. Enter on an empty bullet ends the list.
+
+== Bangla ==
+Ctrl+Space switches to Bangla (Avro phonetic, see [[bangla]]):
+"ami bangla likhi" -> আমি বাংলা লিখি. Conjuncts (ক্ষ, ন্ধ্য ...) are joined
+by the shaping engine. Any font can be used; Bangla letters come from
+Noto Sans Bengali, or pick Hind Siliguri / Noto Serif Bengali / Tiro
+Bangla as the font.
+
+== Editing ==
+  Ctrl+Z / Ctrl+Y   undo / redo        Ctrl+X/C/V  cut, copy, paste
+  Ctrl+A            select all         Ctrl+F, F3, Ctrl+H  find, next, replace
+  Ctrl+arrows       word by word       Shift + keys/click  select
+  double-click      select a word      right-click  menu
+  Ctrl+wheel, Ctrl+= / Ctrl+-   zoom
+Copy and paste between rozword windows keeps the formatting; to other
+programs it pastes plain text.
+
+== Files ==
+  .rwd   rozword's own format (keeps everything; plain UTF-8 text inside)
+  .txt   open any text file; File > Export as text writes one
+Save: Ctrl+S, Save as: F12. A sample: /usr/share/doc/rozword/welcome.rwd
+Word (.docx) files come in the next version.
+
+== Build it yourself ==
+The source is in /usr/src/rozword:
+  `cd /usr/src/rozword && make`          with TCC (under a second)
+  `make CC=gcc`                          with GCC ([[gcc]])
+  `make install`                         copy to /usr/bin
+See [[rozpkg]], [[c-programming]].

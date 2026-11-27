@@ -95,6 +95,9 @@ static void classify(struct ent *e)
         has_ext(n, ".gif") || has_ext(n, ".ppm") || has_ext(n, ".tga")) {
         e->kind = 'i'; e->image = "image-file"; e->type = "Image"; return;
     }
+    if (has_ext(n, ".rwd")) {                    /* ধাপ ২৬ক: rozword-এর দলিল (rozpkg install rozword) */
+        e->kind = 'd'; e->image = "file"; e->type = "rozword document"; return;
+    }
     if (has_ext(n, ".txt") || has_ext(n, ".md") || has_ext(n, ".conf") || has_ext(n, ".app") ||
         has_ext(n, ".mk") || has_ext(n, ".sh") || !strcmp(n, "Makefile") || has_ext(n, ".S") || has_ext(n, ".ld")) {
         e->kind = 'd'; e->image = "file"; e->type = "Text"; return;
@@ -287,7 +290,9 @@ static void open_entry(int i, int with_code)
     join(p, sizeof(p), cwd, E[i].name);
     if (E[i].locked) { run_lockdlg("unlock", p, E[i].disp); return; }      /* ধাপ ১৯ছ */
     if (E[i].isdir && !with_code) { go(E[i].name, 1); return; }
-    if (with_code || E[i].kind == 'c' || E[i].kind == 'd') launch2("code", p);
+    /* ধাপ ২৬ক: .rwd → rozword (প্যাকেজ বসানো থাকলে; না থাকলে আগের মতো Code-এ লেখা হিসেবে) */
+    if (!with_code && has_ext(E[i].name, ".rwd") && access("/usr/bin/rozword", X_OK) == 0) launch2("rozword", p);
+    else if (with_code || E[i].kind == 'c' || E[i].kind == 'd') launch2("code", p);
     else if (E[i].kind == 'i') launch2("imgview", p);
     else if (E[i].kind == 'p') run_in_terminal(p);
 }
