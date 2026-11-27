@@ -23,6 +23,8 @@ struct initrd_stats {
 /* initrd খুঁজে dest ডিরেক্টরিতে খোলা; সফল হলে 0, মডিউল না পেলে -ENOENT */
 int initrd_load(const char *dest, struct initrd_stats *st);
 /* ধাপ ২৪খ: একই, কিন্তু keep(path) সত্য হলে আগে থেকে থাকা ফাইল বদলায় না */
+/* ধাপ ২৪গ: প্রতি ফাইলের আগে (কত বাইট হলো, মোট) — NULL = বন্ধ */
+void initrd_set_progress(void (*fn)(uint64_t done, uint64_t total));
 int initrd_load_keep(const char *dest, struct initrd_stats *st, int (*keep)(const char *path));
 
 /* tmpfs ফাইলসিস্টেম (fs/tmpfs.c) */

@@ -8,6 +8,12 @@
 
 extern const struct filesystem fat_filesystem;
 
+/* ধাপ ২৪গ: বাইরের ডিস্কের আরো দুটো (fs/ntfs.c শুধু পড়া, fs/exfat.c পড়া-লেখা) */
+extern const struct filesystem ntfs_filesystem;
+extern const struct filesystem exfat_filesystem;
+/* probe অনুযায়ী mount-এর driver নাম ("ext2", "fat", "ntfs", "exfat"); চেনা না হলে NULL */
+const char *fs_driver_for(struct block_device *dev);
+
 /* ডিভাইসে কোন ফাইলসিস্টেম আছে, mount না করে ("ext2", "fat32", "fat16", "ntfs", "-" ...) */
 const char *fs_probe_name(struct block_device *dev);
 

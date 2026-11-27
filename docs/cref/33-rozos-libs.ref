@@ -255,6 +255,33 @@ int main(void)
 }
 @end
 
+@entry rozos_diskwrite
+@also read-only_disk writable_disk
+@header rozos.h
+@syntax int rozos_diskwrite(const char *dev, int on);
+@summary Allow (on = 1) or forbid (on = 0) writing to a whole disk (phase 24c).
+@desc
+dev is a disk or one of its partitions ("sdb", "/dev/nvmea3"). The
+whole disk changes; its mounted partitions are unmounted and mounted
+again, so the file systems see the change. Disks of another OS on a
+real computer start read-only; Settings > Disks has the same switch.
+NTFS is always read-only. The disk that holds / cannot be changed.
+@returns
+0, or -1 with errno: EBUSY (files are open on it, or it holds /),
+ENODEV (no such disk).
+@see rozos_mounts mount
+@check compile
+@example
+#include <stdio.h>
+#include <rozos.h>
+
+int main(void)
+{
+    if (rozos_diskwrite("sdb", 0) < 0) perror("sdb");
+    return 0;
+}
+@end
+
 @entry rozos_proc_list
 @header rozos.h
 @syntax long rozos_proc_list(char *buf, unsigned long len);

@@ -24,6 +24,7 @@
 #include <sys/stat.h>
 #include <rozgfx.h>
 #include <rozui.h>
+#include <rozos.h>                              /* ধাপ ২৪গ: rozos_mounts */
 #include <rozlock.h>
 #include <signal.h>
 #include <sys/wait.h>
@@ -681,6 +682,46 @@ static void frame(void)
         ui_icon(s, 10, py + 4, places[i].kind, t->text);
         gfx_text(s, NULL, 32, py + 4, places[i].label, t->text);
         if (hov && U.pressed) go(pp, 1);
+    }
+    /* ধাপ ২৪গ: Disks — mount করা প্রতিটা ডিস্ক (/mnt/...) আলাদা লাইনে, ক্লিকে খোলে */
+    {
+        static char mbuf[4096];
+        static long last_ms;
+        static int nd;
+        static char dpath[12][64], dlabel[12][48];
+        long now = gfx_ticks_ms();
+        int py = ly + 6 + NPLACES * 26 + 6, k;
+        if (!last_ms || now - last_ms > 2000) {             /* ২ সেকেন্ড পরপর তালিকা (পেন ড্রাইভ আসা-যাওয়া) */
+            long n = rozos_mounts(mbuf, sizeof(mbuf) - 1);
+            char *line, *save;
+            last_ms = now;
+            nd = 0;
+            if (n > 0) {
+                mbuf[n] = '\0';
+                for (line = strtok_r(mbuf, "\n", &save); line && nd < 12; line = strtok_r(NULL, "\n", &save)) {
+                    char dev[32], mp[64], fs[16];
+                    if (sscanf(line, "%31s %63s %15s", dev, mp, fs) != 3 || strncmp(mp, "/mnt/", 5)) continue;
+                    snprintf(dpath[nd], sizeof(dpath[nd]), "%s", mp);
+                    snprintf(dlabel[nd], sizeof(dlabel[nd]), "%s (%s)", mp + 5, fs);
+                    nd++;
+                }
+            }
+        }
+        if (nd && py + 20 < ly + lh) {
+            gfx_text(s, NULL, 10, py, "Disks", t->text_dim);
+            py += 20;
+        }
+        for (k = 0; k < nd && py + 24 < ly + lh; k++, py += 26) {
+            int cur = !strncmp(cwd, dpath[k], strlen(dpath[k])) &&
+                      (cwd[strlen(dpath[k])] == '\0' || cwd[strlen(dpath[k])] == '/');
+            int hov = ui_hover(&U, 2, py, PLACES_W - 4, 24);
+            if (cur || hov) gfx_fill_rect(s, 3, py, PLACES_W - 6, 24, cur ? t->select : t->face_hover);
+            ui_icon(s, 10, py + 4, 'n', t->text);
+            gfx_set_clip(s, 32, py, PLACES_W - 36, 24);
+            gfx_text(s, NULL, 32, py + 4, dlabel[k], t->text);
+            gfx_reset_clip(s);
+            if (hov && U.pressed) go(dpath[k], 1);
+        }
     }
     /* ফাইলের তালিকা (কলাম: নাম, মাপ, ধরন) */
     lx = PLACES_W + 2;

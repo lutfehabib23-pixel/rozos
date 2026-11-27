@@ -468,8 +468,7 @@ static int64_t sys_mount(struct interrupt_frame *f, uint64_t usrc, uint64_t utgt
     if (!bd) return -ENODEV;
     fs = type;
     if (!strcmp(type, "auto") || !type[0]) {
-        const char *p = fs_probe_name(bd);
-        fs = !strcmp(p, "ext2") ? "ext2" : !strncmp(p, "fat", 3) ? "fat" : NULL;
+        fs = fs_driver_for(bd);                  /* ধাপ ২৪গ: ntfs, exfat-ও */
         if (!fs) return -EINVAL;                 /* চেনা ফাইলসিস্টেম নেই */
     } else if (!strncmp(type, "vfat", 4) || !strncmp(type, "fat", 3)) {
         fs = "fat";
@@ -530,7 +529,8 @@ static int64_t sys_statfs(struct interrupt_frame *f, uint64_t upath, uint64_t ub
     }
     memset(&out, 0, sizeof(out));
     out.f_type = !strcmp(fsname, "ext2") ? 0xEF53 : !strcmp(fsname, "fat") ? 0x4d44 :
-                 !strcmp(fsname, "tmpfs") ? 0x01021994 : !strcmp(fsname, "devfs") ? 0x1373 : 0;
+                 !strcmp(fsname, "tmpfs") ? 0x01021994 : !strcmp(fsname, "devfs") ? 0x1373 :
+                 !strcmp(fsname, "ntfs") ? 0x5346544e : !strcmp(fsname, "exfat") ? 0x2011BAB0 : 0;   /* ২৪গ */
     out.f_bsize = out.f_frsize = (int64_t)sf.block_size;
     out.f_blocks = sf.total_blocks;
     out.f_bfree = out.f_bavail = sf.free_blocks;
@@ -559,6 +559,61 @@ static int64_t sys_mounts(struct interrupt_frame *f, uint64_t ubuf, uint64_t len
     if (copy_to_user((void *)(uintptr_t)ubuf, k, o + 1) < 0) o = (size_t)-EFAULT;
     kfree(k);
     return (int64_t)o;
+}
+
+/* ধাপ ২৪গ: ডিস্কে লেখা চালু/বন্ধ (Settings > Disks-এর সুইচ)। dev = ডিস্ক বা তার partition-এর
+ * নাম; পুরো ডিস্কের read_only বদলায়, তারপর তার mount করা partition-গুলো umount করে আবার
+ * mount (ফাইলসিস্টেম mount-এর সময় read_only দেখে)। "/" আর ফাইল খোলা থাকলে -EBUSY। */
+static int64_t sys_diskwrite(struct interrupt_frame *f, uint64_t udev, uint64_t on, uint64_t a3,
+                             uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    char name[32];
+    struct block_device *bd, *top;
+    struct { char path[VFS_PATH_MAX]; char fs[16]; char src[24]; } *list;
+    size_t i, n = 0;
+    int err = 0, old;
+    (void)f; (void)a3; (void)a4; (void)a5; (void)a6;
+    if (copy_string_from_user(name, (const char *)(uintptr_t)udev, sizeof(name)) < 0) return -EFAULT;
+    bd = block_find(!strncmp(name, "/dev/", 5) ? name + 5 : name);
+    if (!bd) return -ENODEV;
+    top = bd;
+    while (top->parent) top = top->parent;
+    list = kzalloc(sizeof(*list) * 16);
+    if (!list) return -ENOMEM;
+    for (i = 0; i < vfs_mount_count() && n < 16; i++) {
+        const struct mount *m = vfs_mount_at(i);
+        struct block_device *s;
+        if (!m || !m->active || !m->source[0]) continue;
+        s = block_find(m->source);
+        if (!s) continue;
+        while (s->parent) s = s->parent;
+        if (s != top) continue;
+        if (!strcmp(m->path, "/")) { kfree(list); return -EBUSY; }
+        strncpy(list[n].path, m->path, VFS_PATH_MAX - 1);
+        strncpy(list[n].fs, m->fs->name, 15);
+        strncpy(list[n].src, m->source, 23);
+        n++;
+    }
+    for (i = 0; i < n; i++) {                        /* আগে সব umount (খোলা ফাইল থাকলে থামা) */
+        err = vfs_umount(list[i].path);
+        if (err < 0) {
+            size_t k;
+            for (k = 0; k < i; k++) vfs_mount(list[k].path, list[k].fs, list[k].src);
+            kfree(list);
+            return err;
+        }
+    }
+    old = top->read_only;
+    top->read_only = on ? 0 : 1;
+    block_sync(top);
+    for (i = 0; i < n; i++) {
+        int e = vfs_mount(list[i].path, list[i].fs, list[i].src);
+        if (e < 0) err = e;
+    }
+    kprintf("[disk] /dev/%s is now %s%s\n", top->name, top->read_only ? "read-only" : "writable",
+            old == top->read_only ? " (no change)" : "");
+    kfree(list);
+    return err;
 }
 
 /* ধাপ ১৫খ: lsusb */
@@ -1111,6 +1166,7 @@ void sys_fs_register(void)
     syscall_register(SYS_mount, sys_mount, "mount");
     syscall_register(SYS_umount2, sys_umount2, "umount2");
     syscall_register(SYS_rozos_mounts, sys_mounts, "mounts");
+    syscall_register(SYS_rozos_diskwrite, sys_diskwrite, "diskwrite");   /* ধাপ ২৪গ */
     syscall_register(SYS_statfs, sys_statfs, "statfs");                 /* ধাপ ১৯চ */
     syscall_register(SYS_rozos_usblist, sys_usblist, "usblist");      /* ধাপ ১৫খ */
     syscall_register(SYS_readv, sys_readv, "readv");                  /* ধাপ ১৬ক */

@@ -533,13 +533,13 @@ static void msc_automount(struct usb_dev *d)
             }
             if (busy) continue;
         }
-        fs = fs_probe_name(b);
-        if (strcmp(fs, "ext2") && strncmp(fs, "fat", 3)) continue;
+        fs = fs_driver_for(b);                   /* ধাপ ২৪গ: ext2, FAT, exFAT, NTFS (শুধু পড়া) */
+        if (!fs) continue;
         for (n = 1; n < 10; n++) {
             char mp[24];
             if (n == 1) strcpy(mp, "/mnt/usb"); else ksnprintf(mp, sizeof(mp), "/mnt/usb%d", n);
             vfs_mkdir_p(mp);
-            if (vfs_mount(mp, !strcmp(fs, "ext2") ? "ext2" : "fat", b->name) == 0) {
+            if (vfs_mount(mp, fs, b->name) == 0) {
                 strcpy(d->mountpoint, mp);
                 kprintf("[usb] /dev/%s (%s) mounted on %s - run `umount %s` before pulling it out\n",
                         b->name, fs, mp, mp);

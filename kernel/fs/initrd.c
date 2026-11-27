@@ -139,6 +139,12 @@ static const char *base_name(const char *path)
 /* ধাপ ২৪খ: keep(path) সত্য আর ফাইলটা আগে থেকেই থাকলে লেখা হয় না (স্থায়ী root-এ
  * নতুন সংস্করণের ফাইল বসানোর সময় ব্যবহারকারীর ফাইল আর সেটিং রাখা) */
 static int (*keep_fn)(const char *path);
+static void (*progress_fn)(uint64_t done, uint64_t total);   /* ধাপ ২৪গ */
+
+void initrd_set_progress(void (*fn)(uint64_t done, uint64_t total))
+{
+    progress_fn = fn;
+}
 
 int initrd_load_keep(const char *dest, struct initrd_stats *st, int (*keep)(const char *path))
 {
@@ -182,6 +188,7 @@ int initrd_load(const char *dest, struct initrd_stats *st)
             break;
         }
 
+        if (progress_fn) progress_fn((uint64_t)(p - (const uint8_t *)(uintptr_t)m->virt), m->size);
         r = build_path(dest, h, path, sizeof(path));
         if (r < 0) {
             st->errors++;

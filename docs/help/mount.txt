@@ -1,8 +1,8 @@
 # mount, umount - disks (phase 15a)
   `mount`                          what is mounted where
-  `mount /dev/nvmea /mnt/nvme`     attach a disk or partition (ext2 or FAT
-                                   is found by itself; the folder is made)
-  `mount -t fat /dev/X /mnt/x`     say the type (ext2, fat, tmpfs)
+  `mount /dev/nvmea /mnt/nvme`     attach a disk or partition (ext2, FAT,
+                                   exFAT or NTFS is found by itself; the folder is made)
+  `mount -t fat /dev/X /mnt/x`     say the type (ext2, fat, exfat, ntfs, tmpfs)
   `umount /mnt/nvme`               detach - everything is written first
 umount says "busy" while a file there is open, a program's window shows
 it, or another disk is mounted inside; close it and try again.

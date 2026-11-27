@@ -515,6 +515,24 @@ static void page_disks(ui_ctx *u, int x, int y, int w, int h)
         snprintf(t, sizeof(t), "%s  (%s, %s)%s", path, strcmp(dev, "-") ? dev : "memory", fs,
                  v.f_flag & ST_RDONLY ? "  read-only" : "");
         ui_label(u->s, x, yy, t, T->text);
+        /* ধাপ ২৪গ: ডিস্কে লেখা চালু/বন্ধ (NTFS সবসময় শুধু পড়া; "/" বদলানো যায় না) */
+        if (strcmp(dev, "-") && strcmp(path, "/") && strcmp(path, "/boot") && strcmp(fs, "ntfs") && strcmp(fs, "tmpfs") && strcmp(fs, "devfs")) {
+            int ro = (v.f_flag & ST_RDONLY) != 0;
+            if (ui_do_button(u, x + w - 170, yy - 4, 150, 24, ro ? "Allow writing" : "Make read-only")) {
+                char q[200];
+                snprintf(q, sizeof(q), ro ? "Allow writing to the whole disk of /dev/%s?\n"
+                                            "Only do this if you are sure - it may belong to another OS."
+                                          : "Make the whole disk of /dev/%s read-only?", dev);
+                if (ui_msgbox("Disks", q, UI_MB_YESNO | (ro ? UI_MB_WARN : UI_MB_QUESTION)) == UI_YES &&
+                    rozos_diskwrite(dev, ro) < 0) {
+                    snprintf(q, sizeof(q), "Could not change /dev/%s:\n%s", dev,
+                             errno == EBUSY ? "files are open on it - close them first" : strerror(errno));
+                    ui_msgbox("Disks", q, UI_MB_OK | UI_MB_ERROR);
+                }
+            }
+        } else if (!strcmp(fs, "ntfs")) {
+            ui_label(u->s, x + w - 170, yy, "NTFS: read-only", T->text_dim);
+        }
         human(a, sizeof(a), total - freeb);
         human(b, sizeof(b), freeb);
         human(c, sizeof(c), total);

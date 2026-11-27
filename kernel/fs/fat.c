@@ -1279,3 +1279,14 @@ const char *fs_probe_name(struct block_device *dev)
     }
     return "-";
 }
+
+/* ধাপ ২৪গ: mount-এর জন্য driver-এর নাম */
+const char *fs_driver_for(struct block_device *dev)
+{
+    const char *p = fs_probe_name(dev);
+    if (!strcmp(p, "ext2")) return "ext2";
+    if (!strncmp(p, "fat", 3)) return "fat";
+    if (!strcmp(p, "ntfs")) return "ntfs";
+    if (!strcmp(p, "exfat")) return "exfat";
+    return NULL;
+}

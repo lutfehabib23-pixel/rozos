@@ -357,7 +357,8 @@ static int do_vfs_mount(const char *path, const char *fs_name, const void *arg)
         m->active = 1;
     }
     strncpy(m->path, path, sizeof(m->path) - 1);
-    if (arg && (!strcmp(fs->name, "ext2") || !strcmp(fs->name, "fat"))) strncpy(m->source, (const char *)arg, sizeof(m->source) - 1);
+    if (arg && (!strcmp(fs->name, "ext2") || !strcmp(fs->name, "fat") ||
+                !strcmp(fs->name, "ntfs") || !strcmp(fs->name, "exfat"))   /* ধাপ ২৪গ */) strncpy(m->source, (const char *)arg, sizeof(m->source) - 1);
     else strncpy(m->source, fs->name, sizeof(m->source) - 1);
     m->fs = fs;
     m->root = root;

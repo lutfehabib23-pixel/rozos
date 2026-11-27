@@ -1218,14 +1218,14 @@ static int mkfs_zero(struct block_device *dev, uint64_t off, uint64_t len, uint8
 {
     while (len) {
         size_t n = len > zlen ? zlen : (size_t)len;
-        if (block_write_bytes(dev, off, zero, n) < 0) return -EIO;
+        if (block_write_direct(dev, off, zero, n) < 0) return -EIO;   /* ধাপ ২৪গ: দ্রুত */
         off += n;
         len -= n;
     }
     return 0;
 }
 
-int ext2_mkfs(struct block_device *dev, const char *label)
+int ext2_mkfs(struct block_device *dev, const char *label, void (*progress)(unsigned done, unsigned total))
 {
     uint64_t bytes = dev->sector_count * dev->sector_size;
     uint32_t blocks, groups, gdt_blocks, g, first_meta, root_blk, lf_blk;
@@ -1285,6 +1285,7 @@ int ext2_mkfs(struct block_device *dev, const char *label)
         if ((err = block_write_bytes(dev, (uint64_t)gdt[g].inode_bitmap * MKFS_BS, buf, MKFS_BS)) < 0) goto out;
         if ((err = mkfs_zero(dev, (uint64_t)gdt[g].inode_table * MKFS_BS, (uint64_t)MKFS_ITB * MKFS_BS, zero, zlen)) < 0)
             goto out;
+        if (progress) progress(g + 1, groups);           /* ধাপ ২৪গ: অগ্রগতি */
     }
     root_blk = gdt[0].inode_table + MKFS_ITB;
     lf_blk = root_blk + 1;

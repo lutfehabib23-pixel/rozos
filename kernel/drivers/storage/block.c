@@ -224,6 +224,28 @@ static int load_chunk(struct block_device *dev, uint64_t chunk, struct cache_ent
     return 0;
 }
 
+/* ধাপ ২৪গ: পুরো chunk-টাই নতুন লেখা হবে — আগে ডিস্ক থেকে পড়ার দরকার নেই
+ * (আগে প্রতি ৪ KiB লেখায় একবার পড়া + একবার লেখা হতো; পেন ড্রাইভে খুব ধীর) */
+static int load_chunk_for_write(struct block_device *dev, uint64_t chunk, int full, struct cache_entry **out)
+{
+    struct cache_entry *e;
+    uint64_t lba;
+    if (!full || cache_lookup(dev, chunk) || chunk_sectors(dev, chunk, &lba) * dev->sector_size != CHUNK_SIZE) {
+        return load_chunk(dev, chunk, out);
+    }
+    dev->cache_misses++;
+    e = cache_victim();
+    if (!e) {
+        return -ENOMEM;
+    }
+    e->dev = dev;
+    e->chunk = chunk;
+    e->last_use = ++use_clock;
+    e->valid = 1;
+    *out = e;
+    return 0;
+}
+
 /* ---------- পড়া/লেখা ---------- */
 
 /* ধাপ ১১খ: partition-এর offset → parent ডিস্কের offset (সীমা যাচাই partition-এর মাপে) */
@@ -296,7 +318,7 @@ static int do_block_write_bytes(struct block_device *dev, uint64_t offset, const
             n = len;
         }
         /* chunk cache-এ এনে (আংশিক লেখার জন্য বাকি অংশ লাগে) তাতে বদল */
-        err = load_chunk(dev, chunk, &e);
+        err = load_chunk_for_write(dev, chunk, in == 0 && n == CHUNK_SIZE, &e);   /* ধাপ ২৪গ */
         if (err < 0) {
             return err;
         }
@@ -367,6 +389,45 @@ int block_write_bytes(struct block_device *dev, uint64_t offset, const void *buf
     r = do_block_write_bytes(dev, offset, buf, len);
     kmutex_unlock(&block_lock);
     return r;
+}
+
+/* ধাপ ২৪গ: বড় একটানা লেখা (mkfs-এর শূন্য ইত্যাদি) — cache এড়িয়ে সরাসরি ড্রাইভারে,
+ * একবারে অনেক sector (USB-তে এক কমান্ডে ৬৪ KiB)। offset/len sector-এর গুণিতক হতে হবে।
+ * এই অংশের cache entry বাতিল করা হয়। */
+int block_write_direct(struct block_device *dev, uint64_t offset, const void *buf, size_t len)
+{
+    const uint8_t *in = (const uint8_t *)buf;
+    uint32_t ss;
+    size_t i;
+    int err = 0;
+    kmutex_lock(&block_lock);
+    if (to_disk(&dev, &offset, len, 1) < 0 || offset + len > dev->sector_count * dev->sector_size) {
+        err = -EINVAL;
+    } else if (dev->read_only) {
+        err = -EROFS;
+    } else if (dev->offline) {
+        err = -ENODEV;
+    }
+    ss = dev->sector_size;
+    if (!err && (offset % ss || len % ss)) err = -EINVAL;
+    if (!err) {
+        for (i = 0; i < CACHE_ENTRIES; i++) {
+            if (cache[i].valid && cache[i].dev == dev &&
+                cache[i].chunk >= offset / CHUNK_SIZE && cache[i].chunk <= (offset + len - 1) / CHUNK_SIZE) {
+                cache[i].valid = 0;
+            }
+        }
+        while (len && !err) {
+            size_t n = len > 256 * 1024 ? 256 * 1024 : len;
+            err = dev->ops->write(dev, offset / ss, (uint32_t)(n / ss), in);
+            dev->writes++;
+            in += n;
+            offset += n;
+            len -= n;
+        }
+    }
+    kmutex_unlock(&block_lock);
+    return err;
 }
 
 int block_is_read_only(struct block_device *dev)

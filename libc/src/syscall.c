@@ -65,6 +65,7 @@ void __rozlibc_dirfd_set(int fd, const char *path);    /* ধাপ ১৯জ (�
 #define SYS_rozos_mounts    507
 #define SYS_rozos_usblist   508
 #define SYS_rozos_proclist  509     /* ধাপ ১৯চ */
+#define SYS_rozos_diskwrite 510     /* ধাপ ২৪গ */
 #define SYS_sysinfo         99
 #define SYS_statfs          137
 #define SYS_uname           63
@@ -189,6 +190,7 @@ int  rozos_init_module(const void *image, unsigned long len, const char *name) {
 int  rozos_delete_module(const char *name) { return (int)SC3(SYS_delete_module, name, 0, 0); }
 long rozos_module_list(char *buf, unsigned long len, int ks) { return SC3(SYS_rozos_modlist, buf, len, ks); }
 long rozos_mounts(char *buf, unsigned long len) { return SC3(SYS_rozos_mounts, buf, len, 0); }
+int rozos_diskwrite(const char *dev, int on) { return (int)SC3(SYS_rozos_diskwrite, dev, on, 0); }
 long rozos_usb_list(char *buf, unsigned long len) { return SC3(SYS_rozos_usblist, buf, len, 0); }
 
 /* ধাপ ১৯চ: প্রসেস-তালিকা, sysinfo, statfs/statvfs (Settings-এর System, Processes, Disks) */

@@ -40,6 +40,8 @@ int  rozos_delete_module(const char *name);
 long rozos_module_list(char *buf, unsigned long len, int kernel_symbols);   /* লেখা বাইট */
 long rozos_usb_list(char *buf, unsigned long len);   /* ধাপ ১৫খ: lsusb */
 long rozos_mounts(char *buf, unsigned long len);   /* "ডিভাইস পথ ফাইলসিস্টেম\n" সারি */
+/* ধাপ ২৪গ: ডিস্কে লেখা চালু (on=1)/বন্ধ; mount করা partition আবার mount হয়। -1 + errno (EBUSY = খোলা ফাইল) */
+int  rozos_diskwrite(const char *dev, int on);
 /* ধাপ ১৯চ: চলমান প্রসেস — প্রতি সারি "pid ppid state cpu_ms threads mem_kib name\n" (লেখা বাইট) */
 long rozos_proc_list(char *buf, unsigned long len);
 

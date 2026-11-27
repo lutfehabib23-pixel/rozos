@@ -61,7 +61,7 @@
 #include <arch/x86_64/pit.h>
 #include <arch/x86_64/apic.h>
 
-#define ROZOS_VERSION "0.24.1-phase24b"
+#define ROZOS_VERSION "0.24.2-phase24c"
 
 #ifdef __TINYC__
 /* ধাপ ১১: TCC-র লিংকারে linker.ld নেই — শুরু = Limine-এর দেওয়া virtual base,
@@ -516,6 +516,48 @@ static struct block_device persist_part;
 static struct block_device *persist_dev;
 static int persist_created;
 
+/* ধাপ ২৪গ: পর্দায় অগ্রগতির দাগ — "  Creating persistent storage  [#####-----]  50%"
+ * একই লাইনে (\r) বারবার আঁকা; serial-এ প্রতি ১০%-এ একটা লাইন */
+static const char *prog_what;
+static int prog_last = -1;
+
+static void prog_draw(unsigned pct)
+{
+    char line[120], bar[31];
+    int i, fill;
+    if (pct > 100) pct = 100;
+    if ((int)pct == prog_last) return;
+    if (prog_last < 0 || pct / 10 != (unsigned)prog_last / 10) {
+        int n = ksnprintf(line, sizeof(line), "[....] %s: %u%%\n", prog_what, pct);
+        serial_write(line, (size_t)n);
+    }
+    prog_last = (int)pct;
+    fill = (int)(pct * 30 / 100);
+    for (i = 0; i < 30; i++) bar[i] = i < fill ? '#' : '-';
+    bar[30] = '\0';
+    ksnprintf(line, sizeof(line), "\r  %-30s [%s] %3u%%", prog_what, bar, pct);
+    tty_set_color(TTY_COLOR_LIGHT_CYAN, TTY_COLOR_BLACK);
+    tty_screen_puts(line);
+    tty_set_color(TTY_COLOR_LIGHT_GREY, TTY_COLOR_BLACK);
+}
+
+static void prog_begin(const char *what)
+{
+    prog_what = what;
+    prog_last = -1;
+    tty_screen_puts("\n");
+    prog_draw(0);
+}
+
+static void prog_end(void)
+{
+    prog_draw(100);
+    tty_screen_puts("\n");
+}
+
+static void prog_mkfs(unsigned done, unsigned total) { prog_draw(total ? done * 100 / total : 100); }
+static void prog_copy(uint64_t done, uint64_t total) { prog_draw(total ? (unsigned)(done * 100 / total) : 100); }
+
 /* এই ডিস্কে আমাদের ISO (ISO9660 PVD, volume id "ROZOS") আছে কিনা; থাকলে ISO-র মাপ */
 static uint64_t rozos_iso_size(struct block_device *d)
 {
@@ -538,6 +580,19 @@ static int is_boot_disk(struct block_device *d, int loose)
     return id == want;
 }
 
+/* ধাপ ২৪গ সুরক্ষা: শুধু পেন ড্রাইভ (removable), যার MBR/GPT-এর কোনো partition ১ GiB-এর
+ * পরে নেই — অর্থাৎ ১ GiB-এর পরের জায়গা কারো নয়। অভ্যন্তরীণ ডিস্কে (HDD/SSD/NVMe) কখনো নয়। */
+static int persist_area_free(struct block_device *d, uint64_t start_lba)
+{
+    size_t k;
+    if (!d->removable) return 0;
+    for (k = 0; k < block_device_count(); k++) {
+        struct block_device *p = block_device_at(k);
+        if (p->parent == d && p != &persist_part && p->start_lba + p->sector_count > start_lba) return 0;
+    }
+    return 1;
+}
+
 static void persist_setup(void)
 {
     char msg[200];
@@ -550,7 +605,7 @@ static void persist_setup(void)
         struct block_device *d = block_device_at(i);
         uint64_t iso, total, start;
         int err;
-        if (d->parent || d->read_only || d->offline) continue;
+        if (d->parent || d->read_only || d->offline || !d->removable) continue;   /* ২৪গ: শুধু পেন ড্রাইভ */
         iso = rozos_iso_size(d);
         if (!iso || !is_boot_disk(d, loose)) continue;
         total = d->sector_count * d->sector_size;
@@ -561,6 +616,11 @@ static void persist_setup(void)
             return;
         }
         start = PERSIST_OFFSET / d->sector_size;
+        if (!persist_area_free(d, start)) {
+            ksnprintf(msg, sizeof(msg), "/dev/%s: has partitions after 1 GiB - not used for persistent storage", d->name);
+            print_warn(msg);
+            return;
+        }
         memset(&persist_part, 0, sizeof(persist_part));
         persist_part.parent = d;
         persist_part.start_lba = start;
@@ -576,7 +636,9 @@ static void persist_setup(void)
                       persist_part.name,
                       (unsigned long long)(persist_part.sector_count * persist_part.sector_size / (1024 * 1024)));
             print_warn(msg);
-            err = ext2_mkfs(&persist_part, PERSIST_LABEL);
+            prog_begin("Creating persistent storage");
+            err = ext2_mkfs(&persist_part, PERSIST_LABEL, prog_mkfs);
+            prog_end();
             if (err < 0) {
                 ksnprintf(msg, sizeof(msg), "could not create persistent storage: %s", kstrerror(err));
                 print_warn(msg);
@@ -621,7 +683,11 @@ static void persist_fill(void)
     }
     if (!strcmp(want, have)) return;
     if (!persist_created) print_warn("this ISO is a different build: updating the system files (your files and settings stay)");
+    prog_begin(persist_created ? "Copying the system files" : "Updating the system files");
+    initrd_set_progress(prog_copy);
     err = initrd_load_keep("/", &st, persist_created ? NULL : persist_keep);
+    initrd_set_progress(NULL);
+    prog_end();
     if (err < 0 || st.errors) {
         ksnprintf(msg, sizeof(msg), "persistent storage: copying the system files: %llu errors",
                   (unsigned long long)st.errors);
@@ -777,6 +843,42 @@ static void mount_boot_partition(void)
     }
 }
 
+/* ধাপ ২৪গ: ভেতরের সব ডিস্কের (SATA HDD/SSD, NVMe) চেনা partition → /mnt/<নাম>
+ * (যেমন /mnt/nvmea3)। অন্য OS-এর ডিস্ক protect_foreign_disks-এর কারণে শুধু পড়া;
+ * NTFS সবসময় শুধু পড়া। পেন ড্রাইভ/USB ডিস্ক usbd নিজে /mnt/usb-তে বসায়। */
+static int mounted_source(const char *name)
+{
+    size_t k;
+    for (k = 0; k < vfs_mount_count(); k++) {
+        const struct mount *m = vfs_mount_at(k);
+        if (m && m->active && !strcmp(m->source, name)) return 1;
+    }
+    return 0;
+}
+
+static void automount_disks(void)
+{
+    char msg[160], mp[48];
+    size_t i;
+    if (cmdline_has("noautomount")) return;
+    for (i = 0; i < block_device_count(); i++) {
+        struct block_device *b = block_device_at(i);
+        struct block_device *top = b->parent ? b->parent : b;
+        const char *fs;
+        if (top->removable || (!b->parent && b->partitions) || b == &persist_part) continue;
+        if (mounted_source(b->name)) continue;
+        fs = fs_driver_for(b);
+        if (!fs) continue;
+        ksnprintf(mp, sizeof(mp), "/mnt/%s", b->name);
+        vfs_mkdir_p(mp);
+        if (vfs_mount(mp, fs, b->name) == 0) {
+            ksnprintf(msg, sizeof(msg), "%s on /dev/%s mounted on %s%s", fs, b->name, mp,
+                      (block_is_read_only(b) || !strcmp(fs, "ntfs")) ? " (read-only)" : "");
+            print_ok(msg);
+        }
+    }
+}
+
 /* ধাপ ৪-৫: ফাইলসিস্টেম। initrd মডিউলের ডেটা executable_and_modules অঞ্চলে থাকে
  * (reclaim হয় না), আর এর তথ্য bootinfo-তে কপি করা — তাই এটা reclaim-এর আগে বা পরে
  * যেকোনো সময় চলতে পারে। */
@@ -789,6 +891,8 @@ static void init_vfs(void)
     vfs_register_filesystem(&tmpfs_filesystem);
     vfs_register_filesystem(&ext2_filesystem);
     vfs_register_filesystem(&fat_filesystem);        /* ধাপ ১১খ */
+    vfs_register_filesystem(&ntfs_filesystem);       /* ধাপ ২৪গ: শুধু পড়া */
+    vfs_register_filesystem(&exfat_filesystem);      /* ধাপ ২৪গ */
 
     disk_root = mount_disk_root();
     if (disk_root) {
@@ -844,6 +948,7 @@ static void init_vfs(void)
         print_ok("devfs mounted on /dev");
         fbdev_init();                        /* ধাপ ১৩: /dev/fb0 */
     }
+    automount_disks();                       /* ধাপ ২৪গ */
     usb_storage_ready();                     /* ধাপ ১৫খ: পেন ড্রাইভ এখন /mnt/usb-তে */
 }
 

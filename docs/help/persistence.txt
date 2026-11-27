@@ -10,8 +10,13 @@ How it works:
     to the end rozOS keeps an ext2 file system named "rozOS-persist".
     No partition is added, so Windows still sees the drive as before.
   - First boot from the drive: the screen says "creating persistent
-    storage ... please wait" (a few seconds; on a 64 GB drive about
-    65 MB are written). Then all system files are copied there.
+    storage ... please wait" and shows two progress bars (phase 24c):
+    "Creating persistent storage [####------] 40%" (about 65 MB are
+    written on a 64 GB drive) and "Copying the system files". Then
+    the desktop starts as usual.
+  - Only a pen drive (removable USB drive) that has this ISO on it and
+    nothing after 1 GiB is ever used - never a disk inside the computer
+    (HDD, SSD, NVMe) and never a drive with other partitions there.
   - Every later boot: / is this ext2 (`mount` shows sdX9 on /).
   - A new rozos.iso written over the same drive (DD again) keeps it:
     on the next boot the system files are updated from the new ISO;
