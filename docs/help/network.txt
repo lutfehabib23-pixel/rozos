@@ -7,6 +7,8 @@ or a Realtek RTL8111/8168 gigabit card (most real PC boards, phase 22).
                 frames
   lwIP          a small TCP/IP stack inside the kernel: ARP, IPv4,
                 ICMP (ping), UDP, TCP, DHCP, DNS
+                (since phase 25a: 256 KiB TCP window with window scaling -
+                fast downloads from far servers like GitHub)
   sockets       kernel/net/socket.c - turns lwIP into file descriptors
   rozlibc       socket(), connect(), send() ... ([[sockets]])
   TLS           BearSSL in userland ([[tls]], [[rozhttp]])

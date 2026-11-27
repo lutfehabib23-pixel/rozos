@@ -662,13 +662,51 @@ static void test_phase15a(void)
     check(rozos_mounts(buf, sizeof(buf)) > 0 && strstr(buf, " / ext2") != NULL && umount("/") < 0 && errno == EBUSY &&
           umount("/no/such") < 0, "mount list; umount of / is refused");
     if (access("/dev/nvmea", F_OK) == 0) {
+        int whole;
         mkdir("/mnt/.st15", 0755);
-        check(mount("/dev/nvmea", "/mnt/.st15", "auto", 0, NULL) == 0 && stat("/mnt/.st15", &st) == 0 &&
-              umount("/mnt/.st15") == 0, "NVMe: /dev/nvmea mounts and unmounts");
+        whole = mount("/dev/nvmea", "/mnt/.st15", "auto", 0, NULL) == 0 && stat("/mnt/.st15", &st) == 0 &&
+                umount("/mnt/.st15") == 0;
         rmdir("/mnt/.st15");
+        if (whole) {
+            check(1, "NVMe: /dev/nvmea mounts and unmounts");
+        } else {
+            /* ধাপ ২৫ক: আসল পিসিতে ফাইল সিস্টেম partition-এ (nvmea1 …), আর সেগুলো আগেই
+             * automount হয়ে /mnt-এ — তখন পুরো ডিস্ক mount হয় না, সেটা ভুল নয় */
+            check(access("/dev/nvmea1", F_OK) == 0 ||
+                  (rozos_mounts(buf, sizeof(buf)) > 0 && strstr(buf, "nvmea") != NULL),
+                  "NVMe: /dev/nvmea found with its partitions (real PC)");
+        }
     } else {
         check(1, "no NVMe disk attached (make run NVME=1) - skipped");
     }
+}
+
+/* ধাপ ২৫ক: /mnt/usb-এ লেখা পরীক্ষা চলবে না যদি — (ক) এটা rozOS-এর নিজের পেন ড্রাইভ
+ * (ISO-র ভেতরের ছোট EFI/FAT ভাগ, জায়গা নেই, আর সেখানে লেখা ঝুঁকির): "/"-এর একই ডিস্ক,
+ * অথবা (খ) ফাইল সিস্টেম শুধু-পড়া (ntfs)। mount তালিকার লাইন: "src path fs kind label" */
+static void disk_of(char *s)
+{
+    size_t n = strlen(s);
+    while (n > 0 && s[n - 1] >= '0' && s[n - 1] <= '9') s[--n] = '\0';   /* sdb2 → sdb */
+}
+static int usb_is_readonly(void)
+{
+    static char m[4096];
+    char root_disk[64] = "", usb_disk[64] = "", usb_fs[32] = "", *line;
+    if (rozos_mounts(m, sizeof(m)) <= 0) return 0;
+    for (line = strtok(m, "\n"); line; line = strtok(NULL, "\n")) {
+        char src[64], path[128], fs[32];
+        if (sscanf(line, "%63s %127s %31s", src, path, fs) != 3) continue;
+        if (!strcmp(path, "/")) { snprintf(root_disk, sizeof(root_disk), "%s", src); disk_of(root_disk); }
+        if (!strcmp(path, "/mnt/usb")) {
+            snprintf(usb_disk, sizeof(usb_disk), "%s", src); disk_of(usb_disk);
+            snprintf(usb_fs, sizeof(usb_fs), "%s", fs);
+        }
+    }
+    if (!usb_disk[0]) return 0;
+    if (access("/mnt/usb/EFI/BOOT/BOOTX64.EFI", F_OK) == 0 || access("/mnt/usb/limine.conf", F_OK) == 0)
+        return 1;                                /* বুটের ফাইল — rozOS-এর নিজের পেন ড্রাইভ (live মোডেও) */
+    return !strcmp(usb_fs, "ntfs") || (root_disk[0] && !strncmp(root_disk, "sd", 2) && !strcmp(root_disk, usb_disk));
 }
 
 /* ধাপ ১৫খ: USB পেন ড্রাইভ (make run USB=1 হলে) */
@@ -677,7 +715,12 @@ static void test_phase15b(void)
     char buf[1024];
     long n = rozos_usb_list(buf, sizeof(buf));
     check(n >= 0, "lsusb: the USB device list can be read");
-    if (n > 0 && strstr(buf, " storage ") && access("/mnt/usb", F_OK) == 0) {
+    if (n > 0 && strstr(buf, " storage ") && access("/mnt/usb", F_OK) == 0 && usb_is_readonly()) {
+        /* ধাপ ২৫ক: আসল পিসিতে /mnt/usb = rozOS-এর নিজের পেন ড্রাইভের EFI ভাগ — লেখা নয়, পড়া পরীক্ষা */
+        DIR *dir = opendir("/mnt/usb");
+        check(dir != NULL && readdir(dir) != NULL, "USB pen drive: /mnt/usb (the rozOS stick itself) can be read");
+        if (dir) closedir(dir);
+    } else if (n > 0 && strstr(buf, " storage ") && access("/mnt/usb", F_OK) == 0) {
         FILE *f = fopen("/mnt/usb/.systest", "w");
         int ok = 0;
         if (f) { fputs("usb-ok", f); fclose(f); }

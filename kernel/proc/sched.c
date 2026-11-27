@@ -558,10 +558,14 @@ void kmutex_lock(struct kmutex *m)
         return;
     }
     flags = cpu_irq_save();
-    while (m->owner && m->owner != self) {
-        m->contended++;
-        sched_relax();                       /* মালিককে চলতে দেওয়া (IF = 1 করে ফেরে) */
-        cpu_cli();
+    if (m->owner && m->owner != self) {
+        m->waiting++;                        /* ধাপ ২৫ক: kmutex_unlock_yield দেখে */
+        while (m->owner && m->owner != self) {
+            m->contended++;
+            sched_relax();                   /* মালিককে চলতে দেওয়া (IF = 1 করে ফেরে) */
+            cpu_cli();
+        }
+        m->waiting--;
     }
     m->owner = self;
     m->depth++;
@@ -575,6 +579,20 @@ void kmutex_unlock(struct kmutex *m)
         m->owner = NULL;
     }
     cpu_irq_restore(flags);
+}
+
+void kmutex_unlock_yield(struct kmutex *m)
+{
+    int give = 0;
+    uint64_t flags = cpu_irq_save();
+    if (m->depth > 0 && --m->depth == 0) {
+        m->owner = NULL;
+        give = m->waiting > 0;
+    }
+    cpu_irq_restore(flags);
+    if (give && sched_can_sleep()) {
+        sched_yield();                       /* অপেক্ষমাণ থ্রেড এখন lock নিতে পারে */
+    }
 }
 
 unsigned kmutex_release_all(struct kmutex *m)

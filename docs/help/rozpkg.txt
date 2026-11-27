@@ -35,6 +35,10 @@ It is saved in /etc/rozpkg.conf. Making your own repo: [[packages]].
 == Safety ==
 Packages are .tar or (since phase 17b) .tar.gz files; while unpacking
 rozpkg shows how many MiB are done.
+While downloading it shows KiB, percent, speed (KiB/s) and the time
+left. If there is enough free RAM (3 x the package + 64 MiB) the
+download goes to /tmp (RAM) first, so a slow pen drive does not slow
+the network down; after installing, a copy is kept in the cache.
 Every download is checked against the sha256 in the index; a
 mismatch is refused and deleted. The index itself comes over https,
 so its certificate is verified. Paths with ".." or a leading / in a

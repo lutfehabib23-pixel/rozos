@@ -16,6 +16,7 @@
 
 #define CHUNK_SIZE     4096ULL
 #define CACHE_ENTRIES  256           /* 1 MiB */
+#define BIG_WRITE      (256 * 1024)  /* ধাপ ২৫ক: একটানা লেখার এক কমান্ডে সর্বোচ্চ */
 
 struct cache_entry {
     struct block_device *dev;
@@ -314,6 +315,38 @@ static int do_block_write_bytes(struct block_device *dev, uint64_t offset, const
         struct cache_entry *e;
         int err;
 
+        /* ধাপ ২৫ক: chunk-এর শুরু থেকে অন্তত দুটো পুরো chunk — এক কমান্ডে (BIG_WRITE পর্যন্ত)।
+         * আগে প্রতি ৪ KiB আলাদা USB কমান্ড ছিল। লেখা এখনো সাথে সাথে ডিস্কে (write-through);
+         * cache-এ যে chunk-গুলো আছে সেগুলোও একই ডেটায় হালনাগাদ, যাতে পড়ায় পুরোনো না আসে। */
+        if (in == 0 && len >= 2 * CHUNK_SIZE &&
+            chunk_sectors(dev, chunk, &first_lba) * ss == CHUNK_SIZE) {
+            size_t big = len - len % CHUNK_SIZE, i;
+            uint64_t last;
+            if (big > BIG_WRITE) {
+                big = BIG_WRITE;
+            }
+            last = chunk + big / CHUNK_SIZE - 1;
+            for (i = 0; i < CACHE_ENTRIES; i++) {
+                if (cache[i].valid && cache[i].dev == dev && cache[i].chunk >= chunk && cache[i].chunk <= last) {
+                    memcpy(cache[i].data, in_buf + (size_t)(cache[i].chunk - chunk) * CHUNK_SIZE, CHUNK_SIZE);
+                }
+            }
+            err = dev->ops->write(dev, first_lba, (uint32_t)(big / ss), in_buf);
+            dev->writes++;
+            if (err < 0) {
+                for (i = 0; i < CACHE_ENTRIES; i++) {    /* ডিস্কের সাথে না মিলতে পারে — বাতিল */
+                    if (cache[i].valid && cache[i].dev == dev && cache[i].chunk >= chunk && cache[i].chunk <= last) {
+                        cache[i].valid = 0;
+                    }
+                }
+                return err;
+            }
+            in_buf += big;
+            offset += big;
+            len -= big;
+            continue;
+        }
+
         if (n > len) {
             n = len;
         }
@@ -378,7 +411,7 @@ int block_read_bytes(struct block_device *dev, uint64_t offset, void *buf, size_
     int r;
     kmutex_lock(&block_lock);
     r = do_block_read_bytes(dev, offset, buf, len);
-    kmutex_unlock(&block_lock);
+    kmutex_unlock_yield(&block_lock);            /* ধাপ ২৫ক: অন্য প্রোগ্রামও ডিস্ক পায় */
     return r;
 }
 
@@ -387,7 +420,7 @@ int block_write_bytes(struct block_device *dev, uint64_t offset, const void *buf
     int r;
     kmutex_lock(&block_lock);
     r = do_block_write_bytes(dev, offset, buf, len);
-    kmutex_unlock(&block_lock);
+    kmutex_unlock_yield(&block_lock);            /* ধাপ ২৫ক: বারবার লেখার ফাঁকে অন্যরাও */
     return r;
 }
 
@@ -426,7 +459,7 @@ int block_write_direct(struct block_device *dev, uint64_t offset, const void *bu
             len -= n;
         }
     }
-    kmutex_unlock(&block_lock);
+    kmutex_unlock_yield(&block_lock);            /* ধাপ ২৫ক */
     return err;
 }
 

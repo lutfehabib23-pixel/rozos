@@ -434,6 +434,28 @@ static int bot(struct usb_dev *d, const uint8_t *cdb, int cdblen, int in, uint32
 
 static uint8_t *msc_data(struct usb_dev *d) { return d->buf + VMM_PAGE_SIZE; }
 
+/* ধাপ ২৫ক: কিবোর্ড/মাউস — পেন ড্রাইভের লম্বা লেখার মাঝেও সাড়া দেওয়া।
+ * hc->lock হাতে থাকা অবস্থায় ডাকতে হয় (usbd আর scsi_rw দুজনেই ডাকে)।
+ * hid_gap_max: দুই সেবার মাঝে সবচেয়ে বড় ফাঁক (kmon usbstat) — মাউস আটকালে এটা বড় হয়। */
+static void hid_service(struct usb_dev *d);
+static uint64_t hid_last_ms, hid_gap_max_ms;
+static void hid_service_hc(struct xhci *hc)
+{
+    int i, any = 0;
+    uint64_t now = timer_uptime_ms();
+    handle_events(hc);
+    for (i = 0; i < MAX_DEVS; i++) {
+        struct usb_dev *d = &devs[i];
+        if (!d->used || d->gone || d->hc != hc || d->kind < 2) continue;
+        hid_service(d);
+        any = 1;
+    }
+    if (any) {
+        if (hid_last_ms && now - hid_last_ms > hid_gap_max_ms) hid_gap_max_ms = now - hid_last_ms;
+        hid_last_ms = now;
+    }
+}
+
 static int scsi_rw(struct usb_dev *d, int write, uint64_t lba, uint32_t count, uint8_t *buf)
 {
     uint32_t ss = d->bdev.sector_size, max = MSC_PAGES * VMM_PAGE_SIZE / ss;
@@ -469,8 +491,9 @@ static int scsi_rw(struct usb_dev *d, int write, uint64_t lba, uint32_t count, u
         buf += (size_t)n * ss;
         lba += n;
         count -= n;
+        hid_service_hc(hc);                      /* ধাপ ২৫ক: কমান্ডের ফাঁকে মাউস/কিবোর্ড */
     }
-    kmutex_unlock(&hc->lock);
+    kmutex_unlock_yield(&hc->lock);              /* ধাপ ২৫ক: usbd অপেক্ষায় থাকলে তার পালা */
     return err;
 }
 
@@ -1023,6 +1046,9 @@ void usb_stat_dump(int reset)
         kprintf("  timeouts %llu, stalls %llu, failed commands %llu\n", (unsigned long long)d->st_timeouts,
                 (unsigned long long)d->st_stalls, (unsigned long long)d->st_errors);
     }
+    /* ধাপ ২৫ক: কিবোর্ড/মাউস কতক্ষণ সেবা পায়নি (বড় হলে = তখন মাউস আটকে ছিল) */
+    if (reset) hid_gap_max_ms = 0;
+    else if (hid_last_ms) kprintf("keyboard/mouse: longest pause %llu ms\n", (unsigned long long)hid_gap_max_ms);
     if (reset) kprintf("usbstat: counters cleared\n");
     else if (!any) kprintf("no USB storage\n");
 }
@@ -1038,12 +1064,11 @@ static int usbd(void *arg)
         for (h = 0; h < nhc; h++) {
             struct xhci *hc = &hcs[h];
             kmutex_lock(&hc->lock);
-            handle_events(hc);
             for (i = 0; i < MAX_DEVS; i++) {
                 struct usb_dev *d = &devs[i];
-                if (!d->used || d->gone || d->hc != hc) continue;
-                if (d->kind >= 2) { hid = 1; hid_service(d); }
+                if (d->used && !d->gone && d->hc == hc && d->kind >= 2) hid = 1;
             }
+            hid_service_hc(hc);                      /* ধাপ ২৫ক: একই কাজ, এক জায়গায় (handle_events সহ) */
             if (now - last_scan >= 300) scan_ports(hc);
             kmutex_unlock(&hc->lock);
         }

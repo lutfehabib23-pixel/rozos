@@ -22,7 +22,7 @@
 #define MEMP_NUM_TCP_PCB_LISTEN     8
 #define MEMP_NUM_TCP_SEG            256
 #define MEMP_NUM_SYS_TIMEOUT        16
-#define PBUF_POOL_SIZE              256
+#define PBUF_POOL_SIZE              512         /* ধাপ ২৫ক: ২৫৬ → ৫১২, বড় window-এর জন্য (~৮০০ KiB) */
 #define PBUF_POOL_BUFSIZE           1600
 
 /* প্রোটোকল */
@@ -48,7 +48,13 @@
 
 /* TCP */
 #define TCP_MSS                     1460
-#define TCP_WND                     (16 * TCP_MSS)
+/* ধাপ ২৫ক: window scaling — দূরের সার্ভার (GitHub) থেকে দ্রুত নামানো।
+ * আগে TCP_WND ১৬ × MSS (~২৩ KiB) ছিল: গতি ≤ window / RTT (২০০ ms-এ ~১১৫ KiB/s)।
+ * এখন ২৫৬ KiB (scale 3 → সর্বোচ্চ ৫১২ KiB); pbuf pool-ও তাই বড় (নিচে)। */
+#define LWIP_WND_SCALE              1
+#define TCP_RCV_SCALE               3
+#define TCP_WND                     (256 * 1024)
+/* আগে: #define TCP_WND (16 * TCP_MSS) */
 #define TCP_SND_BUF                 (16 * TCP_MSS)
 #define TCP_SND_QUEUELEN            (4 * TCP_SND_BUF / TCP_MSS)
 #define TCP_LISTEN_BACKLOG          1

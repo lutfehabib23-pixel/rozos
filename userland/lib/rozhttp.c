@@ -365,17 +365,32 @@ static void emit(int fd, const void *p, size_t n)
     }
 }
 
+/* ধাপ ২৫ক: অগ্রগতিতে গতি আর বাকি সময় — শরীরের প্রথম বাইট থেকে মাপা */
+static long long progress_t0_ms;
+static long long now_ms(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long long)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+}
+
 static void body(const struct rozhttp_opts *o, int out_fd, struct rozhttp_result *r, const void *p, size_t n)
 {
     if (!n) return;
+    if (r->bytes == 0) progress_t0_ms = now_ms();
     emit(out_fd, p, n);
     if (o->on_data) o->on_data(o->on_data_ctx, p, n);
     r->bytes += (long)n;
     if (o->progress && (r->bytes >> 16) != ((r->bytes - (long)n) >> 16)) {
+        long long ms = now_ms() - progress_t0_ms;
+        long kbs = ms > 0 ? (long)((long long)r->bytes * 1000 / 1024 / ms) : 0;
         if (r->content_length > 0) {
-            fprintf(stderr, "\r  %ld / %ld KiB", r->bytes / 1024, r->content_length / 1024);
+            long left = kbs > 0 ? (r->content_length - r->bytes) / 1024 / kbs : -1;
+            fprintf(stderr, "\r  %ld / %ld KiB  %ld%%  %ld KiB/s", r->bytes / 1024, r->content_length / 1024,
+                    (long)((long long)r->bytes * 100 / r->content_length), kbs);
+            if (left >= 0) fprintf(stderr, "  %ld:%02ld left ", left / 60, left % 60);
         } else {
-            fprintf(stderr, "\r  %ld KiB", r->bytes / 1024);
+            fprintf(stderr, "\r  %ld KiB  %ld KiB/s ", r->bytes / 1024, kbs);
         }
     }
 }

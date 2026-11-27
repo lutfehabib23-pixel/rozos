@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/sysinfo.h>
 #include "rozhttp.h"
 
 /* ধাপ ১৭খ: tar পড়ার উৎস — zlib থাকলে gz* (.tar আর .tar.gz দুটোই), না থাকলে সাধারণ fd */
@@ -539,6 +540,38 @@ static void sha_cb(void *ctx, const void *data, size_t len)
     rozhttp_sha256_update((struct rozhttp_sha256 *)ctx, data, len);
 }
 
+/* ধাপ ২৫ক: ফাইল কপি (বড় বাফারে — ডিস্কে কম কমান্ড) */
+static int copy_file(const char *from, const char *to)
+{
+    char *buf = (char *)malloc(256 * 1024);
+    int in, out, ok = 1;
+    ssize_t n;
+    if (!buf) return -1;
+    in = open(from, O_RDONLY);
+    out = in >= 0 ? open(to, O_WRONLY | O_CREAT | O_TRUNC, 0644) : -1;
+    if (in < 0 || out < 0) ok = 0;
+    while (ok && (n = read(in, buf, 256 * 1024)) > 0) {
+        if (write(out, buf, (size_t)n) != n) ok = 0;
+    }
+    if (in >= 0) close(in);
+    if (out >= 0) close(out);
+    free(buf);
+    if (!ok) unlink(to);
+    return ok ? 0 : -1;
+}
+
+/* ধাপ ২৫ক: RAM-এ (/tmp) নামানোর মতো জায়গা আছে কি — প্যাকেজের ৩ গুণ + ৬৪ MiB খালি থাকতে হবে।
+ * তাহলে নেটওয়ার্ক পেন ড্রাইভের ধীর লেখার জন্য অপেক্ষা করে না। */
+static int fits_in_ram(long size)
+{
+    struct sysinfo si;
+    unsigned long free_b;
+    if (size <= 0 || sysinfo(&si) != 0) return 0;
+    free_b = si.freeram * (si.mem_unit ? si.mem_unit : 1);
+    return free_b > (unsigned long)size * 3 + 64ul * 1024 * 1024;
+}
+
+/* ফেরত: 0 = path-এ (cache) তৈরি, 1 = path-এ /tmp-এর ফাইল (install_one পরে cache-এ কপি করে), -1 = ভুল */
 static int fetch_pkg(const struct pkg *p, char *path, size_t size)
 {
     char url[1400], hex[65];
@@ -546,7 +579,7 @@ static int fetch_pkg(const struct pkg *p, char *path, size_t size)
     struct rozhttp_opts o;
     struct rozhttp_result r;
     long have;
-    int fd;
+    int fd, in_tmp = 0;
 
     mkdirs(CACHE_DIR);
     snprintf(path, size, CACHE_DIR "/%s", p->file);
@@ -555,7 +588,11 @@ static int fetch_pkg(const struct pkg *p, char *path, size_t size)
         return 0;
     }
     snprintf(url, sizeof(url), "%s/%s", repo, p->file);
-    printf("  downloading %s (%ld KiB)\n", p->file, (p->size + 1023) / 1024);
+    if (fits_in_ram(p->size)) {                       /* ধাপ ২৫ক */
+        snprintf(path, size, "/tmp/rozpkg-%s", p->file);
+        in_tmp = 1;
+    }
+    printf("  downloading %s (%ld KiB)%s\n", p->file, (p->size + 1023) / 1024, in_tmp ? " into RAM" : "");
     fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
         fprintf(stderr, "rozpkg: %s: %s\n", path, strerror(errno));
@@ -582,7 +619,7 @@ static int fetch_pkg(const struct pkg *p, char *path, size_t size)
         return -1;
     }
     printf("  sha256 ok\n");
-    return 0;
+    return in_tmp;
 }
 
 /* ---------- remove ---------- */
@@ -634,7 +671,7 @@ static int install_one(const char *name, int force)
 {
     char ver[64], tar[256], path[256];
     struct pkg *p = find_pkg(name);
-    int lfd, nfiles;
+    int lfd, nfiles, from_tmp;
 
     if (!p) {
         fprintf(stderr, "rozpkg: no package '%s' (try `rozpkg search`, or `rozpkg update`)\n", name);
@@ -648,7 +685,7 @@ static int install_one(const char *name, int force)
         printf("replacing %s %s with %s\n", name, ver, p->version);
     }
     printf("installing %s %s\n", p->name, p->version);
-    if (fetch_pkg(p, tar, sizeof(tar)) < 0) return -1;
+    if ((from_tmp = fetch_pkg(p, tar, sizeof(tar))) < 0) return -1;
     if (installed_version(name, ver, sizeof(ver))) remove_pkg(name, 0);
     mkdirs(DB_DIR);
     snprintf(path, sizeof(path), DB_DIR "/%s.list", name);
@@ -660,9 +697,18 @@ static int install_one(const char *name, int force)
     if (extract_tar(tar, lfd, &nfiles) < 0) {
         close(lfd);
         fprintf(stderr, "rozpkg: unpacking %s failed\n", p->file);
+        if (from_tmp) unlink(tar);
         return -1;
     }
     close(lfd);
+    /* ধাপ ২৫ক: RAM-এ নামানো হলে একটা কপি cache-এ (পরে reinstall-এ আবার নামাতে হয় না) */
+    if (from_tmp) {
+        char cached[256];
+        snprintf(cached, sizeof(cached), CACHE_DIR "/%s", p->file);
+        printf("  keeping a copy in " CACHE_DIR "\n");
+        if (copy_file(tar, cached) < 0) fprintf(stderr, "rozpkg: could not keep a copy (%s)\n", strerror(errno));
+        unlink(tar);
+    }
     snprintf(path, sizeof(path), DB_DIR "/%s.ver", name);
     lfd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (lfd >= 0) {

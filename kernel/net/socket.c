@@ -31,6 +31,8 @@
 
 #define DGRAM_QUEUE    32
 #define ACCEPT_QUEUE   16
+#define RXQ_MAX         8             /* ধাপ ২৫ক: rx-এর পরে আরো কয়টা শিকল */
+#define RXQ_CHAIN_MAX   0xF000        /* এক শিকলে সর্বোচ্চ (u16 tot_len-এর নিচে) */
 #define CONNECT_TIMEOUT_MS 20000
 
 enum sock_state {
@@ -60,6 +62,10 @@ struct sock {
         struct raw_pcb *raw;
     } pcb;
     struct pbuf *rx;                  /* TCP: না-পড়া ডেটা */
+    /* ধাপ ২৫ক: window এখন ২৫৬ KiB, কিন্তু একটা pbuf শিকলের tot_len ১৬-বিট (৬৪ KiB) —
+     * তাই বাকিটা আলাদা শিকলে, পরপর। rx খালি হলেই rx_more[0] সামনে আসে। */
+    struct pbuf *rx_more[RXQ_MAX];
+    int rx_more_n;
     struct dgram dq[DGRAM_QUEUE];     /* UDP/RAW */
     int dq_head, dq_count;
     struct sock *pending[ACCEPT_QUEUE];
@@ -70,6 +76,31 @@ struct sock {
 };
 
 static const struct vnode_ops sock_ops;
+
+/* ধাপ ২৫ক: rx-এর সাথে জোড়া যায় কি (tot_len u16 উপচে না যায়) */
+static int rx_fits(struct pbuf *chain, struct pbuf *p)
+{
+    return (uint32_t)chain->tot_len + p->tot_len <= RXQ_CHAIN_MAX;
+}
+
+/* rx খালি হলে পরের শিকল সামনে */
+static void rx_promote(struct sock *s)
+{
+    int i;
+    if (s->rx || s->rx_more_n == 0) return;
+    s->rx = s->rx_more[0];
+    for (i = 1; i < s->rx_more_n; i++) s->rx_more[i - 1] = s->rx_more[i];
+    s->rx_more_n--;
+}
+
+static void rx_free_all(struct sock *s)
+{
+    int i;
+    if (s->rx) pbuf_free(s->rx);
+    for (i = 0; i < s->rx_more_n; i++) pbuf_free(s->rx_more[i]);
+    s->rx = NULL;
+    s->rx_more_n = 0;
+}
 
 /* ---------- সহায়ক ---------- */
 
@@ -172,10 +203,16 @@ static err_t tcp_recv_cb(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t e
     }
     if (!p) {
         s->peer_closed = 1;
-    } else if (s->rx) {
-        pbuf_cat(s->rx, p);
-    } else {
+    } else if (!s->rx) {
         s->rx = p;
+    } else if (s->rx_more_n == 0 && rx_fits(s->rx, p)) {
+        pbuf_cat(s->rx, p);
+    } else if (s->rx_more_n > 0 && rx_fits(s->rx_more[s->rx_more_n - 1], p)) {
+        pbuf_cat(s->rx_more[s->rx_more_n - 1], p);      /* ধাপ ২৫ক */
+    } else if (s->rx_more_n < RXQ_MAX) {
+        s->rx_more[s->rx_more_n++] = p;
+    } else {
+        return ERR_MEM;                     /* জায়গা নেই: lwIP পরে আবার দেবে (refused data) */
     }
     wake(s);
     return ERR_OK;
@@ -363,10 +400,10 @@ static void sock_destroy(struct sock *s)
                 tcp_detach(c->pcb.tcp);
                 tcp_abort(c->pcb.tcp);
             }
-            if (c->rx) pbuf_free(c->rx);
+            rx_free_all(c);                     /* ধাপ ২৫ক: rx_more সহ */
             kfree(c);
         }
-        if (s->rx) pbuf_free(s->rx);
+        rx_free_all(s);
     } else {
         if (s->type == SOCK_DGRAM && s->pcb.udp) udp_remove(s->pcb.udp);
         if (s->type == SOCK_RAW && s->pcb.raw) raw_remove(s->pcb.raw);
@@ -573,6 +610,7 @@ int64_t sock_recv(struct sock *s, void *buf, size_t len, int flags, uint32_t *ip
         n = pbuf_copy_partial(s->rx, buf, (u16_t)len, 0);
         if (!peek) {
             s->rx = pbuf_free_header(s->rx, n);
+            rx_promote(s);                          /* ধাপ ২৫ক */
             if (s->pcb.tcp) tcp_recved(s->pcb.tcp, n);
         }
         if (ip && s->pcb.tcp) *ip = ip_2_ip4(&s->pcb.tcp->remote_ip)->addr;

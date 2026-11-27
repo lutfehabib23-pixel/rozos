@@ -110,12 +110,17 @@ struct kmutex {
     unsigned depth;
     const char *name;
     uint64_t contended;                  /* কতবার অপেক্ষা করতে হয়েছে */
+    unsigned waiting;                    /* ধাপ ২৫ক: এই মুহূর্তে কয়টা থ্রেড অপেক্ষায় */
 };
 
-#define KMUTEX_INIT(n) { NULL, 0, (n), 0 }
+#define KMUTEX_INIT(n) { NULL, 0, (n), 0, 0 }
 
 void kmutex_lock(struct kmutex *m);
 void kmutex_unlock(struct kmutex *m);
+/* ধাপ ২৫ক: ছেড়ে দিয়ে, কেউ অপেক্ষায় থাকলে তাকে একবার চলতে দেওয়া (sched_yield)।
+ * যে থ্রেড lock বারবার ছেড়ে সঙ্গে সঙ্গে আবার নেয় (USB-তে হাজার হাজার লেখা), তার জন্য —
+ * নইলে অপেক্ষমাণ থ্রেড (usbd: মাউস/কিবোর্ড) কখনো সুযোগ পায় না। */
+void kmutex_unlock_yield(struct kmutex *m);
 /* পুরোপুরি ছেড়ে দিয়ে গভীরতা ফেরত (ব্লকিং ডিভাইস পড়ার আগে); পরে kmutex_relock */
 unsigned kmutex_release_all(struct kmutex *m);
 void kmutex_relock(struct kmutex *m, unsigned depth);
