@@ -90,6 +90,8 @@ int bootinfo_save(void)
             m->size = f->size;
             copy_str(m->path, sizeof(m->path), f->path);
             copy_str(m->cmdline, sizeof(m->cmdline), f->string);
+            m->mbr_disk_id = f->mbr_disk_id;            /* ধাপ ২৪খ: বুটের পেন ড্রাইভ চেনা */
+            m->media_type = f->media_type;
         }
     }
     return 1;

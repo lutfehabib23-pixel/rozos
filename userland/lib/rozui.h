@@ -182,6 +182,8 @@ int ui_shortcut_key(const char *shortcut);   /* "Ctrl+S" → 19, "F5" → GFX_KE
 #define UI_MB_QUESTION 0x80
 enum { UI_CANCEL = 0, UI_OK = 1, UI_YES = 2, UI_NO = 3 };
 int ui_msgbox(const char *title, const char *text, int type);
+/* ধাপ ২৪খ: উইন্ডো ছাড়া প্রোগ্রামের জন্য — বার্তাটাই নিজের ছোট উইন্ডো (gfx_init_window/gfx_quit নিজে) */
+int ui_msgbox_window(const char *title, const char *text, int type);
 int ui_inputbox(const char *title, const char *prompt, char *buf, int size);   /* 1 = OK */
 /* ধাপ ১৯ছ: secret চাওয়া (* দেখায়); confirm = 1 হলে দুবার লিখতে হয়। 1 = OK (buf-এ secret) */
 int ui_passwordbox(const char *title, const char *prompt, char *buf, int size, int confirm);

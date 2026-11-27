@@ -61,7 +61,7 @@
 #include <arch/x86_64/pit.h>
 #include <arch/x86_64/apic.h>
 
-#define ROZOS_VERSION "0.24.0-phase24a"
+#define ROZOS_VERSION "0.24.1-phase24b"
 
 #ifdef __TINYC__
 /* ধাপ ১১: TCC-র লিংকারে linker.ld নেই — শুরু = Limine-এর দেওয়া virtual base,
@@ -498,6 +498,147 @@ static void protect_foreign_disks(void)
     }
 }
 
+/* ---------- ধাপ ২৪খ: ISO লেখা পেন ড্রাইভে স্থায়ী জায়গা (persistence) ----------
+ * ISO (DD করে লেখা) থেকে বুট হলে / আসলে RAM-এ (tmpfs + initrd) — বন্ধ করলেই সব হারায়।
+ * এখন: বুটের পেন ড্রাইভে ISO-র পরে, ১ GiB থেকে শেষ পর্যন্ত, একটা ext2 ("rozOS-persist")।
+ * MBR-এ নতুন partition লাগে না (xorriso-র চারটা ঘরই ভরা), তাই Windows-এ ড্রাইভ যেমন
+ * ছিল তেমনই দেখায়; নতুন ISO আবার DD করলেও (ISO < ১ GiB) এই জায়গা অক্ষত থাকে।
+ *   - প্রথম বুট: ext2 বানানো → / হিসেবে mount → initrd-এর সব ফাইল সেখানে কপি
+ *   - পরের বুট: সরাসরি / = এই ext2 (Desktop-এর ফাইল, ওয়ালপেপার, প্যাকেজ সব থাকে)
+ *   - ISO বদলালে (বিল্ড আলাদা): সিস্টেম ফাইল নতুন করে, /home আর নিজের সেটিং রেখে
+ * বুটের কমান্ড লাইনে "nopersist" দিলে আগের মতো শুধু RAM। */
+#define PERSIST_OFFSET   (1024ull * 1024 * 1024)          /* ১ GiB */
+#define PERSIST_MIN      (512ull * 1024 * 1024)           /* অন্তত ৫১২ MiB জায়গা লাগবে */
+#define PERSIST_LABEL    "rozOS-persist"
+#define PERSIST_MARK     "/etc/.rozos-persist"
+
+static struct block_device persist_part;
+static struct block_device *persist_dev;
+static int persist_created;
+
+/* এই ডিস্কে আমাদের ISO (ISO9660 PVD, volume id "ROZOS") আছে কিনা; থাকলে ISO-র মাপ */
+static uint64_t rozos_iso_size(struct block_device *d)
+{
+    uint8_t pvd[2048];
+    if (block_read_bytes(d, 32768, pvd, sizeof(pvd)) < 0) return 0;
+    if (pvd[0] != 1 || memcmp(pvd + 1, "CD001", 5) || memcmp(pvd + 40, "ROZOS", 5)) return 0;
+    return (uint64_t)(pvd[80] | (pvd[81] << 8) | (pvd[82] << 16) | ((uint32_t)pvd[83] << 24)) * 2048;
+}
+
+static int is_boot_disk(struct block_device *d, int loose)
+{
+    const struct bootinfo *bi = bootinfo();
+    uint8_t mbr[512];
+    uint32_t id, want = 0;
+    uint64_t i;
+    for (i = 0; i < bi->module_count; i++) if (bi->modules[i].mbr_disk_id) want = bi->modules[i].mbr_disk_id;
+    if (!want || loose) return d->removable;        /* বুটলোডার জানায়নি/মেলেনি: শুধু পেন ড্রাইভ */
+    if (block_read(d, 0, 1, mbr) < 0) return 0;
+    id = (uint32_t)mbr[440] | ((uint32_t)mbr[441] << 8) | ((uint32_t)mbr[442] << 16) | ((uint32_t)mbr[443] << 24);
+    return id == want;
+}
+
+static void persist_setup(void)
+{
+    char msg[200];
+    size_t i, n = block_device_count();
+    int loose;
+    if (cmdline_has("nopersist")) return;
+    /* প্রথমে MBR signature মিলিয়ে; কোনোটা না মিললে ISO লেখা পেন ড্রাইভ */
+    for (loose = 0; loose < 2; loose++)
+    for (i = 0; i < n; i++) {
+        struct block_device *d = block_device_at(i);
+        uint64_t iso, total, start;
+        int err;
+        if (d->parent || d->read_only || d->offline) continue;
+        iso = rozos_iso_size(d);
+        if (!iso || !is_boot_disk(d, loose)) continue;
+        total = d->sector_count * d->sector_size;
+        if (iso > PERSIST_OFFSET || total < PERSIST_OFFSET + PERSIST_MIN) {
+            ksnprintf(msg, sizeof(msg), "/dev/%s: too small for persistent storage (needs 1.5 GiB) - changes are lost at power off",
+                      d->name);
+            print_warn(msg);
+            return;
+        }
+        start = PERSIST_OFFSET / d->sector_size;
+        memset(&persist_part, 0, sizeof(persist_part));
+        persist_part.parent = d;
+        persist_part.start_lba = start;
+        persist_part.sector_count = d->sector_count - start;
+        persist_part.part_number = 9;
+        persist_part.removable = d->removable;
+        strcpy(persist_part.part_type, "rozOS persistence");
+        strcpy(persist_part.part_label, "rozOS persist");
+        if (block_register_partition(&persist_part) < 0) return;
+        /* বুট অপশন "persistreset": সব মুছে নতুন করে (কখনো নিজে থেকে মোছে না) */
+        if (!ext2_has_label(&persist_part, PERSIST_LABEL) || cmdline_has("persistreset")) {
+            ksnprintf(msg, sizeof(msg), "first boot from this pen drive: creating persistent storage on /dev/%s (%llu MiB), please wait...",
+                      persist_part.name,
+                      (unsigned long long)(persist_part.sector_count * persist_part.sector_size / (1024 * 1024)));
+            print_warn(msg);
+            err = ext2_mkfs(&persist_part, PERSIST_LABEL);
+            if (err < 0) {
+                ksnprintf(msg, sizeof(msg), "could not create persistent storage: %s", kstrerror(err));
+                print_warn(msg);
+                return;
+            }
+            persist_created = 1;
+        }
+        persist_dev = &persist_part;
+        ksnprintf(msg, sizeof(msg), "persistent storage on /dev/%s (after the %llu MiB ISO)", persist_part.name,
+                  (unsigned long long)(iso / (1024 * 1024)));
+        print_ok(msg);
+        return;
+    }
+}
+
+/* ISO বদলালে নতুন ফাইল বসানোর সময় এগুলো আগেরটাই থাকে */
+static int persist_keep(const char *p)
+{
+    static const char *const keep[] = {
+        "/etc/rozos.conf", "/etc/rozpkg.conf", "/etc/hosts", "/etc/resolv.conf", "/etc/passwd",
+        "/etc/group", "/etc/console-font", NULL
+    };
+    int i;
+    if (!strncmp(p, "/home/", 6)) return 1;
+    for (i = 0; keep[i]; i++) if (!strcmp(p, keep[i])) return 1;
+    return 0;
+}
+
+/* স্থায়ী root mount হওয়ার পরে: প্রথমবার বা ISO বদলালে initrd থেকে ফাইল */
+static void persist_fill(void)
+{
+    char want[96], have[96] = "", msg[160];
+    struct initrd_stats st;
+    int fd, err;
+    int64_t r;
+    ksnprintf(want, sizeof(want), "%s %s\n", ROZOS_VERSION, rozos_build_id);
+    fd = vfs_open(PERSIST_MARK, O_RDONLY);
+    if (fd >= 0) {
+        r = vfs_read(fd, have, sizeof(have) - 1);
+        have[r > 0 ? r : 0] = '\0';
+        vfs_close(fd);
+    }
+    if (!strcmp(want, have)) return;
+    if (!persist_created) print_warn("this ISO is a different build: updating the system files (your files and settings stay)");
+    err = initrd_load_keep("/", &st, persist_created ? NULL : persist_keep);
+    if (err < 0 || st.errors) {
+        ksnprintf(msg, sizeof(msg), "persistent storage: copying the system files: %llu errors",
+                  (unsigned long long)st.errors);
+        print_warn(msg);
+    } else {
+        ksnprintf(msg, sizeof(msg), "persistent storage: %llu system files copied from the ISO",
+                  (unsigned long long)st.files);
+        print_ok(msg);
+    }
+    fd = vfs_open(PERSIST_MARK, O_WRONLY | O_CREAT | O_TRUNC);
+    if (fd >= 0) {
+        vfs_write(fd, want, strlen(want));
+        vfs_close(fd);
+    }
+    block_sync(NULL);
+}
+
 static void init_storage(void)
 {
     char msg[128];
@@ -561,6 +702,7 @@ static void init_storage(void)
         }
     }
     protect_foreign_disks();                         /* ধাপ ১৫খ */
+    persist_setup();                                 /* ধাপ ২৪খ */
 }
 
 /* ext2 পাওয়া প্রথম ডিস্ক "/"-এ; সফল হলে 1
@@ -570,6 +712,15 @@ static int mount_disk_root(void)
     char msg[128];
     size_t i;
     int pass;
+    /* ধাপ ২৪খ: বুটের পেন ড্রাইভের স্থায়ী জায়গা সবার আগে */
+    if (persist_dev && vfs_mount("/", "ext2", persist_dev->name) == 0) {
+        struct vfs_statfs sf;
+        vfs_statfs("/", &sf);
+        ksnprintf(msg, sizeof(msg), "persistent storage /dev/%s mounted on / (%llu MiB free)", persist_dev->name,
+                  (unsigned long long)(sf.free_blocks * sf.block_size / (1024 * 1024)));
+        print_ok(msg);
+        return 2;
+    }
     /* ধাপ ১৫খ: আগে "rozOS root" নামের partition (আসল কম্পিউটারে অন্য Linux-এর ext2 নয়),
      * না পেলে আগের মতো প্রথম ext2 */
     for (pass = 0; pass < 2; pass++)
@@ -641,7 +792,9 @@ static void init_vfs(void)
 
     disk_root = mount_disk_root();
     if (disk_root) {
-        if (bootinfo()->module_count) {
+        if (disk_root == 2) {
+            persist_fill();                          /* ধাপ ২৪খ */
+        } else if (bootinfo()->module_count) {
             print_ok("initrd present but not used: root is on disk");
         }
         vfs_mkdir_p("/tmp");
@@ -653,7 +806,7 @@ static void init_vfs(void)
         } else {
             print_ok("tmpfs mounted on /tmp");
         }
-        mount_boot_partition();
+        if (disk_root != 2) mount_boot_partition();  /* ধাপ ২৪খ: ISO-তে /boot নেই */
     } else {
         err = vfs_mount("/", "tmpfs", NULL);
         if (err < 0) {

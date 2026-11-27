@@ -136,6 +136,19 @@ static const char *base_name(const char *path)
     return last;
 }
 
+/* ধাপ ২৪খ: keep(path) সত্য আর ফাইলটা আগে থেকেই থাকলে লেখা হয় না (স্থায়ী root-এ
+ * নতুন সংস্করণের ফাইল বসানোর সময় ব্যবহারকারীর ফাইল আর সেটিং রাখা) */
+static int (*keep_fn)(const char *path);
+
+int initrd_load_keep(const char *dest, struct initrd_stats *st, int (*keep)(const char *path))
+{
+    int r;
+    keep_fn = keep;
+    r = initrd_load(dest, st);
+    keep_fn = NULL;
+    return r;
+}
+
 int initrd_load(const char *dest, struct initrd_stats *st)
 {
     const struct boot_module *m = find_initrd();
@@ -180,8 +193,11 @@ int initrd_load(const char *dest, struct initrd_stats *st)
                     st->errors++;
                 }
             } else if (h->typeflag == '0' || h->typeflag == '\0') {
+                struct vfs_stat ks;
                 if (!strcmp(base_name(path), ".keep")) {
                     /* শুধু খালি ডিরেক্টরি রাখার চিহ্ন — ফাইলটা লাগবে না */
+                } else if (keep_fn && keep_fn(path) && vfs_stat(path, &ks) == 0) {
+                    /* ধাপ ২৪খ: ব্যবহারকারীর ফাইল — আগেরটাই থাকে */
                 } else {
                     char parent[VFS_PATH_MAX], name[VFS_NAME_MAX + 1];
                     int fd;

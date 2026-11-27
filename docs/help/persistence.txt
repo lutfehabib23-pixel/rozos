@@ -1,0 +1,30 @@
+# Persistence: the ISO pen drive keeps your files (phase 24b)
+When rozos.iso is written to a pen drive as a whole image (Rufus "DD
+Image", `dd`, balenaEtcher) and the computer boots from it, rozOS keeps
+everything you do on that pen drive: files on the desktop, the
+wallpaper and other settings, installed packages (rozpkg), your
+programs in /home.
+
+How it works:
+  - The ISO takes the first part of the drive (about 80 MB). From 1 GiB
+    to the end rozOS keeps an ext2 file system named "rozOS-persist".
+    No partition is added, so Windows still sees the drive as before.
+  - First boot from the drive: the screen says "creating persistent
+    storage ... please wait" (a few seconds; on a 64 GB drive about
+    65 MB are written). Then all system files are copied there.
+  - Every later boot: / is this ext2 (`mount` shows sdX9 on /).
+  - A new rozos.iso written over the same drive (DD again) keeps it:
+    on the next boot the system files are updated from the new ISO;
+    /home and /etc/rozos.conf, rozpkg.conf, hosts, resolv.conf, passwd,
+    group, console-font stay as you left them.
+
+Needs a drive of at least 1.5 GiB. The boot menu entry "rozOS (live: do
+not use or save the persistent storage)" (boot option `nopersist`) runs
+only from memory once.
+The rozOS kernel finds the drive by its MBR signature from the
+bootloader, or else by the ISO name "ROZOS" on a removable drive.
+To start from scratch: boot once with the option `persistreset` (edit
+the Limine entry with E, add it to the cmdline line, then F10): the
+area is made new and empty and the system files are copied again.
+It is never erased by itself.
+Also: [[real-hardware]], [[mount]], [[boot]].

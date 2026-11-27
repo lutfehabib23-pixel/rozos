@@ -22,6 +22,8 @@ struct initrd_stats {
 
 /* initrd খুঁজে dest ডিরেক্টরিতে খোলা; সফল হলে 0, মডিউল না পেলে -ENOENT */
 int initrd_load(const char *dest, struct initrd_stats *st);
+/* ধাপ ২৪খ: একই, কিন্তু keep(path) সত্য হলে আগে থেকে থাকা ফাইল বদলায় না */
+int initrd_load_keep(const char *dest, struct initrd_stats *st, int (*keep)(const char *path));
 
 /* tmpfs ফাইলসিস্টেম (fs/tmpfs.c) */
 extern const struct filesystem tmpfs_filesystem;

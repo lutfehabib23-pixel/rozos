@@ -521,6 +521,18 @@ static void msc_automount(struct usb_dev *d)
         const char *fs;
         if (b != &d->bdev && b->parent != &d->bdev) continue;
         if (b == &d->bdev && d->bdev.partitions) continue;
+        /* ধাপ ২৪খ: স্থায়ী জায়গা (আগেই / হিসেবে mount) বা অন্য কোথাও mount করা ডিভাইস নয় —
+         * একই ext2 দুবার mount করলে নষ্ট হবে */
+        if (!strcmp(b->part_label, "rozOS persist")) continue;
+        {
+            size_t k;
+            int busy = 0;
+            for (k = 0; k < vfs_mount_count(); k++) {
+                const struct mount *m = vfs_mount_at(k);
+                if (m && m->active && !strcmp(m->source, b->name)) busy = 1;
+            }
+            if (busy) continue;
+        }
         fs = fs_probe_name(b);
         if (strcmp(fs, "ext2") && strncmp(fs, "fat", 3)) continue;
         for (n = 1; n < 10; n++) {

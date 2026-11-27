@@ -28,6 +28,7 @@
 #include <rozos/clock.h>
 #include <rozos/compiler.h>
 #include <rozos/printf.h>
+#include <rozos/random.h>
 
 #define EXT2_MAGIC              0xEF53
 #define EXT2_ROOT_INO           2
@@ -1193,3 +1194,189 @@ static int ext2_umount(struct vnode *root)
 }
 
 const struct filesystem ext2_filesystem = { "ext2", ext2_mount, ext2_statfs, ext2_info, ext2_umount };
+
+/* ---------- ধাপ ২৪খ: ext2 বানানো (mkfs) ----------
+ * পেন ড্রাইভের স্থায়ী জায়গার জন্য: block 4096, প্রতি group 32768 block (128 MiB) আর
+ * 1024 inode (128 বাইট), sparse_super + large_file + filetype; root (2) আর lost+found (11)।
+ * সব bitmap আর inode table শূন্য দিয়ে লেখা হয় (৬৪ GB-এ ~৬৫ MB লেখা, শুধু প্রথমবার)। */
+#define MKFS_BS      4096u
+#define MKFS_BPG     32768u
+#define MKFS_IPG     1024u
+#define MKFS_ITB     (MKFS_IPG * 128u / MKFS_BS)        /* inode table: 32 block */
+
+static int mkfs_has_super(uint32_t g)
+{
+    uint32_t p;
+    if (g <= 1) return 1;
+    for (p = 3; p <= g; p *= 3) if (p == g) return 1;
+    for (p = 5; p <= g; p *= 5) if (p == g) return 1;
+    for (p = 7; p <= g; p *= 7) if (p == g) return 1;
+    return 0;
+}
+
+static int mkfs_zero(struct block_device *dev, uint64_t off, uint64_t len, uint8_t *zero, size_t zlen)
+{
+    while (len) {
+        size_t n = len > zlen ? zlen : (size_t)len;
+        if (block_write_bytes(dev, off, zero, n) < 0) return -EIO;
+        off += n;
+        len -= n;
+    }
+    return 0;
+}
+
+int ext2_mkfs(struct block_device *dev, const char *label)
+{
+    uint64_t bytes = dev->sector_count * dev->sector_size;
+    uint32_t blocks, groups, gdt_blocks, g, first_meta, root_blk, lf_blk;
+    uint32_t free_blocks_total = 0, free_inodes_total = 0;
+    struct ext2_gd *gdt;
+    uint8_t *buf, *zero;
+    uint8_t sbraw[1024];
+    struct ext2_super *sb = (struct ext2_super *)sbraw;
+    struct ext2_inode ino;
+    struct ext2_dirent *de;
+    int err = 0;
+    const size_t zlen = 256 * 1024;
+
+    if (bytes / MKFS_BS > 0xFFFFFFF0ull) bytes = 0xFFFFFFF0ull * MKFS_BS;     /* ১৬ TB সীমা */
+    blocks = (uint32_t)(bytes / MKFS_BS);
+    groups = (blocks + MKFS_BPG - 1) / MKFS_BPG;
+    gdt_blocks = (groups * 32 + MKFS_BS - 1) / MKFS_BS;
+    /* শেষ group খুব ছোট হলে বাদ (metadata + কিছু ডেটার জায়গা লাগে) */
+    if (groups > 1 && blocks - (groups - 1) * MKFS_BPG < 1 + gdt_blocks + 2 + MKFS_ITB + 64) {
+        groups--;
+        blocks = groups * MKFS_BPG;
+        gdt_blocks = (groups * 32 + MKFS_BS - 1) / MKFS_BS;
+    }
+    if (groups == 0 || blocks < 1 + gdt_blocks + 2 + MKFS_ITB + 64) return -ENOSPC;
+
+    gdt = (struct ext2_gd *)kzalloc((size_t)gdt_blocks * MKFS_BS);
+    buf = (uint8_t *)kmalloc(MKFS_BS);
+    zero = (uint8_t *)kzalloc(zlen);
+    if (!gdt || !buf || !zero) { err = -ENOMEM; goto out; }
+
+    /* group-গুলোর বিন্যাস আর bitmap */
+    for (g = 0; g < groups; g++) {
+        uint32_t start = g * MKFS_BPG;
+        uint32_t nblk = (g == groups - 1) ? blocks - start : MKFS_BPG;
+        uint32_t used, i;
+        first_meta = start + (mkfs_has_super(g) ? 1 + gdt_blocks : 0);
+        gdt[g].block_bitmap = first_meta;
+        gdt[g].inode_bitmap = first_meta + 1;
+        gdt[g].inode_table = first_meta + 2;
+        used = first_meta - start + 2 + MKFS_ITB;
+        if (g == 0) used += 2;                                  /* root আর lost+found-এর ডিরেক্টরি block */
+        gdt[g].free_blocks = (uint16_t)(nblk - used);
+        gdt[g].free_inodes = (uint16_t)(g == 0 ? MKFS_IPG - 11 : MKFS_IPG);
+        gdt[g].used_dirs = (uint16_t)(g == 0 ? 2 : 0);
+        free_blocks_total += nblk - used;
+        free_inodes_total += gdt[g].free_inodes;
+
+        /* block bitmap: শুরুর used টা বিট, আর group-এর বাইরের বিট (শেষ group) */
+        memset(buf, 0, MKFS_BS);
+        for (i = 0; i < used; i++) buf[i >> 3] |= (uint8_t)(1u << (i & 7));
+        for (i = nblk; i < MKFS_BPG; i++) buf[i >> 3] |= (uint8_t)(1u << (i & 7));
+        if ((err = block_write_bytes(dev, (uint64_t)gdt[g].block_bitmap * MKFS_BS, buf, MKFS_BS)) < 0) goto out;
+        /* inode bitmap: group 0-তে ১-১১ ব্যবহৃত; IPG-র পরের বিট সব ১ */
+        memset(buf, 0, MKFS_BS);
+        if (g == 0) for (i = 0; i < 11; i++) buf[i >> 3] |= (uint8_t)(1u << (i & 7));
+        for (i = MKFS_IPG; i < MKFS_BS * 8; i++) buf[i >> 3] |= (uint8_t)(1u << (i & 7));
+        if ((err = block_write_bytes(dev, (uint64_t)gdt[g].inode_bitmap * MKFS_BS, buf, MKFS_BS)) < 0) goto out;
+        if ((err = mkfs_zero(dev, (uint64_t)gdt[g].inode_table * MKFS_BS, (uint64_t)MKFS_ITB * MKFS_BS, zero, zlen)) < 0)
+            goto out;
+    }
+    root_blk = gdt[0].inode_table + MKFS_ITB;
+    lf_blk = root_blk + 1;
+
+    /* root ডিরেক্টরি: . .. lost+found */
+    memset(buf, 0, MKFS_BS);
+    de = (struct ext2_dirent *)buf;
+    de->inode = EXT2_ROOT_INO; de->rec_len = 12; de->name_len = 1; de->file_type = FT_DIR; de->name[0] = '.';
+    de = (struct ext2_dirent *)(buf + 12);
+    de->inode = EXT2_ROOT_INO; de->rec_len = 12; de->name_len = 2; de->file_type = FT_DIR;
+    de->name[0] = '.'; de->name[1] = '.';
+    de = (struct ext2_dirent *)(buf + 24);
+    de->inode = 11; de->rec_len = (uint16_t)(MKFS_BS - 24); de->name_len = 10; de->file_type = FT_DIR;
+    memcpy(de->name, "lost+found", 10);
+    if ((err = block_write_bytes(dev, (uint64_t)root_blk * MKFS_BS, buf, MKFS_BS)) < 0) goto out;
+    memset(buf, 0, MKFS_BS);
+    de = (struct ext2_dirent *)buf;
+    de->inode = 11; de->rec_len = 12; de->name_len = 1; de->file_type = FT_DIR; de->name[0] = '.';
+    de = (struct ext2_dirent *)(buf + 12);
+    de->inode = EXT2_ROOT_INO; de->rec_len = (uint16_t)(MKFS_BS - 12); de->name_len = 2; de->file_type = FT_DIR;
+    de->name[0] = '.'; de->name[1] = '.';
+    if ((err = block_write_bytes(dev, (uint64_t)lf_blk * MKFS_BS, buf, MKFS_BS)) < 0) goto out;
+
+    /* inode 2 আর 11 */
+    memset(&ino, 0, sizeof(ino));
+    ino.mode = (uint16_t)(S_IFDIR | 0755);
+    ino.size = MKFS_BS;
+    ino.atime = ino.ctime = ino.mtime = now32();
+    ino.links = 3;
+    ino.blocks = MKFS_BS / 512;
+    ino.block[0] = root_blk;
+    if ((err = block_write_bytes(dev, (uint64_t)gdt[0].inode_table * MKFS_BS + 1 * 128, &ino, 128)) < 0) goto out;
+    ino.mode = (uint16_t)(S_IFDIR | 0700);
+    ino.links = 2;
+    ino.block[0] = lf_blk;
+    if ((err = block_write_bytes(dev, (uint64_t)gdt[0].inode_table * MKFS_BS + 10 * 128, &ino, 128)) < 0) goto out;
+
+    /* superblock আর group descriptor (sparse_super-এর group-গুলোতে কপি) */
+    memset(sbraw, 0, sizeof(sbraw));
+    sb->inodes_count = groups * MKFS_IPG;
+    sb->blocks_count = blocks;
+    sb->free_blocks_count = free_blocks_total;
+    sb->free_inodes_count = free_inodes_total;
+    sb->first_data_block = 0;
+    sb->log_block_size = 2;
+    sb->log_frag_size = 2;
+    sb->blocks_per_group = MKFS_BPG;
+    sb->frags_per_group = MKFS_BPG;
+    sb->inodes_per_group = MKFS_IPG;
+    sb->wtime = sb->lastcheck = now32();
+    sb->max_mnt_count = 0xFFFF;
+    sb->magic = EXT2_MAGIC;
+    sb->state = 1;
+    sb->errors = 1;
+    sb->rev_level = 1;
+    sb->first_ino = 11;
+    sb->inode_size = 128;
+    sb->feature_incompat = EXT2_INCOMPAT_FILETYPE;
+    sb->feature_ro_compat = EXT2_RO_SPARSE_SUPER | EXT2_RO_LARGE_FILE;
+    random_get(sb->uuid, sizeof(sb->uuid));
+    strncpy(sb->volume_name, label ? label : "", sizeof(sb->volume_name));
+    for (g = 0; g < groups; g++) {
+        uint64_t base = (uint64_t)g * MKFS_BPG * MKFS_BS;
+        if (!mkfs_has_super(g)) continue;
+        sb->block_group_nr = (uint16_t)g;
+        if (g == 0) {
+            memset(buf, 0, MKFS_BS);                        /* block 0: প্রথম 1024 বাইট boot এলাকা */
+            memcpy(buf + 1024, sbraw, 1024);
+            if ((err = block_write_bytes(dev, 0, buf, MKFS_BS)) < 0) goto out;
+        } else {
+            memset(buf, 0, MKFS_BS);
+            memcpy(buf, sbraw, 1024);
+            if ((err = block_write_bytes(dev, base, buf, MKFS_BS)) < 0) goto out;
+        }
+        if ((err = block_write_bytes(dev, base + MKFS_BS, gdt, (size_t)gdt_blocks * MKFS_BS)) < 0) goto out;
+    }
+    block_sync(dev);
+out:
+    kfree(gdt);
+    kfree(buf);
+    kfree(zero);
+    return err < 0 ? err : 0;
+}
+
+/* ধাপ ২৪খ: ডিভাইসে ext2 আছে আর তার নাম (volume name) label কিনা */
+int ext2_has_label(struct block_device *dev, const char *label)
+{
+    uint8_t raw[1024];
+    struct ext2_super *sb = (struct ext2_super *)raw;
+    char name[17];
+    if (block_read_bytes(dev, 1024, raw, sizeof(raw)) < 0 || sb->magic != EXT2_MAGIC) return 0;
+    memcpy(name, sb->volume_name, 16);
+    name[16] = '\0';
+    return !strcmp(name, label);
+}

@@ -27,6 +27,8 @@ struct boot_module {
     uint64_t size;
     char     path[BOOTINFO_STR_MAX];
     char     cmdline[BOOTINFO_STR_MAX];
+    uint32_t mbr_disk_id;                /* ধাপ ২৪খ: যে ডিস্ক থেকে এল তার MBR signature (0 = অজানা) */
+    uint32_t media_type;                 /* LIMINE_MEDIA_TYPE_* */
 };
 
 struct bootinfo {

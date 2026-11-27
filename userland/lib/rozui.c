@@ -1146,6 +1146,64 @@ int ui_msgbox(const char *title, const char *text, int type)
     return answer;
 }
 
+/* ধাপ ২৪খ: নিজের ছোট উইন্ডোতে বার্তা — যে প্রোগ্রামের আর কোনো উইন্ডো নেই (deldlg ইত্যাদি)।
+ * ui_msgbox উইন্ডোর ভেতরে আরেকটা বাক্স আঁকে; এটা উইন্ডোটাই বাক্স: শিরোনাম = title,
+ * মাপ লেখা অনুযায়ী। gfx_init_window আর gfx_quit নিজেই করে। ফেরত ui_msgbox-এর মতো। */
+int ui_msgbox_window(const char *title, const char *text, int type)
+{
+    static const char *const names[4][3] = {
+        { "OK", NULL, NULL }, { "OK", "Cancel", NULL }, { "Yes", "No", NULL }, { "Yes", "No", "Cancel" }
+    };
+    static const int vals[4][3] = {
+        { UI_OK, 0, 0 }, { UI_OK, UI_CANCEL, 0 }, { UI_YES, UI_NO, 0 }, { UI_YES, UI_NO, UI_CANCEL }
+    };
+    ui_ctx u;
+    char lines[12][96];
+    int kind = type & 3, nb = kind == 0 ? 1 : kind == 3 ? 3 : 2, icon = (type & 0xF0) != 0;
+    int nl = 0, n = 0, longest = 0, w, h, answer = -1, i;
+    const char *p;
+    if (!text) text = "";
+    for (p = text;; p++) {                       /* লাইনে ভাগ (৯০ অক্ষরে ভাঙা) */
+        if (*p == '\n' || *p == '\0' || n >= 90) {
+            if (nl < 12) { lines[nl][n] = '\0'; nl++; }
+            n = 0;
+            if (*p == '\0') break;
+            if (*p == '\n') continue;
+        }
+        if (nl < 12) lines[nl][n++] = *p;
+    }
+    for (i = 0; i < nl; i++) {
+        int tw = gfx_text_width(NULL, lines[i]);
+        if (tw > longest) longest = tw;
+    }
+    w = longest + 50 + (icon ? 48 : 0);
+    if (w < nb * 92 + 30) w = nb * 92 + 30;
+    if (w < 320) w = 320;
+    h = nl * 20 + 80;
+    if (h < 120) h = 120;
+    if (gfx_init_window(title ? title : "", w, h) < 0) return UI_CANCEL;   /* লেখা মেপে ঠিক মাপে */
+    ui_init(&u);
+    u.want_focus = 1;
+    ui_ask_before_close(&u, 1);
+    while (answer < 0 && ui_run(&u)) {
+        int tx = 20 + (icon ? 48 : 0), ty = 20, bx;
+        gfx_clear(u.s, dark3d.face);
+        if (icon) mb_symbol(u.s, 18, 16, type);
+        for (i = 0; i < nl; i++, ty += 20) gfx_text(u.s, NULL, tx, ty, lines[i], GFX_WHITE);
+        bx = u.w - nb * 92 - 10;
+        for (i = 0; i < nb; i++)
+            if (ui_do_button(&u, bx + i * 92, u.h - 40, 84, 28, names[kind][i])) answer = vals[kind][i];
+        if (u.key == '\n') answer = vals[kind][0];
+        else if (u.key == GFX_KEY_ESC) answer = kind == 0 ? UI_OK : kind == 2 ? UI_NO : UI_CANCEL;
+        else if ((u.key == 'y' || u.key == 'Y') && kind >= 2) answer = UI_YES;
+        else if ((u.key == 'n' || u.key == 'N') && kind >= 2) answer = UI_NO;
+        if (u.closing) answer = kind == 0 ? UI_OK : kind == 2 ? UI_NO : UI_CANCEL;
+    }
+    if (answer < 0) answer = UI_CANCEL;
+    gfx_quit();
+    return answer;
+}
+
 int ui_inputbox(const char *title, const char *prompt, char *buf, int size)
 {
     struct dlg d;

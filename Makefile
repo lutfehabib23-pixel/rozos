@@ -928,7 +928,7 @@ define make_iso
 	@cp limine.conf $(LIMINE_DIR)/limine-bios.sys $(LIMINE_DIR)/limine-bios-cd.bin \
 	    $(LIMINE_DIR)/limine-uefi-cd.bin $(3)/boot/limine/
 	@cp $(LIMINE_DIR)/BOOTX64.EFI $(LIMINE_DIR)/BOOTIA32.EFI $(3)/EFI/BOOT/
-	@xorriso -as mkisofs -R -r -J \
+	@xorriso -as mkisofs -V ROZOS -R -r -J \
 	    -b boot/limine/limine-bios-cd.bin -no-emul-boot -boot-load-size 4 -boot-info-table \
 	    -hfsplus -apm-block-size 2048 \
 	    --efi-boot boot/limine/limine-uefi-cd.bin -efi-boot-part --efi-boot-image \

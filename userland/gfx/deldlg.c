@@ -69,30 +69,23 @@ int main(int argc, char **argv)
     base = strrchr(path, '/');
     base = base ? base + 1 : path;
     snprintf(shown, sizeof(shown), "%.60s", base);
-    if (gfx_init_window("Delete", 460, 150) < 0) {
-        fprintf(stderr, "deldlg: needs the desktop\n");
-        return 2;
-    }
+    /* ধাপ ২৪খ: আলাদা উইন্ডোর ভেতরে বাক্স নয় — বার্তাটাই নিজের উইন্ডো (ui_msgbox_window) */
     if (rozlock_is_lockfile(path)) {
         rozlock_display_name(path, shown, sizeof(shown));
-        ui_msgbox("Delete", "A locked folder cannot be deleted.\nUnlock it first.", UI_MB_OK | UI_MB_WARN);
-        gfx_quit();
+        ui_msgbox_window("Delete", "A locked folder cannot be deleted.\nUnlock it first.", UI_MB_OK | UI_MB_WARN);
         return 1;
     }
     snprintf(m, sizeof(m), isdir ? "Are you sure you want to delete the folder\n\"%s\" and everything in it?"
                                  : "Are you sure you want to delete\n\"%s\"?", shown);
-    if (ui_msgbox("Delete", m, UI_MB_YESNO | UI_MB_WARN) != UI_YES) {
-        gfx_quit();
+    if (ui_msgbox_window("Delete", m, UI_MB_YESNO | UI_MB_WARN) != UI_YES) {
         return 1;
     }
     r = remove_tree(path);
     if (r != 0) {
         if (errno == EPERM) snprintf(m, sizeof(m), "Cannot delete everything:\nthere is a locked folder inside.\nUnlock it first.");
         else snprintf(m, sizeof(m), "Cannot delete \"%s\":\n%s", shown, strerror(errno));
-        ui_msgbox("Delete", m, UI_MB_OK | UI_MB_ERROR);
-        gfx_quit();
+        ui_msgbox_window("Delete", m, UI_MB_OK | UI_MB_ERROR);
         return 2;
     }
-    gfx_quit();
     return 0;
 }

@@ -23,7 +23,10 @@ The other way: `make CROSS= iso`, then Rufus with GPT, UEFI (non CSM) and
 
 == Boot ==
 F12 at power-on (Gigabyte; F11/F8/Esc on others) and choose "UEFI: <pen
-drive>". In the Limine menu, "rozOS (debug: show every boot step)" prints
+drive>". F12 is needed again after every restart unless the pen drive
+is first in the BIOS boot order: Gigabyte - press DEL at power-on, Boot
+tab, "Boot Option #1" = "UEFI: <pen drive>", F10 to save (the drive
+must be plugged in while you do this). In the Limine menu, "rozOS (debug: show every boot step)" prints
 each step (text mode) - if it stops, take a photo of the screen: the last
 lines show where.
 
@@ -32,8 +35,10 @@ Works: the screen (UEFI framebuffer), keyboard and mouse (USB or PS/2),
 SATA and NVMe disks (read-only), USB pen drives, wired network on
 Realtek RTL8111/8168 or Intel e1000 cards (phase 22; `kmon` then `nic`
 if it does not work - see [[network]]). Not yet: sound, Wi-Fi, more
-than one CPU core (all run on one). Everything runs from memory:
-changes are lost at power off - save to the pen drive (/mnt/usb).
+than one CPU core (all run on one). With the DD (Rufus "DD Image")
+pen drive everything is kept since phase 24b - see [[persistence]];
+with the FAT32 copy (`make usb`) it all runs from memory and changes
+are lost at power off - save to the pen drive (/mnt/usb).
 "[kernel] iretq to user failed ... SS=0018" on AMD Ryzen (desktop or a
 big build) was fixed in phase 19k: sysret on AMD does not set the RPL of
 SS, so the STAR MSR now holds it. If the message comes again, take a

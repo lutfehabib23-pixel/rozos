@@ -374,6 +374,33 @@ int main(void)
 }
 @end
 
+@entry ui_msgbox_window
+@also msgbox_window question_window
+@header rozui.h
+@syntax int ui_msgbox_window(const char *title, const char *text, int type);
+@summary A message box that is its own small window (phase 24b).
+@desc
+For a program that has no window of its own and only asks one question
+(like deldlg, the desktop's Delete...): opens a window just big enough
+for the text and the buttons, waits for the answer and closes it again
+- do not call gfx_init_window or gfx_quit yourself. type is as for
+ui_msgbox. Inside a program that already has a window use ui_msgbox.
+@returns
+UI_OK, UI_YES, UI_NO or UI_CANCEL ([X] or Esc = No/Cancel).
+@see ui_msgbox
+@check compile
+@example
+#include <stdio.h>
+#include <rozui.h>
+
+int main(void)
+{
+    if (ui_msgbox_window("Question", "Make the file?", UI_MB_YESNO | UI_MB_QUESTION) == UI_YES)
+        printf("yes\n");
+    return 0;
+}
+@end
+
 @entry ui_passwordbox
 @also ui_do_password password secret
 @header rozui.h
