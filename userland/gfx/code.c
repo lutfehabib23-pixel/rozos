@@ -25,6 +25,7 @@
 #include <sys/wait.h>
 #include <rozgfx.h>
 #include <rozui.h>
+#include <rozbn.h>
 
 #define TOOL_H   32
 #define STATUS_H 22
@@ -134,10 +135,56 @@ static void set_text(const char *t, size_t len)
 }
 
 /* ---------- স্তম্ভ (ট্যাব বুঝে) ---------- */
+/* ধাপ ২৩গ: বাংলা (ASCII-র বাইরের) অক্ষরের ঘর-সংখ্যা — পুরো অংশটা shaping-এ কত চওড়া হয়
+ * (যুক্তাক্ষর সরু, রেফ/কার ০) সেই মাপে ভাগ করা; ফল cache-এ (অংশের লেখা + অবস্থান ধরে) */
+static rozbn_comp bcomp;                         /* ধাপ ২৩গ: বাংলা টাইপের চলতি শব্দ */
+
+static int bn_cells(const struct line *l, int i)
+{
+    static struct { unsigned key; short cells; short gen; } cache[1024];
+    static int gen = 1, last_cw = -1;
+    char tmp[600];
+    int s = i, e = i, nx = i + 1, wa, wb;
+    unsigned h = 2166136261u;
+    if (!gfx_font_is_ttf(font)) return 1;
+    if (cw != last_cw) { last_cw = cw; gen++; }                 /* ফন্ট বদলালে পুরোনো cache বাতিল */
+    while (s > 0 && (unsigned char)l->s[s - 1] >= 0x80) s--;
+    while (e < l->len && (unsigned char)l->s[e] >= 0x80) e++;
+    while (nx < l->len && CONT(l->s[nx])) nx++;
+    if (e - s >= (int)sizeof(tmp)) return 1;
+    for (wa = s; wa < e; wa++) h = (h ^ (unsigned char)l->s[wa]) * 16777619u;
+    h = (h ^ (unsigned)(i - s)) * 16777619u;
+    {
+        int slot = (int)(h % 1024);
+        if (cache[slot].gen == gen && cache[slot].key == h) return cache[slot].cells;
+        memcpy(tmp, l->s + s, (size_t)(i - s));
+        tmp[i - s] = '\0';
+        wa = i > s ? gfx_text_width(font, tmp) : 0;
+        memcpy(tmp, l->s + s, (size_t)(nx - s));
+        tmp[nx - s] = '\0';
+        wb = gfx_text_width(font, tmp);
+        cache[slot].key = h;
+        cache[slot].gen = (short)gen;
+        cache[slot].cells = (short)((wb + cw / 2) / cw - (wa + cw / 2) / cw);
+        if (cache[slot].cells < 0) cache[slot].cells = 0;
+        return cache[slot].cells;
+    }
+}
+
+/* i বাইটের অক্ষর কত ঘর নেয় (r = এ পর্যন্ত ঘর, ট্যাবের জন্য) */
+static int cell_w(const struct line *l, int i, int r)
+{
+    unsigned char c = (unsigned char)l->s[i];
+    if (c == '\t') return TABW - r % TABW;
+    if (CONT(c)) return 0;
+    if (c >= 0x80) return bn_cells(l, i);
+    return 1;
+}
+
 static int render_x(const struct line *l, int x)
 {
     int i, r = 0;
-    for (i = 0; i < x && i < l->len; i++) r = l->s[i] == '\t' ? (r / TABW + 1) * TABW : CONT(l->s[i]) ? r : r + 1;
+    for (i = 0; i < x && i < l->len; i++) r += cell_w(l, i, r);
     return r;
 }
 
@@ -145,7 +192,7 @@ static int byte_at_render(const struct line *l, int want)
 {
     int i, r = 0;
     for (i = 0; i < l->len; i++) {
-        int nr = l->s[i] == '\t' ? (r / TABW + 1) * TABW : CONT(l->s[i]) ? r : r + 1;
+        int nr = r + cell_w(l, i, r);                          /* ধাপ ২৩গ */
         if (nr > want) {
             int k = (want - r) * 2 >= nr - r ? i + 1 : i;
             while (k < l->len && CONT(l->s[k])) k++;          /* অক্ষরের মাঝখানে নয় */
@@ -959,7 +1006,14 @@ static void handle_key(int k, int mods, int page)
 {
     int shift = mods & GFX_MOD_SHIFT, ctrl = mods & GFX_MOD_CTRL;
     int nav = k >= GFX_KEY_UP && k <= GFX_KEY_PAGE_DOWN;
+    if (rozbn_is_toggle_key(k, mods)) {             /* ধাপ ২৩গ: Ctrl+Space = বাংলা/ইংরেজি */
+        rozbn_reset(&bcomp);
+        snprintf(status_msg, sizeof(status_msg), rozbn_toggle() ? "Bangla typing (Avro phonetic) - Ctrl+Space for English"
+                                                                : "English typing - Ctrl+Space for Bangla");
+        return;
+    }
     if (nav) {
+        rozbn_reset(&bcomp);
         if (shift && !sel_on) { sel_on = 1; sx = cx; sy = cy; }
         if (!shift) sel_on = 0;
         typing_run = 0;
@@ -997,6 +1051,22 @@ static void handle_key(int k, int mods, int page)
         return;
     }
     want_col = -1;
+    if (rozbn_mode() && !ctrl) {                     /* ধাপ ২৩গ: অভ্র phonetic — শব্দটা আবার বাংলা করে বসানো */
+        int del = 0;
+        char ins[256];
+        int had = bcomp.rlen > 0;
+        if (rozbn_key(&bcomp, k, &del, ins, sizeof(ins))) {
+            undo_point(1);
+            if (!had) delete_selection();
+            if (del > cx) del = cx;
+            if (del) delete_range(cy, cx - del, cy, cx);
+            if (ins[0]) insert_text(ins, (int)strlen(ins));
+            follow_cursor = 1;
+            return;
+        }
+    } else {
+        rozbn_reset(&bcomp);
+    }
     switch (k) {
     case 2: do_action(M_COMPILE); return;            /* Ctrl+B / Ctrl+R — মেনুতেও আছে */
     case 18: do_action(M_RUN); return;
@@ -1109,15 +1179,25 @@ static void draw_editor(int ex, int ey, int ew, int eh, int gut)
         color_line(l, l->st, col);
         gfx_set_clip(s, x0 - 2, ey + 2, ew - gut - 8, eh - 4);
         for (i = 0; i <= l->len; i++) {
-            int w = (i < l->len && l->s[i] == '\t') ? TABW - rx % TABW : (i < l->len && CONT(l->s[i])) ? 0 : 1;
+            int w = i < l->len ? cell_w(l, i, rx) : 1;          /* ধাপ ২৩গ */
             int sel = 0, px = x0 + (rx - left) * cw;
             if (has && ((ln > y1 || (ln == y1 && i >= x1)) && (ln < y2 || (ln == y2 && i < x2)))) sel = 1;
             if (has && i == l->len && ln >= y1 && ln < y2) sel = 1;        /* লাইনের শেষ ভাঙনও বাছাইয়ে */
             if (rx + w > left && px < ex + ew) {
                 if (sel) gfx_fill_rect(s, px, y, w * cw, chh, t->select);
-                if (i < l->len && l->s[i] != '\t' && l->s[i] != ' ' && w > 0) {
+                if (i < l->len && (unsigned char)l->s[i] >= 0x80 && !CONT(l->s[i]) && gfx_font_is_ttf(font)) {
+                    /* ধাপ ২৩গ: বাংলা অংশের শুরু হলে পুরো অংশ একসাথে সাজিয়ে (যুক্তাক্ষর) আঁকা */
+                    if (i == 0 || (unsigned char)l->s[i - 1] < 0x80) {
+                        char run[600];
+                        int e = i;
+                        while (e < l->len && (unsigned char)l->s[e] >= 0x80 && e - i < (int)sizeof(run) - 1) e++;
+                        memcpy(run, l->s + i, (size_t)(e - i));
+                        run[e - i] = '\0';
+                        gfx_text(s, font, px, y, run, col[i]);
+                    }
+                } else if (i < l->len && l->s[i] != '\t' && l->s[i] != ' ' && w > 0) {
                     unsigned char g = (unsigned char)l->s[i];
-                    if (g >= 0x80) g = 0xF9;                 /* UTF-8 অক্ষর: বিন্দু */
+                    if (g >= 0x80) g = 0xF9;                 /* PSF ফন্টে UTF-8 অক্ষর: বিন্দু */
                     gfx_glyph(s, font, px, y, g, col[i], field_bg(ln == cy && !has, sel));
                 }
             }
@@ -1194,6 +1274,7 @@ static void frame(void)
     {
         int x0 = 2 + gut + 6, over = ui_hover(&U, 0, ey, ew, eh);
         if (over && U.wheel) top += U.wheel * 3;
+        if (over && U.pressed) rozbn_reset(&bcomp);          /* ধাপ ২৩গ: ক্লিকে শব্দ শেষ */
         if ((over && U.pressed) || (dragging && (U.buttons & GFX_BUTTON_LEFT))) {
             int ln = top + (U.my - ey - 2) / chh, colr;
             if (U.my < ey + 2 && dragging) ln = top - 1;

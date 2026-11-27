@@ -18,6 +18,7 @@
 #include <sys/statvfs.h>
 #include <stdio.h>
 #include <rozgfx.h>
+#include <rozbn.h>
 #include <poll.h>
 #include <pty.h>
 #include <sys/un.h>
@@ -2114,6 +2115,37 @@ static void test_phase23b(void)
     gfx_font_free(f);
 }
 
+/* ধাপ ২৩গ: অভ্র phonetic আর টাইপের সময় শব্দ বদল */
+static void test_phase23c(void)
+{
+    char o1[64], o2[64], o3[64], o4[64], ins[64];
+    rozbn_comp c;
+    int del = 0, ok;
+    rozbn_convert("ami", o1, sizeof(o1));
+    rozbn_convert("shikkha", o2, sizeof(o2));
+    rozbn_convert("sondhya", o3, sizeof(o3));
+    rozbn_convert("karrtik", o4, sizeof(o4));
+    check(!strcmp(o1, "আমি") && !strcmp(o2, "শিক্ষা") && !strcmp(o3, "সন্ধ্যা") && !strcmp(o4, "কার্তিক"),
+          "Avro phonetic: ami shikkha sondhya karrtik");
+    rozbn_reset(&c);
+    ok = rozbn_key(&c, 'a', &del, ins, sizeof(ins)) && del == 0 && !strcmp(ins, "আ") &&
+         rozbn_key(&c, 'm', &del, ins, sizeof(ins)) && del == 3 && !strcmp(ins, "আম") &&
+         rozbn_key(&c, 'i', &del, ins, sizeof(ins)) && !strcmp(ins, "আমি") &&
+         !rozbn_key(&c, ' ', &del, ins, sizeof(ins)) && c.rlen == 0;
+    check(ok, "Bengali typing rewrites the word on each key (a, am, ami)");
+}
+
+/* ধাপ ২৪ক: ডেস্কটপের Delete... (deldlg), শান্ত বুট, নেটওয়ার্কের লিংক তথ্য */
+static void test_phase24a(void)
+{
+    struct utsname un;
+    struct rozos_netinfo ni;
+    check(access("/bin/deldlg", X_OK) == 0 && system("deldlg 2>/dev/null") != 0,
+          "deldlg exists and refuses to run without a path");
+    check(uname(&un) == 0 && !strncmp(un.release, "0.24.", 5), "kernel version 0.24.x");
+    check(rozos_netinfo(0, &ni) != 0 || ni.link_up <= 1, "netinfo reports the link state (LAN icon)");
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -2146,6 +2178,8 @@ int main(int argc, char **argv)
     test_phase19h();
     test_phase23a();
     test_phase23b();
+    test_phase23c();
+    test_phase24a();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

@@ -11,6 +11,10 @@ void kpanic(const char *fmt, ...)
     va_list ap;
 
     cpu_cli();
+    if (tty_quiet()) {                   /* ধাপ ২৪ক: শান্ত বুটেও প্যানিক পুরো দেখানো */
+        tty_set_quiet(0);
+        tty_screen_puts("\n");
+    }
     if (fb_graphics_mode()) {            /* ধাপ ১৩: গ্রাফিক্স প্রোগ্রাম চললেও বার্তা পর্দায় */
         fb_set_graphics(0);
         tty_refresh();

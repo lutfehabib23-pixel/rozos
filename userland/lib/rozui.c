@@ -8,6 +8,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include "rozui.h"
+#include "rozbn.h"
 
 /* ধাপ ১৪খ: ব্যবহারকারীর থিম — Ebony, Obsidian, Black, Dark Charcoal, Onyx, Jet Black,
  * White, Grey (আগের ধাপ ১৪ক-এর রং ছিল ওয়ালপেপার থেকে: #282C35 / #0D031B) */
@@ -188,9 +189,14 @@ void ui_icon(gfx_surface *s, int x, int y, char k, uint32_t c)
     case 'l':                                    /* ধাপ ১৯ছ: লক করা ফোল্ডার — ফোল্ডার + তালা */
         gfx_fill_rect(s, x + 1, y + 3, 6, 3, GFX_RGB(230, 180, 70));
         gfx_fill_rect(s, x + 1, y + 5, 14, 9, GFX_RGB(240, 196, 90));
-        gfx_circle(s, x + 11, y + 7, 2, GFX_RGB(60, 60, 60));
-        gfx_fill_rect(s, x + 8, y + 8, 7, 6, GFX_RGB(60, 60, 60));
-        gfx_fill_rect(s, x + 11, y + 10, 1, 2, GFX_RGB(240, 196, 90));
+        /* ধাপ ২৪ক: তালা বড় আর স্পষ্ট — ধূসর-রুপালি কড়া (দুই পিক্সেল), গাঢ় বডি,
+         * হালকা কিনারা আর সাদা চাবির ছিদ্র; হলুদ ফোল্ডারের ওপর আলাদা চোখে পড়ে */
+        gfx_circle(s, x + 11, y + 6, 3, GFX_RGB(200, 205, 215));
+        gfx_circle(s, x + 11, y + 6, 2, GFX_RGB(200, 205, 215));
+        gfx_fill_rect(s, x + 6, y + 8, 10, 8, GFX_RGB(200, 205, 215));
+        gfx_fill_rect(s, x + 7, y + 9, 8, 6, GFX_RGB(70, 72, 85));
+        gfx_fill_rect(s, x + 10, y + 10, 2, 2, GFX_RGB(250, 250, 250));
+        gfx_fill_rect(s, x + 10, y + 12, 2, 2, GFX_RGB(250, 250, 250));
         break;
     case 'k':                                    /* নতুন ফোল্ডার: ফোল্ডার + সবুজ যোগ */
         gfx_fill_rect(s, x + 1, y + 3, 6, 3, GFX_RGB(230, 180, 70));
@@ -585,6 +591,9 @@ static int take_focus(ui_ctx *u, int id, int over)
 }
 
 static int pw_mask;                      /* ধাপ ১৯ছ: ui_do_password চলার সময় 1 */
+static rozbn_comp tb_comp;               /* ধাপ ২৩গ: বাংলা টাইপের চলতি শব্দ */
+static int tb_comp_id;
+#define U8CONT(c) ((((unsigned char)(c)) & 0xC0) == 0x80)
 static gfx_font *list_font;              /* ধাপ ২৩ক: ui_do_list-এর ফন্ট (NULL = UI ফন্ট) */
 
 void ui_list_font(gfx_font *f) { list_font = f; }
@@ -605,7 +614,9 @@ static int tw_hit(const char *str, int from, int len, int px)
 {
     int i, best = from, bd = 1 << 30;
     for (i = from; i <= len; i++) {
-        int d = tw_n(str + from, i - from) - px;
+        int d;
+        if (i < len && U8CONT(str[i])) continue;      /* ধাপ ২৩গ: UTF-8 অক্ষরের মাঝে নয় */
+        d = tw_n(str + from, i - from) - px;
         if (d < 0) d = -d;
         if (d < bd) { bd = d; best = i; }
         else break;
@@ -639,17 +650,43 @@ int ui_do_textbox(ui_ctx *u, int x, int y, int w, char *buf, int size)
         u->focus_claimed |= u->pressed && over;
         if (u->tb_cur > len) u->tb_cur = len;
         cur = u->tb_cur;
+        if (tb_comp_id != id || u->pressed) { rozbn_reset(&tb_comp); tb_comp_id = id; }   /* ধাপ ২৩গ */
         if (u->key && !u->block) {
-            int k = u->key;
+            int k = u->key, del = 0;
+            char ins[256];
             u->key = 0;
-            if (k == '\n') ret = 2;
+            if (rozbn_is_toggle_key(k, u->mods)) {            /* ধাপ ২৩গ: Ctrl+Space = বাংলা/ইংরেজি */
+                rozbn_toggle();
+                rozbn_reset(&tb_comp);
+            } else if (!pw_mask && rozbn_mode() && rozbn_key(&tb_comp, k, &del, ins, sizeof(ins))) {
+                int n = (int)strlen(ins);
+                if (del > cur) del = cur;
+                memmove(buf + cur - del, buf + cur, (size_t)(len - cur + 1));
+                cur -= del;
+                len -= del;
+                if (len + n >= size) n = size - 1 - len;
+                if (n > 0) {
+                    memmove(buf + cur + n, buf + cur, (size_t)(len - cur + 1));
+                    memcpy(buf + cur, ins, (size_t)n);
+                    cur += n;
+                }
+                ret = 1;
+            } else if (k == '\n') ret = 2;
             else if (k == '\t') ui_focus_next(u);
             else if (k == '\b') {
-                if (cur > 0) { memmove(buf + cur - 1, buf + cur, (size_t)(len - cur + 1)); cur--; ret = 1; }
+                if (cur > 0) {                       /* ধাপ ২৩গ: পুরো UTF-8 অক্ষর */
+                    int n = 1;
+                    while (n < cur && U8CONT(buf[cur - n])) n++;
+                    memmove(buf + cur - n, buf + cur, (size_t)(len - cur + 1)); cur -= n; ret = 1;
+                }
             } else if (k == GFX_KEY_DELETE) {
-                if (cur < len) { memmove(buf + cur, buf + cur + 1, (size_t)(len - cur)); ret = 1; }
-            } else if (k == GFX_KEY_LEFT) { if (cur > 0) cur--; }
-            else if (k == GFX_KEY_RIGHT) { if (cur < len) cur++; }
+                if (cur < len) {
+                    int n = 1;
+                    while (cur + n < len && U8CONT(buf[cur + n])) n++;
+                    memmove(buf + cur, buf + cur + n, (size_t)(len - cur - n + 1)); ret = 1;
+                }
+            } else if (k == GFX_KEY_LEFT) { if (cur > 0) { cur--; while (cur > 0 && U8CONT(buf[cur])) cur--; } }
+            else if (k == GFX_KEY_RIGHT) { if (cur < len) { cur++; while (cur < len && U8CONT(buf[cur])) cur++; } }
             else if (k == GFX_KEY_HOME) cur = 0;
             else if (k == GFX_KEY_END) cur = len;
             else if (k == 21) { buf[0] = '\0'; cur = 0; ret = 1; }          /* Ctrl+U: সব মোছো */
@@ -658,7 +695,7 @@ int ui_do_textbox(ui_ctx *u, int x, int y, int w, char *buf, int size)
                 int n = 0, i;
                 char *c = ui_clip_get(&n);
                 for (i = 0; c && i < n && len + 1 < size; i++) {
-                    if (c[i] < 32 || c[i] > 126) continue;
+                    if ((unsigned char)c[i] < 32 || c[i] == 127) continue;     /* ধাপ ২৩গ: UTF-8-ও */
                     memmove(buf + cur + 1, buf + cur, (size_t)(len - cur + 1));
                     buf[cur++] = c[i];
                     len++;
@@ -682,7 +719,10 @@ int ui_do_textbox(ui_ctx *u, int x, int y, int w, char *buf, int size)
         u->tb_cur = cur;
         if (u->tb_off > len) u->tb_off = len;
         if (cur < u->tb_off) u->tb_off = cur;
-        while (u->tb_off < cur && tw_n(disp + u->tb_off, cur - u->tb_off) > w - 12) u->tb_off++;
+        while (u->tb_off < cur && tw_n(disp + u->tb_off, cur - u->tb_off) > w - 12) {
+            u->tb_off++;
+            while (u->tb_off < cur && U8CONT(disp[u->tb_off])) u->tb_off++;
+        }
         u->auto_tick = 1;                        /* কার্সর ঝলকানো — ৫০০ ms পরপর ফ্রেম */
     }
     ui_sunken(u->s, x, y, w, h, t->field);

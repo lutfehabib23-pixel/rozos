@@ -59,6 +59,7 @@ Type [[help|how to use this viewer]] if you are new here.
   [[games]]           Snake, Breakout, Tetris, Platformer - and [[rozgame]]:
                       make your own games in C, or in Lua with [[luagame]]
   [[fonts]]           smooth desktop fonts, console fonts, screen resolution
+  [[bangla]]          writing Bengali: Ctrl+Space, Avro phonetic
   [[framebuffer]]     /dev/fb0      [[shm]] shared memory   [[pipes]] pipe(), poll()
 
 == Network ==

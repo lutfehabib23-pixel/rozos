@@ -2,6 +2,10 @@
   `reboot`        restart the computer
   `poweroff`      switch off (ACPI); in QEMU this also closes QEMU
   `poweroff -h`   only stop (halt)
-The kernel writes everything to the disk first. After `reboot` the
+The kernel writes everything to the disk first. Phase 24a: restart
+tries, in order, the ACPI reset register (from the FADT table), the
+chipset reset port 0xCF9, the keyboard controller (0xFE) and at last a
+CPU triple fault - so newer PCs that ignore the old keyboard-controller
+reset (for example AMD B550 boards) restart too. After `reboot` the
 boot menu appears ([[boot-menu]]) - that is how a new kernel from
 [[kinstall]] is started. In C: #include <sys/reboot.h>, reboot(RB_AUTOBOOT).

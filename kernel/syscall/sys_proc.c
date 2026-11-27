@@ -181,7 +181,7 @@ static int64_t sys_uname(struct interrupt_frame *f, uint64_t ubuf, uint64_t a2, 
                          uint64_t a4, uint64_t a5, uint64_t a6)
 {
     static const char *const fields[6] = {
-        "rozOS", "rozos", "0.23.1-phase23b", "phase23b", "x86_64", "(none)"
+        "rozOS", "rozos", "0.24.0-phase24a", "phase24a", "x86_64", "(none)"
     };
     char buf[6 * 65];
     int i;
@@ -388,7 +388,7 @@ static int64_t sys_reboot(struct interrupt_frame *f, uint64_t m1, uint64_t m2, u
     block_sync(NULL);
     if ((uint32_t)cmd == REBOOT_RESTART) {
         kprintf("\n[rozOS] restarting...\n");
-        ps2_reset_cpu();
+        machine_restart();                       /* ধাপ ২৪ক: ACPI/0xCF9/8042/triple fault */
     } else if ((uint32_t)cmd == REBOOT_POWER_OFF) {
         kprintf("\n[rozOS] power off\n");
         acpi_poweroff();

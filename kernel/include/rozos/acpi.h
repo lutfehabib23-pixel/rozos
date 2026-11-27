@@ -33,5 +33,9 @@ const struct acpi_sdt_header *acpi_table(size_t index);
 const struct acpi_sdt_header *acpi_find_table(const char *signature, size_t n);
 /* ধাপ ১১খ: ACPI S5 দিয়ে বিদ্যুৎ বন্ধ — সফল হলে ফেরে না, না পারলে -1 */
 int acpi_poweroff(void);
+/* ধাপ ২৪ক: ACPI reset register (না থাকলে/কাজ না হলে -1) আর পুরো রিস্টার্ট-ক্রম
+ * (ACPI → 0xCF9 → 8042 → triple fault) — machine_restart ফেরে না */
+int acpi_reset(void);
+void machine_restart(void);
 
 #endif

@@ -639,7 +639,8 @@ static int64_t kbd_read(void *ctx, uint64_t off, void *buf, size_t len)
         cpu_cli();
         while (n < max && keyboard_try_getkey(&key)) {
             /* ধাপ ১৪: বিশেষ কী-র সাথে modifier: বিট 16-18 = Shift/Ctrl/Alt (KEYMOD_*) */
-            if (key >= 0x100) key |= (int)(keyboard_modifiers() & 7) << 16;
+            /* ধাপ ২৩গ: স্পেসের সাথেও (Ctrl+Space = বাংলা/ইংরেজি টাইপ বদল) */
+            if (key >= 0x100 || key == ' ') key |= (int)(keyboard_modifiers() & 7) << 16;
             out[n++] = key;
         }
         if (n == 0) {

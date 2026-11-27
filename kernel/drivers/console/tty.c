@@ -480,9 +480,101 @@ static void ansi_feed(char c)
     }
 }
 
+/* ---------- ধাপ ২৪ক: শান্ত বুট ----------
+ * বুটের সময় পর্দায় শুধু "Starting rozOS ... ....." — প্রতিটা [ OK ]-এর জন্য একটা বিন্দু।
+ * সব লেখা serial-এ যায় আর bootlog বাফারে জমে (kmon "bootlog"); [WARN]/FAIL/PANIC লাইন
+ * পর্দাতেও দেখায়। কমান্ড লাইনে "bootdebug" থাকলে আগের মতো সব দেখায়। */
+static int quiet;
+static int quiet_col;                     /* এই লাইনে বিন্দু/লেখা আছে কিনা */
+static char qline[256];
+static size_t qline_len;
+static char bootlog[32768];
+static size_t bootlog_len;
+static int bootlog_closed;
+
+static int qline_has(const char *w)
+{
+    size_t n = strlen(w), i;
+    if (qline_len < n) return 0;
+    for (i = 0; i + n <= qline_len; i++) {
+        if (!memcmp(qline + i, w, n)) return 1;
+    }
+    return 0;
+}
+
+static void quiet_line_done(void)
+{
+    if (qline_has("[WARN]") || qline_has("FAIL") || qline_has("PANIC") || qline_has("[ERR")) {
+        size_t i;
+        uint8_t fg = cur_fg;
+        if (quiet_col) ansi_feed('\n');
+        cur_fg = TTY_COLOR_YELLOW;
+        for (i = 0; i < qline_len; i++) ansi_feed(qline[i]);
+        ansi_feed('\n');
+        cur_fg = fg;
+        quiet_col = 0;
+    }
+    qline_len = 0;
+}
+
+void tty_set_quiet(int q)
+{
+    if (quiet && !q) {
+        qline_len = 0;
+        quiet_col = 0;
+    }
+    quiet = q;
+}
+
+int tty_quiet(void) { return quiet; }
+
+/* শান্ত অবস্থায় সরাসরি পর্দায় (serial/bootlog-এ নয়) */
+void tty_screen_puts(const char *s)
+{
+    while (*s) {
+        ansi_feed(*s);
+        quiet_col = (*s != '\n');
+        s++;
+    }
+}
+
+void tty_quiet_dot(void)
+{
+    if (quiet) {
+        ansi_feed('.');
+        quiet_col = 1;
+    }
+}
+
+const char *tty_bootlog(size_t *len)
+{
+    *len = bootlog_len;
+    return bootlog;
+}
+
+void tty_bootlog_close(void) { bootlog_closed = 1; }
+
+/* bootdebug: জমে থাকা লেখা পর্দায় আবার দেখানো */
+void tty_bootlog_replay(void)
+{
+    size_t i;
+    for (i = 0; i < bootlog_len; i++) ansi_feed(bootlog[i]);
+}
+
 void tty_putc(char c)
 {
     serial_putc(c);
+    if (!bootlog_closed && bootlog_len < sizeof(bootlog)) {
+        bootlog[bootlog_len++] = c;
+    }
+    if (quiet) {
+        if (c == '\n') {
+            quiet_line_done();
+        } else if (qline_len < sizeof(qline)) {
+            qline[qline_len++] = c;
+        }
+        return;
+    }
     ansi_feed(c);
 }
 

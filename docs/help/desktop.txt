@@ -9,7 +9,10 @@ rozOS starts in the desktop (use `make run` to see the QEMU window):
                 for every other window (click = front, again = minimise).
                 Rest the mouse on an icon to see its name. Right side:
                 network (bright = connected; click = Settings > Network)
-                and sound (no sound driver yet) - phase 21
+                and sound (no sound driver yet) - phase 21. Phase 24a: the
+                network sign is a LAN port - white = connected (has an IP),
+                yellow = cable in but no address yet (DHCP), red with x =
+                no cable / no link, grey with x = no network card
   Start menu    the programs of /usr/share/apps by category, then
                 Terminal, About rozOS, Text mode, Restart, Shut down
   About rozOS   version, build number, CPU, memory, disk; Copy puts it all
@@ -35,6 +38,10 @@ Right-click your own icon: Open, Remove from desktop (shortcuts) or Show
 in Files. The seven fixed icons always stay.
 Phase 19g: folders also have Lock..., locked folders (padlock) Unlock...,
 and every own icon Hide / Unhide - see [[rozlock]].
+Phase 24a: files and folders also have Delete... - it asks "Are you
+sure...?" and deletes only after Yes (a folder with everything in it).
+A locked folder cannot be deleted: Unlock it first. (The helper is
+`deldlg PATH`; Files has the same Delete on its toolbar.)
 
 == Windows ==
 Drag the title bar to move, drag the bottom-right corner to resize,

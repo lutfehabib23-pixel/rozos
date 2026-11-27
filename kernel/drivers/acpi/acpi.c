@@ -11,6 +11,7 @@
 #include <rozos/vmm.h>
 #include <rozos/string.h>
 #include <arch/x86_64/io.h>
+#include <rozos/ps2.h>
 
 #define ACPI_MAX_TABLES 64
 
@@ -191,4 +192,71 @@ int acpi_poweroff(void)
     outw((uint16_t)pm1a, (uint16_t)((typa << 10) | (1 << 13)));
     if (pm1b) outw((uint16_t)pm1b, (uint16_t)((typb << 10) | (1 << 13)));
     return -1;                                                   /* এখানে এলে কাজ হয়নি */
+}
+
+/* ---------- ধাপ ২৪ক: রিস্টার্ট ----------
+ * আগে শুধু 8042 (0xFE) দিয়ে রিস্টার্ট হতো — নতুন মাদারবোর্ডে (যেমন B550) সেটা কাজ করে না,
+ * পিসি আটকে থাকে। এখন ক্রম: (১) FADT-এর ACPI reset register, (২) port 0xCF9 (চিপসেটের
+ * reset control), (৩) 8042, (৪) triple fault (খালি IDT-তে interrupt)। প্রতিটার পরে একটু
+ * অপেক্ষা, কাজ না হলে পরেরটা। */
+static void reset_delay(void)
+{
+    int i;
+    for (i = 0; i < 50000; i++) io_wait();            /* ~৫০ ms */
+}
+
+/* FADT flags বিট ১০ (RESET_REG_SUP): offset 116-এ Generic Address (১২ বাইট), 128-এ মান */
+int acpi_reset(void)
+{
+    const uint8_t *fadt = (const uint8_t *)acpi_find_table("FACP", 0);
+    uint32_t flags;
+    uint8_t space, value;
+    uint64_t addr;
+
+    if (!fadt || ((const struct acpi_sdt_header *)fadt)->length < 129) return -1;
+    flags = *(const uint32_t *)(fadt + 112);
+    space = fadt[116];
+    memcpy(&addr, fadt + 120, 8);
+    value = fadt[128];
+    if (!(flags & (1u << 10)) || !addr) return -1;
+    if (space == 1) {                                  /* System I/O */
+        outb((uint16_t)addr, value);
+    } else if (space == 0) {                           /* System Memory */
+        volatile uint8_t *m = (volatile uint8_t *)vmm_map_mmio(addr & ~0xFFFull, 0x1000);
+        if (!m) return -1;
+        m[addr & 0xFFF] = value;
+    } else if (space == 2) {                           /* PCI config: bus 0, dev:func:offset */
+        uint32_t dev = (uint32_t)((addr >> 32) & 0x1F);
+        uint32_t fn = (uint32_t)((addr >> 16) & 0x7);
+        uint32_t off = (uint32_t)(addr & 0xFF);
+        outl(0xCF8, 0x80000000u | (dev << 11) | (fn << 8) | (off & 0xFC));
+        outb((uint16_t)(0xCFC + (off & 3)), value);
+    } else {
+        return -1;
+    }
+    reset_delay();
+    return -1;                                         /* এখানে এলে কাজ হয়নি */
+}
+
+void machine_restart(void)
+{
+    __asm__ volatile("cli");
+    acpi_reset();
+    /* 0xCF9: বিট ১ = system reset, বিট ২ = reset শুরু; বিট ৩ = full (cold) reset */
+    outb(0xCF9, 0x02);
+    io_wait();
+    outb(0xCF9, 0x06);
+    reset_delay();
+    outb(0xCF9, 0x0E);
+    reset_delay();
+    if (ps2_present()) {
+        ps2_reset_cpu();
+        reset_delay();
+    }
+    {
+        /* শেষ উপায়: শূন্য-দৈর্ঘ্যের IDT লোড করে interrupt → triple fault → CPU reset */
+        struct { uint16_t limit; uint64_t base; } __attribute__((packed)) idtr = { 0, 0 };
+        __asm__ volatile("lidt %0; int3" : : "m"(idtr));
+    }
+    for (;;) __asm__ volatile("hlt");
 }

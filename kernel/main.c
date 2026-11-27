@@ -61,7 +61,7 @@
 #include <arch/x86_64/pit.h>
 #include <arch/x86_64/apic.h>
 
-#define ROZOS_VERSION "0.23.1-phase23b"
+#define ROZOS_VERSION "0.24.0-phase24a"
 
 #ifdef __TINYC__
 /* ধাপ ১১: TCC-র লিংকারে linker.ld নেই — শুরু = Limine-এর দেওয়া virtual base,
@@ -96,6 +96,7 @@ static void print_banner(void)
 
 static void print_ok(const char *what)
 {
+    tty_quiet_dot();                     /* ধাপ ২৪ক: শান্ত বুটে পর্দায় শুধু একটা বিন্দু */
     tty_set_color(TTY_COLOR_LIGHT_GREEN, TTY_COLOR_BLACK);
     kprintf("[ OK ] ");
     tty_set_color(TTY_COLOR_LIGHT_GREY, TTY_COLOR_BLACK);
@@ -709,6 +710,14 @@ void kmain(void)
     fb_init();
     tty_init();
 
+    /* ধাপ ২৪ক: শান্ত বুট — পর্দায় এক লাইন, বাকি সব serial আর bootlog-এ।
+     * command line এখনো পড়া হয়নি (bootinfo পরে কপি হয়), "bootdebug" দেখলে নিচে
+     * জমা লেখা আবার দেখিয়ে স্বাভাবিক হয়ে যায়। */
+    tty_set_color(TTY_COLOR_LIGHT_CYAN, TTY_COLOR_BLACK);
+    tty_screen_puts("Starting rozOS " ROZOS_VERSION " ");
+    tty_set_color(TTY_COLOR_LIGHT_GREY, TTY_COLOR_BLACK);
+    tty_set_quiet(1);
+
     print_banner();
     if (have_serial) {
         print_ok("Serial console on COM1 (115200 8N1)");
@@ -730,6 +739,12 @@ void kmain(void)
     /* Limine-এর সব তথ্য নিজের মেমোরিতে কপি — পরে bootloader মেমোরি ফেরত নেওয়া হবে */
     if (!bootinfo_save()) {
         kpanic("could not copy boot information (missing HHDM or memory map)");
+    }
+
+    if (cmdline_has("bootdebug")) {
+        tty_set_quiet(0);
+        tty_screen_puts("\n");
+        tty_bootlog_replay();
     }
 
     if (!limine_hhdm_req.response) {
@@ -765,8 +780,15 @@ void kmain(void)
         print_ok(msg);
     }
 
+    if (tty_quiet()) {
+        /* ধাপ ২৪ক: শান্ত বুট শেষ — বিন্দুর লাইনের পরে " ok" */
+        tty_set_color(TTY_COLOR_LIGHT_GREEN, TTY_COLOR_BLACK);
+        tty_screen_puts(" ok\n");
+        tty_set_color(TTY_COLOR_LIGHT_GREY, TTY_COLOR_BLACK);
+        tty_set_quiet(0);
+    }
     tty_set_color(TTY_COLOR_LIGHT_GREEN, TTY_COLOR_BLACK);
-    kprintf("\nrozOS booted. Phase 15b: USB (pen drives, keyboard, mouse), disk protection; modules, NVMe, mount, rename; desktop.\n");
+    kprintf("\nrozOS booted.\n");   /* ধাপ ২৪ক: ছোট (আগে ধাপ ১৫খ-এর বৈশিষ্ট্যের তালিকা ছিল) */
     tty_set_color(TTY_COLOR_LIGHT_GREY, TTY_COLOR_BLACK);
 
     /* /etc/motd থাকলে দেখানো — initrd থেকে আসা প্রথম "ফাইল" */
@@ -783,6 +805,7 @@ void kmain(void)
         }
     }
 
+    tty_bootlog_close();                 /* ধাপ ২৪ক: bootlog শুধু বুটের লেখা রাখে */
     start_init();
     kmon_run();
 }

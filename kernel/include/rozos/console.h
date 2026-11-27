@@ -108,6 +108,14 @@ uint32_t tty_cols(void);
 uint32_t tty_rows(void);
 void tty_putc(char c);
 void tty_write(const char *s, size_t n);
+/* ধাপ ২৪ক: শান্ত বুট (বিন্দু), bootlog */
+void tty_set_quiet(int q);
+int  tty_quiet(void);
+void tty_screen_puts(const char *s);
+void tty_quiet_dot(void);
+const char *tty_bootlog(size_t *len);
+void tty_bootlog_replay(void);
+void tty_bootlog_close(void);
 void tty_set_color(uint8_t fg, uint8_t bg);
 
 /* ধাপ ১২: প্রোগ্রাম কোন মাউস-রিপোর্টিং চেয়েছে (ESC[?1000h ইত্যাদি) */

@@ -884,6 +884,7 @@ static void cmd_help(void)
             "  exit           back to the shell (when started as /bin/kmon)\n"
             "  net            network cards, addresses and counters\n"
             "  nic            network driver details: chip, registers, link, init log\n"
+            "  bootlog        everything the kernel printed while booting (quiet boot)\n"
             "  netlog [dhcp]  network events, DHCP frames, last 32 frames, DHCP counters\n"
             "  echo <text>    print text\n"
             "  int3           breakpoint exception test (returns)\n"
@@ -1042,6 +1043,10 @@ static void run_command(int argc, char **argv)
         cmd_net();
     } else if (!strcmp(cmd, "nic")) {
         cmd_nic();                               /* ধাপ ২২ */
+    } else if (!strcmp(cmd, "bootlog")) {
+        size_t bl;                               /* ধাপ ২৪ক: শান্ত বুটের পুরো লেখা */
+        const char *b = tty_bootlog(&bl);
+        tty_write(b, bl);
     } else if (!strcmp(cmd, "netlog")) {
         net_log_dump(argc > 1 && !strcmp(argv[1], "dhcp"));   /* ধাপ ২২ঘ/ঙ */
     } else if (!strcmp(cmd, "ps")) {
@@ -1084,9 +1089,7 @@ static void run_command(int argc, char **argv)
     } else if (!strcmp(cmd, "reboot")) {
         kprintf("rebooting...\n");
         cpu_cli();
-        if (ps2_present()) {
-            ps2_reset_cpu();
-        }
+        machine_restart();                       /* ধাপ ২৪ক */
         kprintf("reset failed - halting\n");
         cpu_halt_forever();
     } else if (!strcmp(cmd, "halt")) {

@@ -1,0 +1,22 @@
+# Writing Bengali (Avro phonetic, phase 23c)
+Press Ctrl+Space to switch typing between English and Bengali in every
+window program (Code, Files, text fields); the taskbar shows "বা" or
+"EN" on the right - click it to switch too. Type the sounds in Roman
+letters, as in Avro Phonetic: each word turns into Bengali while you
+type, Backspace takes back the last Roman letter, Space ends the word.
+  ami -> আমি          shikkha -> শিক্ষা     sondhya -> সন্ধ্যা
+  bangladesh -> বাংলাদেশ   ggan -> জ্ঞান    karrtik -> কার্তিক
+  prrithibI -> পৃথিবী      raShTro -> রাষ্ট্র  bhalobasi -> ভালবাসি
+Upper and lower case differ, exactly as in Avro:
+  vowels   a া/আ  i ি/ই  I ী/ঈ  u ু/উ  U ূ/ঊ  e ে/এ  O ো/ও  OI ৈ/ঐ  OU ৌ/ঔ
+           o after a consonant = no sign, at the start = অ; rri = ৃ/ঋ
+  k ক  kh খ  g গ  gh ঘ  Ng ঙ   c চ  ch ছ  j জ  jh ঝ  NG ঞ
+  T ট  Th ঠ  D ড  Dh ঢ  N ণ    t ত  th থ  d দ  dh ধ  n ন
+  p প  ph/f ফ  b ব  bh/v ভ  m ম   z য  r র  l ল  sh/S শ  Sh ষ  s স  h হ
+  R ড়  Rh ঢ়  y য় (after a consonant: য-ফলা ্য)  w ্ব  x ক্স
+  ng ং  ^ ঁ  : ঃ  . ।  ` hasanta stop  rr before a consonant = reph র্
+  kkh/kSh ক্ষ   gg জ্ঞ   digits 0-9 -> ০-৯
+Bengali is shown with joined letters in window text and Code ([[fonts]]).
+Not yet: the terminal (rozterm) and edit. In C: rozbn_convert
+(`cref rozbn_convert`). The rules come from libavrophonetic (MIT).
+See [[fonts]], [[code]].

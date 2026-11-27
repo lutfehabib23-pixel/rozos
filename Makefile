@@ -152,7 +152,7 @@ ROZGFX_SRCS  := userland/lib/rozgfx.c userland/lib/rozgfx_ttf.c userland/lib/roz
 ROZGFX_OBJS  := $(patsubst userland/lib/%.c,$(USER_BUILD)/lib/%.o,$(ROZGFX_SRCS))
 ROZGFX_A     := $(USER_BUILD)/lib/librozgfx.a
 # ধাপ ১৪: rozui (3D UI) — rozgfx-এর ওপর
-ROZUI_SRCS   := userland/lib/rozui.c
+ROZUI_SRCS   := userland/lib/rozui.c userland/lib/rozbn.c        # ধাপ ২৩গ: rozbn = অভ্র phonetic
 ROZUI_OBJS   := $(patsubst userland/lib/%.c,$(USER_BUILD)/lib/%.o,$(ROZUI_SRCS))
 ROZUI_A      := $(USER_BUILD)/lib/librozui.a
 # ধাপ ১৮ক: librozgame (গেম লুপ, ইনপুট, sprite, সংঘর্ষ) — rozgfx-এর ওপর
@@ -182,7 +182,7 @@ CA_PEM       := $(BUILD)/ssl/certs.pem
 # (debug তথ্য ছাড়া কপি — libbearssl.a 4.5 MB থেকে অনেক ছোট হয়)
 DEV_LIBS     := $(BUILD)/devlib/librozhttp.a $(BUILD)/devlib/librozgfx.a $(BUILD)/devlib/librozui.a $(BUILD)/devlib/librozgame.a $(BUILD)/devlib/librozcref.a $(BUILD)/devlib/librozlock.a $(if $(HAVE_BEARSSL),$(BUILD)/devlib/libbearssl.a) \
                 $(if $(wildcard ports/lua/src/lua.h),$(BUILD)/devlib/liblua.a) $(if $(wildcard ports/zlib/src/zlib.h),$(BUILD)/devlib/libz.a)
-DEV_HEADERS  := userland/lib/rozhttp.h userland/lib/rozgfx.h userland/lib/rozui.h userland/lib/rozgame.h userland/lib/rozcref.h userland/lib/rozlock.h userland/lib/rozwm_proto.h $(if $(HAVE_BEARSSL),$(wildcard $(BEARSSL_SRC)/inc/*.h))
+DEV_HEADERS  := userland/lib/rozhttp.h userland/lib/rozgfx.h userland/lib/rozui.h userland/lib/rozbn.h userland/lib/rozgame.h userland/lib/rozcref.h userland/lib/rozlock.h userland/lib/rozwm_proto.h $(if $(HAVE_BEARSSL),$(wildcard $(BEARSSL_SRC)/inc/*.h))
 
 # ধাপ ১১: kernel-এর সোর্স rozOS-এর /usr/src/rozos-এ — ভেতরে `make` (pdpmake + tcc) দিয়ে বিল্ড।
 # সেখানকার Makefile হোস্টে toolchain/gen-kernel-mk.sh বানায় (ফাইলের তালিকা এখানের সাথে মেলে)।
@@ -1050,7 +1050,7 @@ CREF_COVER ?= stdio.h stdlib.h string.h strings.h ctype.h math.h time.h \
   netinet/in.h arpa/inet.h netdb.h dirent.h signal.h setjmp.h pthread.h semaphore.h sched.h poll.h \
   termios.h pty.h regex.h wchar.h wctype.h locale.h langinfo.h iconv.h getopt.h fnmatch.h glob.h libgen.h \
   pwd.h grp.h syslog.h search.h utime.h dlfcn.h err.h fenv.h inttypes.h \
-  rozgfx.h rozui.h rozgame.h rozhttp.h rozos.h rozcref.h sys/statvfs.h sys/statfs.h sys/sysinfo.h \
+  rozgfx.h rozui.h rozbn.h rozgame.h rozhttp.h rozos.h rozcref.h sys/statvfs.h sys/statfs.h sys/sysinfo.h \
   rozlock.h sys/sysmacros.h memory.h
 # ধাপ ১৯গ: rozOS-এর লাইব্রেরি (rozgfx, rozui, rozgame, rozhttp, rozcref) আর Lua/zlib-এর পাতাও;
 # উদাহরণে যে হেডার আছে সেই অনুযায়ী লাইব্রেরি যোগ হয় (--autolib)
@@ -1059,7 +1059,7 @@ SQLITE_PKG   := $(BUILD)/packages/sqlite/root
 CREF_INCLUDE := libc/include userland/lib $(if $(wildcard ports/lua/src/lua.h),ports/lua/src) $(if $(wildcard ports/zlib/src/zlib.h),ports/zlib/src) \
   $(if $(wildcard $(SQLITE_PKG)/usr/include/sqlite3.h),$(SQLITE_PKG)/usr/include)
 DL := $(BUILD)/devlib
-CREF_AUTOLIB := rozui.h=$(DL)/librozui.a,$(DL)/librozgame.a,$(DL)/librozgfx.a \
+CREF_AUTOLIB := rozui.h=$(DL)/librozui.a,$(DL)/librozgame.a,$(DL)/librozgfx.a rozbn.h=$(DL)/librozui.a,$(DL)/librozgfx.a \
   rozgame.h=$(DL)/librozgame.a,$(DL)/librozgfx.a rozgfx.h=$(DL)/librozgfx.a rozcref.h=$(DL)/librozcref.a \
   rozhttp.h=$(DL)/librozhttp.a$(if $(HAVE_BEARSSL),$(comma)$(DL)/libbearssl.a) \
   lua.h=$(DL)/liblua.a lauxlib.h=$(DL)/liblua.a zlib.h=$(DL)/libz.a \

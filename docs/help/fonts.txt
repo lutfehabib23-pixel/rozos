@@ -43,8 +43,8 @@ font's OpenType rules; letters missing from the UI font come from the
 Bengali font: bengali_font=/usr/share/fonts/NotoSansBengali.ttf in
 /etc/rozos.conf, or the "Bengali:" button in Settings > Fonts.
 Works in every window text: file names in Files, titles, menus,
-dialogs, fontview. Not yet: the terminal and Code (they keep one byte
-per cell) and typing Bengali (an input method comes in phase 23c).
+dialogs, fontview and (phase 23c) Code. Typing: Ctrl+Space, Avro
+phonetic - see [[bangla]]. Not yet: the terminal.
 
 == Resolution ==
 The screen size is chosen by Limine at boot, so it changes with a

@@ -40,6 +40,7 @@
 #include <rozwm_proto.h>
 #include <rozlock.h>          /* ধাপ ১৯ছ: লক করা ফোল্ডার, .hidden */
 #include <rozos.h>            /* ধাপ ২১: rozos_netinfo (tray) */
+#include <rozbn.h>            /* ধাপ ২৩গ: বা/EN */
 
 #define MAXWIN    32
 #define MAXCLI    32
@@ -820,7 +821,8 @@ static void damage_icons(void) { damage(0, PANEL_H, W, H - PANEL_H - TASK_H); }
 enum { CX_NEWTEXT = 1, CX_NEWFOLDER, CX_ADDICON, CX_WALLPAPER, CX_SETTINGS, CX_REFRESH,
        CX_OPEN, CX_REMOVE, CX_SHOWFILES,
        CX_LOCK, CX_UNLOCK, CX_HIDE, CX_SHOWHIDDEN,                   /* ধাপ ১৯ছ */
-       CX_ABOUT };                                                    /* ধাপ ২১ */
+       CX_ABOUT,                                                      /* ধাপ ২১ */
+       CX_DELETE };                                                   /* ধাপ ২৪ক */
 struct ctxitem { const char *label; int id; };
 static const struct ctxitem ctx_desktop[] = {
     { "New text file", CX_NEWTEXT }, { "New folder", CX_NEWFOLDER }, { "-", 0 },
@@ -829,11 +831,14 @@ static const struct ctxitem ctx_desktop[] = {
 };
 static const struct ctxitem ctx_builtin[] = { { "Open", CX_OPEN } };
 static const struct ctxitem ctx_app[] = { { "Open", CX_OPEN }, { "Remove from desktop", CX_REMOVE } };
-static const struct ctxitem ctx_file[] = { { "Open", CX_OPEN }, { "Show in Files", CX_SHOWFILES } };
+static const struct ctxitem ctx_file[] = { { "Open", CX_OPEN }, { "Show in Files", CX_SHOWFILES }, { "-", 0 },
+                                           { "Delete...", CX_DELETE } };
 /* ধাপ ১৯ছ: ফোল্ডার আর লক করা ফোল্ডার; সবশেষে Hide/Unhide যোগ হয় (ctx_show) */
 static const struct ctxitem ctx_dir[] = { { "Open", CX_OPEN }, { "Show in Files", CX_SHOWFILES }, { "-", 0 },
-                                          { "Lock...", CX_LOCK } };
-static const struct ctxitem ctx_locked[] = { { "Unlock...", CX_UNLOCK }, { "Show in Files", CX_SHOWFILES }, { "-", 0 } };
+                                          { "Lock...", CX_LOCK }, { "Delete...", CX_DELETE } };
+/* ধাপ ২৪ক: তালা দেওয়া ফোল্ডারেও Delete... — deldlg বলে দেয় যে আগে Unlock করতে হবে */
+static const struct ctxitem ctx_locked[] = { { "Unlock...", CX_UNLOCK }, { "Show in Files", CX_SHOWFILES }, { "-", 0 },
+                                             { "Delete...", CX_DELETE }, { "-", 0 } };
 static struct ctxitem ctx_dyn[12];
 #define CTX_W 190
 static const struct ctxitem *ctx_items;
@@ -867,7 +872,7 @@ static void ctx_show(int x, int y, int icon)
         const struct uicon *u = &uicons[icon - NICONS];
         const struct ctxitem *src = u->kind == UK_APP ? ctx_app : u->kind == UK_DIR ? ctx_dir :
                                     u->kind == UK_LOCKED ? ctx_locked : ctx_file;
-        int n = u->kind == UK_APP ? 2 : u->kind == UK_DIR ? 4 : u->kind == UK_LOCKED ? 3 : 2;
+        int n = u->kind == UK_APP ? 2 : u->kind == UK_DIR ? 5 : u->kind == UK_LOCKED ? 5 : 4;   /* ধাপ ২৪ক: +Delete */
         memcpy(ctx_dyn, src, sizeof(ctx_dyn[0]) * (size_t)n);
         if (src[n - 1].label[0] != '-') { ctx_dyn[n].label = "-"; ctx_dyn[n++].id = 0; }
         ctx_dyn[n].label = u->hidden ? "Unhide" : "Hide";
@@ -951,6 +956,12 @@ static void ctx_do(int id)
         break;
     case CX_SHOWHIDDEN: desk_show_hidden = !desk_show_hidden; break;
     case CX_ABOUT: spawn("about"); break;
+    case CX_DELETE:                              /* ধাপ ২৪ক: "Are you sure?" তারপর মোছা */
+        if (ic >= NICONS && uicons[ic - NICONS].kind != UK_APP) {
+            snprintf(cmd, sizeof(cmd), "deldlg '%s'", uicons[ic - NICONS].path);
+            spawn(cmd);
+        }
+        break;
     }
     if (load_user_icons()) damage_icons();
 }
@@ -1050,10 +1061,11 @@ static const struct pin pins[] = {
 #define PIN_W   38
 #define WIN_X   (PIN_X + NPINS * PIN_W + 12)
 #define WBTN_W  40
-#define TRAY_W  72
+#define TRAY_W  104                         /* ধাপ ২৩গ: বা/EN + নেটওয়ার্ক + শব্দ */
+static int bn_state = -1;                  /* ধাপ ২৩গ: বাংলা টাইপ মোড */
 static char tip[96];                    /* এখন দেখানো tooltip ("" = নেই) */
 static int tip_x, tip_w;
-static int net_state = -1;              /* 0 = কার্ড নেই, 1 = ঠিকানা নেই, 2 = চালু */
+static int net_state = -1;              /* ধাপ ২৪ক: 0 = কার্ড নেই, 1 = তার/লিংক নেই, 2 = লিংক আছে কিন্তু ঠিকানা নেই, 3 = চালু */
 static char net_ip[20];
 
 /* শিরোনাম "NAME" বা "... - NAME" */
@@ -1118,9 +1130,13 @@ static void update_net(void)
     int st = 0;
     char ip[20] = "";
     if (rozos_netinfo(0, &ni) == 0) {
-        st = ni.configured && ni.ip ? 2 : 1;
-        if (st == 2)
+        st = ni.configured && ni.ip ? 3 : ni.link_up ? 2 : 1;
+        if (st == 3)
             snprintf(ip, sizeof(ip), "%u.%u.%u.%u", ni.ip & 255, (ni.ip >> 8) & 255, (ni.ip >> 16) & 255, ni.ip >> 24);
+    }
+    if (rozbn_mode() != bn_state) {                      /* ধাপ ২৩গ */
+        bn_state = rozbn_mode();
+        damage(W - TRAY_W, H - TASK_H, TRAY_W, TASK_H);
     }
     if (st != net_state || strcmp(ip, net_ip)) {
         net_state = st;
@@ -1132,13 +1148,31 @@ static void update_net(void)
 static void draw_tray(void)
 {
     int x = W - TRAY_W + 6, y = H - TASK_H + 7;
-    uint32_t c = net_state == 2 ? T->text : T->text_dim;
+    /* ধাপ ২৪ক: LAN আইকনের রং — সাদা = চালু, হলুদ = লিংক আছে ঠিকানা নেই,
+     * লাল = তার/লিংক নেই, ধূসর = কার্ড নেই */
+    uint32_t c = net_state == 3 ? T->text : net_state == 2 ? GFX_RGB(235, 190, 60) :
+                 net_state == 1 ? GFX_RGB(220, 80, 70) : T->text_dim;
     gfx_vline(S, W - TRAY_W, H - TASK_H + 5, TASK_H - 10, T->dark);
-    /* নেটওয়ার্ক: তিনটা বাড়তে থাকা দাগ; না থাকলে লাল কাটা */
-    gfx_fill_rect(S, x + 2, y + 10, 3, 5, c);
-    gfx_fill_rect(S, x + 7, y + 6, 3, 9, c);
-    gfx_fill_rect(S, x + 12, y + 2, 3, 13, c);
-    if (net_state < 2) gfx_line(S, x, y + 15, x + 16, y, GFX_RGB(220, 80, 70));
+    /* ধাপ ২৩গ: টাইপের ভাষা — বা (অভ্র phonetic) / EN */
+    {
+        const char *lg = bn_state == 1 ? "বা" : "EN";
+        gfx_text(S, NULL, x + 12 - gfx_text_width(NULL, lg) / 2, y, lg, bn_state == 1 ? T->accent : T->text_dim);
+    }
+    x += 32;
+    /* ধাপ ২৪ক: নেটওয়ার্ক = LAN (RJ45) পোর্ট: বাক্স, ভেতরে ৪টা পিন, নিচে খাঁজ;
+     * লিংক বা কার্ড না থাকলে ওপরে লাল x */
+    gfx_rect(S, x + 1, y + 1, 16, 11, c);
+    gfx_rect(S, x + 2, y + 2, 14, 9, c);
+    gfx_fill_rect(S, x + 5, y + 4, 1, 3, c);
+    gfx_fill_rect(S, x + 8, y + 4, 1, 3, c);
+    gfx_fill_rect(S, x + 10, y + 4, 1, 3, c);
+    gfx_fill_rect(S, x + 13, y + 4, 1, 3, c);
+    gfx_fill_rect(S, x + 6, y + 12, 6, 3, c);
+    if (net_state < 2) {
+        uint32_t xr = GFX_RGB(220, 80, 70);
+        gfx_thick_line(S, x + 12, y + 8, x + 18, y + 14, 2, xr);
+        gfx_thick_line(S, x + 18, y + 8, x + 12, y + 14, 2, xr);
+    }
     /* শব্দ: স্পিকার; ড্রাইভার নেই বলে x */
     x += 32;
     gfx_fill_rect(S, x + 1, y + 5, 4, 6, T->text_dim);
@@ -1226,13 +1260,19 @@ static void taskbar_hover(void)
         if (!taskbar_button_rect(k++, n, &x, &y, &w, &h)) break;
         if (mx >= x && mx < x + w) { set_tip(wins[i].title, x + w / 2); return; }
     }
-    if (mx >= W - TRAY_W && mx < W - TRAY_W + 32) {
-        if (net_state == 2) snprintf(t, sizeof(t), "Network: connected, %s", net_ip);
-        else snprintf(t, sizeof(t), "%s", net_state == 1 ? "Network: no address yet" : "Network: no supported network card");
+    if (mx >= W - TRAY_W && mx < W - TRAY_W + 32) {          /* ধাপ ২৩গ */
+        set_tip(bn_state == 1 ? "Typing: Bangla (Avro phonetic) - click or Ctrl+Space for English"
+                              : "Typing: English - click or Ctrl+Space for Bangla (Avro phonetic)", mx);
+        return;
+    }
+    if (mx >= W - TRAY_W + 32 && mx < W - TRAY_W + 64) {
+        if (net_state == 3) snprintf(t, sizeof(t), "Network: connected, %s", net_ip);
+        else snprintf(t, sizeof(t), "%s", net_state == 2 ? "Network: cable connected, no address yet (DHCP)" :
+                      net_state == 1 ? "Network: cable unplugged / no link" : "Network: no supported network card");
         set_tip(t, mx);
         return;
     }
-    if (mx >= W - TRAY_W + 32) { set_tip("Sound: no sound driver yet", mx); return; }
+    if (mx >= W - TRAY_W + 64) { set_tip("Sound: no sound driver yet", mx); return; }
     set_tip("", 0);
 }
 
@@ -1401,8 +1441,11 @@ static void taskbar_click(int x, int y, int button)
             return;
         }
     }
-    if (x >= W - TRAY_W) {                       /* tray: নেটওয়ার্ক → Settings */
-        if (x < W - TRAY_W + 32) spawn("settings network");
+    if (x >= W - TRAY_W) {                       /* tray: বা/EN বদল, নেটওয়ার্ক → Settings */
+        if (x < W - TRAY_W + 32) {
+            rozbn_toggle();
+            update_net();
+        } else if (x < W - TRAY_W + 64) spawn("settings network");
         return;
     }
     for (i = 0; i < MAXWIN; i++) {

@@ -4,7 +4,13 @@
 2. Limine shows the menu ([[boot-menu]]: installed kernels, factory,
    no init), loads the kernel and the initrd, sets up 64-bit mode
    and the framebuffer.
-3. The kernel prints [ OK ] lines as it starts each part: serial,
+3. Phase 24a (quiet boot): the screen shows one line,
+   "Starting rozOS <version> ........ ok" - one dot for every part
+   that started. Warnings still appear in full. Everything is still
+   written to the serial port, and kmon `bootlog` shows it all again.
+   Add `bootdebug` to the kernel command line ([[boot-menu]]) to see
+   the full output below on the screen, as before.
+   The kernel prints [ OK ] lines as it starts each part: serial,
    screen, GDT/IDT, timer, keyboard, memory, ACPI/APIC, scheduler,
    syscalls, PCI, AHCI, partitions, ext2 on /, FAT on /boot,
    tmpfs on /tmp, devfs on /dev. The first line has the build number.

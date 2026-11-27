@@ -176,6 +176,8 @@ struct rtl {
     uint64_t link_check_ms;               /* শেষ autoneg চেষ্টার সময় */
     int an_restarts;
     uint64_t rx_errors;
+    uint64_t rx_zero_late;                /* ধাপ ২৪ক: হেডার শূন্য পেয়ে আবার পড়তে হয়েছে */
+    uint64_t rx_zero_drop;                /* ধাপ ২৪ক: অপেক্ষার পরেও শূন্য — ফেলে দেওয়া */
     uint16_t last_istatus;
     uint16_t istatus_seen;                /* ধাপ ২২খ: চালুর পর থেকে সব বিটের OR */
     int rx_restarts;
@@ -386,6 +388,22 @@ static int rtl_transmit(struct net_device *dev, const void *frame, size_t len)
 }
 
 /* ---------- পাওয়া ---------- */
+/* ধাপ ২৪ক: ইথারনেট হেডারের ১৪ বাইট সব শূন্য? (আসল ফ্রেমে গন্তব্য MAC কখনো শূন্য নয়) */
+static int rx_hdr_zero(const uint8_t *b)
+{
+    int k;
+    for (k = 0; k < 14; k++) {
+        if (b[k]) return 0;
+    }
+    return 1;
+}
+
+/* ~১ মাইক্রোসেকেন্ড: port 0x80-তে লেখা (প্রতিটা ~১µs) আর মেমোরি fence */
+static void rx_delay(void)
+{
+    __asm__ volatile("mfence; outb %%al, $0x80" : : "a"(0) : "memory");
+}
+
 static void rx_give_back(struct rtl *t, unsigned i)
 {
     struct rtl_desc *d = &t->rx[i];
@@ -480,6 +498,7 @@ static size_t rtl_poll(struct net_device *dev, void *buf, size_t max)
             return 0;
         }
         barrier();
+        __asm__ volatile("lfence" ::: "memory");   /* ধাপ ২৪ক: OWN দেখার পরে ডেটা পড়া */
         len = st & D_LEN_MASK;
         if ((st & D_RX_RES) || (st & (D_FS | D_LS)) != (D_FS | D_LS) || len < 4 ||
             len - 4 > max) {
@@ -489,6 +508,26 @@ static size_t rtl_poll(struct net_device *dev, void *buf, size_t max)
         } else {
             len -= 4;                     /* শেষের CRC বাদ */
             memcpy(buf, t->rx_buf + (size_t)i * BUF_SIZE, len);
+            /* ধাপ ২৪ক: প্রথম ১৪ বাইট (ইথারনেট হেডার) সব শূন্য হলে ডেটা হয়তো এখনো
+             * মেমোরিতে পৌঁছায়নি — একটু অপেক্ষা করে আবার পড়া */
+            {
+                int tries;
+                for (tries = 0; tries < 64 && len >= 14 && rx_hdr_zero(buf); tries++) {
+                    rx_delay();
+                    memcpy(buf, t->rx_buf + (size_t)i * BUF_SIZE, len);
+                }
+                if (tries) {
+                    t->rx_zero_late++;
+                    if (len >= 14 && rx_hdr_zero(buf)) {
+                        t->rx_zero_drop++;
+                        t->rx_errors++;
+                        dev->rx_dropped++;
+                        rx_give_back(t, i);
+                        t->rx_next = (i + 1) % NUM_RX;
+                        continue;
+                    }
+                }
+            }
             dev->rx_packets++;
             dev->rx_bytes += len;
         }
@@ -546,6 +585,8 @@ static void rtl_diag(struct net_device *dev)
             bmcr & 0xFFFF, bmsr & 0xFFFF, t->an_restarts);
     kprintf("     rx next %u (chip owns %u/%u)  tx next %u (chip owns %u/%u)  rx errors %llu\n",
             t->rx_next, own, NUM_RX, t->tx_next, town, NUM_TX, (unsigned long long)t->rx_errors);
+    kprintf("     zero-header frames: re-read %llu, dropped %llu\n",
+            (unsigned long long)t->rx_zero_late, (unsigned long long)t->rx_zero_drop);
     kprintf("     IntrStatus last %04x, seen %04x (01 RxOK 04 TxOK 08 TxErr 10 RxDescUnavail)"
             "  rx restarts %d\n", t->last_istatus, t->istatus_seen, t->rx_restarts);
     kprintf("     DLLPR %02x  MISC_1 %02x  ANAR %04x  GBCR %04x\n", r8(t, R_DLLPR),
@@ -802,9 +843,13 @@ int rtl8168_init(void)
                 uint8_t pe = pci_find_cap(pd, 0x10);
                 if (pe) {
                     uint16_t dc = pci_read16(pd, (uint8_t)(pe + 8));
-                    tlog(t, "PCIe DevCtl %04x%s", dc, (dc & 0x0800) ? " -> No Snoop off" : "");
-                    if (dc & 0x0800) {
-                        pci_write16(pd, (uint8_t)(pe + 8), (uint16_t)(dc & ~0x0800u));
+                    /* ধাপ ২৪ক: Relaxed Ordering (বিট ৪)-ও বন্ধ — চালু থাকলে descriptor-এর OWN
+                     * মোছা বাফারের ডেটার আগে পৌঁছাতে পারে, তখন আমরা শূন্য-ভরা ফ্রেম পড়ি
+                     * (আসল পিসিতে DHCP OFFER এভাবেই হারাচ্ছিল) */
+                    tlog(t, "PCIe DevCtl %04x%s%s", dc, (dc & 0x0800) ? " -> No Snoop off" : "",
+                         (dc & 0x0010) ? " -> Relaxed Ordering off" : "");
+                    if (dc & 0x0810) {
+                        pci_write16(pd, (uint8_t)(pe + 8), (uint16_t)(dc & ~0x0810u));
                     }
                 }
             }

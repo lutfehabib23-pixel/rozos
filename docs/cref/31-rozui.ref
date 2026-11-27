@@ -617,3 +617,42 @@ int main(void)
     return 0;
 }
 @end
+
+@entry rozbn_convert
+@also rozbn rozbn_mode rozbn_set_mode rozbn_toggle rozbn_is_toggle_key rozbn_reset rozbn_key rozbn_comp avro bangla bengali phonetic
+@header rozbn.h
+@syntax #include <rozbn.h>      tcc prog.c -lrozui -lrozgfx -o prog
+@syntax int  rozbn_convert(const char *roman, char *out, size_t size);
+@syntax int  rozbn_mode(void);   void rozbn_set_mode(int on);   int rozbn_toggle(void);
+@syntax int  rozbn_is_toggle_key(int key, int mods);
+@syntax void rozbn_reset(rozbn_comp *c);
+@syntax int  rozbn_key(rozbn_comp *c, int key, int *del, char *ins, size_t size);
+@summary Write Bengali with Avro phonetic: "ami" becomes "আমি".
+@desc
+Phase 23c. rozbn_convert turns Roman letters into Bengali (UTF-8) with
+the exact Avro Classic Phonetic rules (upper/lower case differ: t ত,
+T ট, sh শ, Sh ষ, rr reph, rri ri-kar). The typing mode is shared by all
+programs (/tmp/.rozbn-mode): rozbn_mode reads it, toggle flips it,
+is_toggle_key says whether a key is Ctrl+Space. For typing, keep a
+rozbn_comp per text field: rozbn_key takes each key; when it returns 1,
+delete *del bytes before the cursor and insert ins; 0 means the word
+ended, so insert the key as usual. rozui text fields and Code do this.
+@returns
+convert: bytes written. key: 1 handled, 0 not. mode/toggle: 1 Bengali.
+@see ui_do_textbox gfx_text
+@example
+#include <stdio.h>
+#include <rozbn.h>
+
+int main(void)
+{
+    static const char *const words[] = { "ami", "shikkha", "sondhya", "karrtik", "prrithibI" };
+    char out[128];
+    int i;
+    for (i = 0; i < 5; i++) {
+        rozbn_convert(words[i], out, sizeof(out));
+        printf("%-10s %s\n", words[i], out);
+    }
+    return 0;
+}
+@end
