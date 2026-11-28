@@ -61,7 +61,7 @@
 #include <arch/x86_64/pit.h>
 #include <arch/x86_64/apic.h>
 
-#define ROZOS_VERSION "0.26.0-phase26a"
+#define ROZOS_VERSION "0.26.1-phase17c"
 
 #ifdef __TINYC__
 /* ধাপ ১১: TCC-র লিংকারে linker.ld নেই — শুরু = Limine-এর দেওয়া virtual base,

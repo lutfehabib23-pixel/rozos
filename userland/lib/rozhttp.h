@@ -9,6 +9,11 @@
 
 #include <stddef.h>
 
+/* ধাপ ১৭গ: C++ থেকেও (g++) */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define ROZHTTP_URL_MAX 2048
 
 struct rozhttp_opts {
@@ -46,4 +51,7 @@ void rozhttp_sha256_init(struct rozhttp_sha256 *s);
 void rozhttp_sha256_update(struct rozhttp_sha256 *s, const void *data, size_t len);
 void rozhttp_sha256_hex(struct rozhttp_sha256 *s, char out[65]);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

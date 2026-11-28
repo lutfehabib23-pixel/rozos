@@ -52,6 +52,9 @@ int  cref_search(const char *word, const cref_entry **out, int max);
 char *cref_format(const cref_entry *e, int width);
 /* হেডারের তালিকা (সাজানো); সংখ্যা ফেরত */
 int  cref_headers(const char **out, int max);
+/* ধাপ ১৭গ: C++-এর পাতা কিনা — @header "c++" (ভাষা) বা C++-এর লাইব্রেরি হেডার (iostream,
+ * vector …, ".h" ছাড়া)। উদাহরণ .cpp, g++ দিয়ে বানাতে হয় */
+int  cref_is_cpp(const cref_entry *e);
 
 #ifdef __cplusplus
 }

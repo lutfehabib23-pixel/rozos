@@ -32,7 +32,7 @@ Type [[help|how to use this viewer]] if you are new here.
   [[lua]]             Lua 5.4 scripts; [[zlib]]: gzip, gunzip, libz
   [[make]]            build from a Makefile (pdpmake)
   [[kmon]]            the kernel monitor (debugging)
-  [[systest]]         the self-test (240 checks)
+  [[systest]]         the self-test (242 checks)
 
 == Writing software ==
   [[c-programming]]   write, compile and run a C program, step by step

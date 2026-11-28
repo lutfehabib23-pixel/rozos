@@ -39,7 +39,9 @@ key reminder. `<` and `>` at the edges mean the line goes on there.
   `Ctrl+W`       save as (a new name; asks before replacing a file)
   `Ctrl+R`       C files: save, compile with [[tcc]] (+ -lrozgame -lrozgfx
                  -lm, so graphics programs and games work too) and run; the program
-                 runs on the normal screen, Enter brings the editor back
+                 runs on the normal screen, Enter brings the editor back.
+                 Phase 17c: .cpp files use g++ ([[gcc]]); .c uses GCC instead of
+                 TCC if Code's Build menu chose it (/home/.rozcc)
   `Ctrl+F`       find (the match is selected); Ctrl+F, Enter = next
   `Ctrl+G`       go to a line number
   `Ctrl+K`       cut the current line   `Ctrl+U`   paste it above

@@ -13,7 +13,7 @@
  *   Ctrl+Q                   বের হওয়া            Ctrl+F  খোঁজা (আবার Ctrl+F = পরেরটা)
  *   Ctrl+G                   লাইনে যাওয়া         Ctrl+K  লাইন কাটা, Ctrl+U  বসানো
  *   Ctrl+N                   লাইন নম্বর দেখানো/লুকানো   Ctrl+L  আবার আঁকা (মাপ নতুন করে)
- *   Ctrl+W                   অন্য নামে সংরক্ষণ (Save as)  Ctrl+R  C ফাইল: সংরক্ষণ, tcc দিয়ে
+ *   Ctrl+W                   অন্য নামে সংরক্ষণ (Save as)  Ctrl+R  C/C++ ফাইল: সংরক্ষণ, tcc / g++ দিয়ে
  *                            কম্পাইল করে চালানো, Enter দিলে এডিটরে ফেরা (ধাপ ১২ক)
  *   মাউস: ক্লিকে কার্সর, টেনে সিলেক্ট, চাকায় স্ক্রল, ডানের স্ক্রলবারে ক্লিকে লাফ
  *   ধাপ ১৪খ: F10 (বা ওপরের লাইনে ক্লিক) = মেনু (File Edit Search Build View Help), প্রতিটা
@@ -1096,20 +1096,51 @@ static int extra_libs(const char *file, const char **libs, int max)
     return n;
 }
 
+/* ধাপ ১৭গ: কম্পাইলার — .cpp/.cc/.cxx = g++; .c = tcc, বা /home/.rozcc-তে "gcc" থাকলে gcc
+ * (Code-এর Build মেনুর একই বাছাই)। gcc/g++ না থাকলে NULL (C-তে tcc-তে ফেরে) */
+static int prog_exists(const char *name)
+{
+    char p[96];
+    snprintf(p, sizeof(p), "/usr/bin/%s", name);
+    if (access(p, X_OK) == 0) return 1;
+    snprintf(p, sizeof(p), "/bin/%s", name);
+    return access(p, X_OK) == 0;
+}
+
+static const char *pick_compiler(const char *ext)
+{
+    if (!strcmp(ext, ".cpp") || !strcmp(ext, ".cc") || !strcmp(ext, ".cxx")) return prog_exists("g++") ? "g++" : NULL;
+    {
+        char b[16] = "";
+        FILE *f = fopen("/home/.rozcc", "r");
+        if (f) {
+            if (!fgets(b, sizeof(b), f)) b[0] = '\0';
+            fclose(f);
+        }
+        if (!strncmp(b, "gcc", 3) && prog_exists("gcc")) return "gcc";
+    }
+    return "tcc";
+}
+
 static void run_c(void)
 {
     char cmd[sizeof(filename) + 300];
-    const char *dot;
+    const char *dot, *cc;
     int rc, c;
     if (save_file() < 0) return;
     dot = strrchr(filename, '.');
-    if (!dot || strcmp(dot, ".c") != 0) {
-        set_message("%s", "^R compiles and runs C files - save with a .c name (^W)");
+    if (!dot || (strcmp(dot, ".c") != 0 && strcmp(dot, ".cpp") != 0 && strcmp(dot, ".cc") != 0 && strcmp(dot, ".cxx") != 0)) {
+        set_message("%s", "^R compiles and runs C/C++ files - save with a .c or .cpp name (^W)");
+        return;
+    }
+    cc = pick_compiler(dot);
+    if (!cc) {
+        set_message("%s", "C++ needs GCC: rozpkg install binutils gcc (help gcc)");
         return;
     }
     ostr("\x1b[0m\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l");
     oflush();
-    printf("\n== tcc %s ==\n", filename);
+    printf("\n== %s %s ==\n", cc, filename);
     fflush(stdout);
     /* ধাপ ১৩: -lrozgfx — গ্রাফিক্স প্রোগ্রামও চলে (না লাগলে কিছুই যোগ হয় না) */
     /* ধাপ ১৮ক: -lrozgame -lm — গেমও চলে */
@@ -1122,8 +1153,8 @@ static void run_c(void)
             strncat(libs, extra[i], sizeof(libs) - strlen(libs) - 2);
             strcat(libs, " ");
         }
-        snprintf(cmd, sizeof(cmd), "set -e; tcc %s %s-lrozui -lrozgame -lrozgfx -lm -o /tmp/edit-run; /tmp/edit-run",
-                 filename, libs);
+        snprintf(cmd, sizeof(cmd), "set -e; %s %s %s-lrozui -lrozgame -lrozgfx -lm -o /tmp/edit-run; /tmp/edit-run",
+                 cc, filename, libs);
     }
     set_isig(1);                        /* চলন্ত প্রোগ্রাম Ctrl+C-তে থামে, এডিটর নয় */
     rc = system(cmd);
@@ -1438,7 +1469,7 @@ static void show_keys(void)
         "  ^C copy        ^X cut          ^V paste",
         "  ^K cut line    ^U paste line   ^F find (again = next)",
         "  ^G go to line  ^N line numbers ^L redraw / fit window",
-        "  ^R save, compile with tcc and run (C files)",
+        "  ^R save, compile and run (C: tcc, C++: g++)",
         "  Ctrl+F1 C help on the word    Shift+F1 C help by name",
         "  Shift+arrows select, mouse click/drag/wheel",
         "",

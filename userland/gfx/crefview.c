@@ -77,7 +77,8 @@ static void build_items(void)
         for (i = 0; i < cref_count(); i++) {
             const cref_entry *e = cref_at(i);
             if (!prev || strcmp(prev, e->header)) {
-                snprintf(b, sizeof(b), "[ %s ]", strcmp(e->header, "language") ? e->header : "C language");
+                snprintf(b, sizeof(b), "[ %s ]", !strcmp(e->header, "c++") ? "C++ language" :   /* ধাপ ১৭গ */
+                         strcmp(e->header, "language") ? e->header : "C language");
                 add_item(b, NULL, e->header);
                 prev = e->header;
             }
@@ -163,7 +164,8 @@ static void build_page(void)
     if (cur) {
         const cref_entry *e = cur;
         add_line(L_TITLE, e->name, strlen(e->name));
-        snprintf(b, sizeof(b), strcmp(e->header, "language") ? "#include <%s>" : "C language", e->header);
+        if (!strcmp(e->header, "c++")) snprintf(b, sizeof(b), "C++ language (g++)");      /* ধাপ ১৭গ */
+        else snprintf(b, sizeof(b), strcmp(e->header, "language") ? "#include <%s>" : "C language", e->header);
         add_line(L_TEXT, b, strlen(b));
         if (*e->summary) add_wrapped(L_TEXT, e->summary, 0);
         if (*e->also) {
@@ -257,14 +259,15 @@ static void try_it(void)
     char path[128], name[48];
     const char *argv[3];
     FILE *f;
-    int i, j = 0, lua;
+    int i, j = 0, lua, cpp;
     if (!cur || !*cur->example) return;
     for (i = 0; cur->name[i] && j < (int)sizeof(name) - 1; i++)
         name[j++] = isalnum((unsigned char)cur->name[i]) ? cur->name[i] : '_';
     name[j] = 0;
     /* ধাপ ১৯গ: Lua-র game মডিউলের পাতা (header "lua game") — .lua ফাইল, luagame দিয়ে চালানো */
     lua = !strcmp(cur->header, "lua game");
-    snprintf(path, sizeof(path), "/tmp/cref-%s.%s", name, lua ? "lua" : "c");
+    cpp = cref_is_cpp(cur);                      /* ধাপ ১৭গ: C++ — .cpp, Code g++ দিয়ে বানায় */
+    snprintf(path, sizeof(path), "/tmp/cref-%s.%s", name, lua ? "lua" : cpp ? "cpp" : "c");
     f = fopen(path, "w");
     if (!f) {
         snprintf(status, sizeof(status), "cannot write %s", path);
@@ -284,7 +287,8 @@ static void try_it(void)
     argv[1] = path;
     argv[2] = NULL;
     ui_launch(argv, "/tmp");
-    snprintf(status, sizeof(status), "Opened %s in Code - press F5 to compile and run", path);
+    snprintf(status, sizeof(status), cpp ? "Opened %s in Code - F5 compiles with g++ (rozpkg install binutils gcc) and runs"
+                                         : "Opened %s in Code - press F5 to compile and run", path);
 }
 
 /* ---------- আঁকা ---------- */

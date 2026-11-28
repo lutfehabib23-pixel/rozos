@@ -1,0 +1,677 @@
+@entry cpp-hello
+@also c++ cpp g++ hello-cpp
+@header c++
+@summary The first C++ program: build it with g++ inside rozOS.
+@desc
+C++ is C with classes, templates and a big standard library (strings,
+vectors, maps, streams ...). rozOS runs GCC's C++ compiler, g++, after
+    rozpkg install binutils gcc
+Save the program as hello.cpp, then:
+    g++ hello.cpp -o hello
+    ./hello
+In Code: File > New C++ file, then F5 (Code uses g++ for .cpp files).
+In edit: Ctrl+R. Useful flags: -O2 (faster program), -std=c++20,
+-pthread (for std::thread), -Wall (more warnings).
+Everything in the standard library lives in the namespace std, so
+std::cout is the "cout" of the library.
+@see std::cout std::string std::vector class namespace
+@example
+#include <iostream>
+
+int main()
+{
+    std::cout << "Hello from C++ on rozOS!\n";
+    return 0;
+}
+@end
+
+@entry std::cout
+@also cout cin cerr endl std::cin std::cerr std::endl iostream std::getline
+@header iostream
+@syntax std::cout << value << value ...;
+@syntax std::cin >> variable;
+@syntax std::getline(std::cin, line);
+@summary Print to the screen and read the keyboard with streams.
+@desc
+std::cout writes to standard output, std::cerr to standard error, std::cin
+reads standard input. << and >> work for every built-in type and for
+std::string, so there is no format string like printf's. '\n' ends a line;
+std::endl does the same and also flushes the output (slower in loops).
+std::cin >> word reads one word; std::getline(std::cin, line) reads a whole
+line. In a condition a stream is true while reading works, so
+    while (std::cin >> x) ...
+reads until the end of the input.
+@returns
+The stream itself, so calls can be chained.
+@see cpp-hello std::string std::stringstream printf
+@input
+41 rozOS
+@example
+#include <iostream>
+#include <string>
+
+int main()
+{
+    int n;
+    std::string name;
+    std::cout << "number and name: ";
+    std::cin >> n >> name;
+    std::cout << "\n" << name << " + 1 = " << n + 1 << '\n';
+    std::cerr << "(this line goes to stderr)\n";
+    return 0;
+}
+@end
+
+@entry std::string
+@also std::to_string to_string std::stoi stoi std::stod
+@header string
+@syntax std::string s = "text";
+@syntax s.size()  s += "more"  s.substr(pos, len)  s.find("x")
+@summary A text string that grows by itself (no buffer sizes).
+@desc
+std::string owns its memory: adding text with + or += makes it longer, and
+it is freed automatically. Useful members: size(), empty(), substr(pos,
+len), find(text) (returns std::string::npos if not found), replace,
+insert, erase, c_str() (a const char * for C functions like printf).
+Compare with ==, <. std::to_string(42) turns a number into a string,
+std::stoi("42") and std::stod("3.5") turn a string into a number.
+UTF-8 (Bangla) text works, but size() counts bytes, not letters.
+@see std::cout std::vector std::stringstream strings
+@example
+#include <iostream>
+#include <string>
+
+int main()
+{
+    std::string s = "rozOS";
+    s += " is " + std::to_string(64) + "-bit";
+    std::cout << s << " (" << s.size() << " bytes)\n";
+    std::string::size_type at = s.find("64");
+    if (at != std::string::npos)
+        std::cout << "found 64 at " << at << ", word: " << s.substr(0, 5) << '\n';
+    int n = std::stoi("123") + 1;
+    std::cout << n << '\n';
+    return 0;
+}
+@end
+
+@entry std::vector
+@also vector push_back
+@header vector
+@syntax std::vector<T> v;   v.push_back(x);   v[i]   v.size()
+@summary A growing array: add items and it makes room by itself.
+@desc
+std::vector<int> holds ints, std::vector<std::string> strings, and so on.
+push_back adds at the end, pop_back removes the last, v[i] reads or writes
+item i (no bounds check; v.at(i) checks and throws), size() is the count,
+clear() empties it, insert/erase change the middle. A vector can be
+initialised with a list: std::vector<int> v{3, 1, 2}. Loop over it with a
+range-for. The memory is freed automatically.
+@see range-for std::sort std::map template
+@example
+#include <iostream>
+#include <vector>
+
+int main()
+{
+    std::vector<int> v{5, 3, 8};
+    v.push_back(1);
+    v[0] = 50;
+    int sum = 0;
+    for (int x : v) sum += x;
+    std::cout << "items " << v.size() << ", sum " << sum << ", last " << v.back() << '\n';
+    return 0;
+}
+@end
+
+@entry std::map
+@also std::unordered_map unordered_map std::set
+@header map
+@syntax std::map<Key, Value> m;   m[key] = value;   m.count(key)   m.find(key)
+@summary Key -> value tables (dictionaries), sorted or hashed.
+@desc
+std::map keeps its keys sorted; std::unordered_map (header <unordered_map>)
+uses a hash table and is usually faster but unordered. m[key] gives the
+value, creating it (0, "" ...) if the key is new. m.count(key) is 1 if the
+key exists, m.find(key) returns an iterator (m.end() if not found),
+m.erase(key) removes it. Looping gives pairs: p.first is the key,
+p.second the value. std::set (header <set>) is a sorted set of keys only.
+@see std::vector range-for auto-cpp
+@example
+#include <iostream>
+#include <map>
+#include <string>
+
+int main()
+{
+    std::map<std::string, int> count;
+    const char *words[] = {"apple", "pear", "apple", "fig", "apple"};
+    for (const char *w : words) count[w]++;
+    for (const auto &p : count)
+        std::cout << p.first << ": " << p.second << '\n';
+    std::cout << "has pear? " << count.count("pear") << '\n';
+    return 0;
+}
+@end
+
+@entry std::sort
+@also sort std::find std::reverse std::count std::max_element algorithm
+@header algorithm
+@syntax std::sort(v.begin(), v.end());
+@syntax std::sort(v.begin(), v.end(), compare);
+@summary Sort, search and count in containers (vector, array, string).
+@desc
+<algorithm> works on ranges given by two iterators: begin() and end().
+std::sort sorts ascending, or by your own compare function (a lambda that
+returns true if a comes before b). std::find returns an iterator to the
+first match (end() if none), std::count counts matches, std::reverse turns
+the order around, std::max_element / std::min_element find the largest or
+smallest. Much easier than qsort.
+@see std::vector lambda qsort
+@example
+#include <algorithm>
+#include <iostream>
+#include <vector>
+
+int main()
+{
+    std::vector<int> v{7, 2, 9, 4};
+    std::sort(v.begin(), v.end());
+    for (int x : v) std::cout << x << ' ';
+    std::sort(v.begin(), v.end(), [](int a, int b) { return a > b; });
+    std::cout << "| biggest first: " << v[0];
+    bool has4 = std::find(v.begin(), v.end(), 4) != v.end();
+    std::cout << " | has 4: " << has4 << '\n';
+    return 0;
+}
+@end
+
+@entry class
+@also constructor destructor this public private member-function
+@header c++
+@syntax class Name { public: Name(args); ~Name(); void f(); private: int x; };
+@summary Classes: data and the functions that work on it, in one type.
+@desc
+A class bundles member variables and member functions. public members can
+be used from outside, private ones only inside the class (struct is the
+same but public by default). The constructor (same name as the class)
+runs when an object is made; the destructor (~Name) runs when it goes away
+- at the end of its block, or on delete. Inside a member function, this
+points to the object. Member functions marked const promise not to change
+the object. A constructor's ": x(a)" list initialises members.
+@see virtual operator-overloading std::unique_ptr new
+@example
+#include <iostream>
+#include <string>
+
+class Counter {
+public:
+    Counter(std::string name) : name_(name), n_(0) {}
+    ~Counter() { std::cout << name_ << " done at " << n_ << '\n'; }
+    void add(int k) { n_ += k; }
+    int value() const { return n_; }
+private:
+    std::string name_;
+    int n_;
+};
+
+int main()
+{
+    Counter c("clicks");
+    c.add(2);
+    c.add(3);
+    std::cout << "value " << c.value() << '\n';
+    return 0;                       /* the destructor prints here */
+}
+@end
+
+@entry virtual
+@also inheritance override polymorphism base-class
+@header c++
+@syntax class Derived : public Base { void f() override; };
+@summary Inheritance: a class built on another, with virtual functions.
+@desc
+class Dog : public Animal makes Dog an Animal with extra parts. A virtual
+function can be replaced (override) in the derived class; calling it
+through a Base pointer or reference runs the derived version - that is
+polymorphism. A base class with virtual functions should have a virtual
+destructor. "= 0" makes a function pure virtual: the class is then
+abstract and only derived classes can be created.
+@see class std::unique_ptr
+@example
+#include <iostream>
+#include <memory>
+#include <vector>
+
+struct Shape {
+    virtual ~Shape() {}
+    virtual double area() const = 0;
+};
+struct Square : Shape {
+    double s;
+    Square(double side) : s(side) {}
+    double area() const override { return s * s; }
+};
+struct Circle : Shape {
+    double r;
+    Circle(double radius) : r(radius) {}
+    double area() const override { return 3.14159 * r * r; }
+};
+
+int main()
+{
+    std::vector<std::unique_ptr<Shape>> shapes;
+    shapes.push_back(std::make_unique<Square>(2));
+    shapes.push_back(std::make_unique<Circle>(1));
+    for (const auto &s : shapes) std::cout << s->area() << '\n';
+    return 0;
+}
+@end
+
+@entry operator-overloading
+@also operator-cpp overloading
+@header c++
+@syntax Type operator+(const Type &a, const Type &b);
+@summary Give operators (+, ==, <<) a meaning for your own types.
+@desc
+Write a function named operator+ (or operator==, operator<, operator[] ...)
+and the operator works with your class. operator<< with std::ostream lets
+std::cout print your type. Keep the meaning natural: + should add.
+@see class std::cout
+@example
+#include <iostream>
+
+struct Vec2 {
+    double x, y;
+};
+
+Vec2 operator+(Vec2 a, Vec2 b) { return Vec2{a.x + b.x, a.y + b.y}; }
+bool operator==(Vec2 a, Vec2 b) { return a.x == b.x && a.y == b.y; }
+std::ostream &operator<<(std::ostream &o, Vec2 v) { return o << "(" << v.x << ", " << v.y << ")"; }
+
+int main()
+{
+    Vec2 a{1, 2}, b{3, 4};
+    std::cout << a + b << (a + b == Vec2{4, 6} ? " ok" : " ?") << '\n';
+    return 0;
+}
+@end
+
+@entry template
+@also typename generic templates
+@header c++
+@syntax template <typename T> T biggest(T a, T b);
+@summary Templates: one function or class for many types.
+@desc
+A template is a pattern; the compiler makes a real function for every type
+it is used with. std::vector<int> and std::map<std::string, int> are class
+templates from the library. The type is usually found from the arguments
+(biggest(3, 4) uses int), or given in <> (biggest<double>(3, 4.5)).
+Templates live completely in headers.
+@see std::vector class auto-cpp
+@example
+#include <iostream>
+#include <string>
+
+template <typename T>
+T biggest(T a, T b)
+{
+    return a > b ? a : b;
+}
+
+template <typename T>
+struct Pair {
+    T first, second;
+    T sum() const { return first + second; }
+};
+
+int main()
+{
+    std::cout << biggest(3, 9) << ' ' << biggest(2.5, 1.5) << ' '
+              << biggest(std::string("pear"), std::string("apple")) << '\n';
+    Pair<int> p{20, 22};
+    std::cout << p.sum() << '\n';
+    return 0;
+}
+@end
+
+@entry namespace
+@also using std-namespace
+@header c++
+@syntax namespace name { ... }    name::thing    using std::cout;
+@summary Namespaces keep names apart (std::, your own).
+@desc
+The standard library is in namespace std. Your own code can use a
+namespace too, so two libraries can both have a "draw" function.
+"using std::cout;" lets you write cout alone; "using namespace std;"
+does that for everything in std - fine in small programs, best avoided in
+headers.
+@see cpp-hello class
+@example
+#include <iostream>
+
+namespace geometry {
+    const double pi = 3.14159;
+    double circle_area(double r) { return pi * r * r; }
+}
+
+int main()
+{
+    using std::cout;
+    cout << geometry::circle_area(2.0) << '\n';
+    return 0;
+}
+@end
+
+@entry references
+@also reference-cpp const-reference pass-by-reference
+@header c++
+@syntax void f(int &x);    void g(const std::string &s);
+@summary References: another name for a variable (no pointer syntax).
+@desc
+int &r = x makes r another name for x: changing r changes x. A function
+taking int & can change the caller's variable (like a pointer, but without
+* and &). const std::string & passes a big object without copying it and
+without allowing changes - the usual way to pass strings and vectors.
+@see pointers functions std::string
+@example
+#include <iostream>
+#include <string>
+
+void twice(int &x) { x *= 2; }
+std::size_t length(const std::string &s) { return s.size(); }
+
+int main()
+{
+    int n = 21;
+    twice(n);
+    std::cout << n << ' ' << length("rozOS") << '\n';
+    return 0;
+}
+@end
+
+@entry lambda
+@also closure lambda-capture
+@header c++
+@syntax [capture](params) { body }
+@summary Small unnamed functions written right where they are used.
+@desc
+A lambda is a function made in the middle of an expression - handy for
+std::sort, std::for_each or std::thread. The [] part says which outside
+variables it can use: [x] copies x, [&x] uses x itself, [=] copies all,
+[&] uses all by reference. It can be stored in auto or in std::function.
+@see std::sort std::thread auto-cpp
+@example
+#include <algorithm>
+#include <iostream>
+#include <vector>
+
+int main()
+{
+    std::vector<int> v{1, 2, 3, 4, 5};
+    int total = 0;
+    std::for_each(v.begin(), v.end(), [&total](int x) { total += x; });
+    auto square = [](int x) { return x * x; };
+    std::cout << "total " << total << ", 7 squared " << square(7) << '\n';
+    return 0;
+}
+@end
+
+@entry range-for
+@also for-each auto-cpp
+@header c++
+@syntax for (const auto &item : container) { ... }
+@summary Loop over every item of a container; auto picks the type.
+@desc
+"for (x : v)" visits every item of a vector, map, string or array.
+auto lets the compiler write the type (in C++ auto means "deduce the
+type", not the old C storage class). Use const auto & to read without
+copying, auto & to change the items in place.
+@see std::vector std::map for
+@example
+#include <iostream>
+#include <vector>
+
+int main()
+{
+    std::vector<int> v{1, 2, 3};
+    for (auto &x : v) x *= 10;          /* change in place */
+    for (const auto &x : v) std::cout << x << ' ';
+    std::cout << '\n';
+    auto pi = 3.14;                     /* double */
+    std::cout << pi << '\n';
+    return 0;
+}
+@end
+
+@entry try
+@also catch throw exception-cpp std::runtime_error std::exception
+@header c++
+@syntax try { ... throw std::runtime_error("why"); } catch (const std::exception &e) { e.what(); }
+@summary Exceptions: report an error by throwing, handle it with catch.
+@desc
+throw stops the function and jumps to the nearest matching catch, cleaning
+up local objects on the way (their destructors run). Library errors derive
+from std::exception (header <stdexcept> has runtime_error, out_of_range,
+invalid_argument ...); e.what() is the message. An exception nobody
+catches ends the program. vector::at and std::stoi throw on bad input.
+@see class std::string errors
+@example
+#include <iostream>
+#include <stdexcept>
+#include <vector>
+
+double divide(double a, double b)
+{
+    if (b == 0) throw std::runtime_error("division by zero");
+    return a / b;
+}
+
+int main()
+{
+    try {
+        std::cout << divide(10, 4) << '\n';
+        std::cout << divide(1, 0) << '\n';
+    } catch (const std::exception &e) {
+        std::cout << "error: " << e.what() << '\n';
+    }
+    std::vector<int> v(3);
+    try { v.at(10) = 1; } catch (const std::out_of_range &) { std::cout << "out of range\n"; }
+    return 0;
+}
+@end
+
+@entry new
+@also delete new[] delete[]
+@header c++
+@syntax T *p = new T(args);   delete p;   T *a = new T[n];   delete[] a;
+@summary Make objects on the heap (prefer std::unique_ptr or std::vector).
+@desc
+new makes an object on the heap and runs its constructor; delete runs the
+destructor and frees it. Arrays use new[] and delete[]. Forgetting delete
+leaks memory, deleting twice crashes - so modern C++ uses
+std::make_unique (freed automatically) or std::vector instead of raw new.
+@see std::unique_ptr class malloc
+@example
+#include <iostream>
+
+struct Point {
+    int x, y;
+    Point(int a, int b) : x(a), y(b) { std::cout << "made\n"; }
+    ~Point() { std::cout << "gone\n"; }
+};
+
+int main()
+{
+    Point *p = new Point(3, 4);
+    std::cout << p->x + p->y << '\n';
+    delete p;
+    int *a = new int[5]();
+    a[4] = 9;
+    std::cout << a[4] << '\n';
+    delete[] a;
+    return 0;
+}
+@end
+
+@entry std::unique_ptr
+@also unique_ptr std::make_unique make_unique std::shared_ptr shared_ptr make_shared RAII
+@header memory
+@syntax auto p = std::make_unique<T>(args);    auto s = std::make_shared<T>(args);
+@summary Smart pointers: heap objects that free themselves (RAII).
+@desc
+std::unique_ptr owns one object and deletes it when the pointer goes out
+of scope - no delete needed. It can be moved (std::move) but not copied.
+std::shared_ptr can be copied; the object is deleted when the last copy is
+gone (use_count() tells how many). This idea - a resource tied to an
+object's lifetime - is called RAII and is how C++ avoids leaks.
+@see new class virtual
+@example
+#include <iostream>
+#include <memory>
+#include <string>
+
+struct File {
+    std::string name;
+    File(std::string n) : name(n) { std::cout << "open " << name << '\n'; }
+    ~File() { std::cout << "close " << name << '\n'; }
+};
+
+int main()
+{
+    {
+        auto f = std::make_unique<File>("a.txt");
+        std::cout << "using " << f->name << '\n';
+    }                                   /* closed here automatically */
+    auto s = std::make_shared<File>("b.txt");
+    auto t = s;
+    std::cout << "owners: " << s.use_count() << '\n';
+    return 0;
+}
+@end
+
+@entry std::ifstream
+@also ifstream ofstream std::ofstream fstream std::fstream
+@header fstream
+@syntax std::ofstream out("file.txt");   out << "text";
+@syntax std::ifstream in("file.txt");    std::getline(in, line);
+@summary Read and write files with streams.
+@desc
+std::ofstream writes a file (it is created or emptied), std::ifstream reads
+one; both work like std::cout and std::cin. The file closes when the
+object goes away. "if (!in)" checks that opening worked. Open with
+std::ios::app to add at the end. For binary data use .read/.write.
+@see std::cout std::stringstream fopen
+@example
+#include <fstream>
+#include <iostream>
+#include <string>
+
+int main()
+{
+    {
+        std::ofstream out("notes.txt");
+        out << "first line\n" << 42 << '\n';
+    }
+    std::ifstream in("notes.txt");
+    if (!in) { std::cerr << "cannot open\n"; return 1; }
+    std::string line;
+    int n = 0;
+    while (std::getline(in, line)) std::cout << ++n << ": " << line << '\n';
+    return 0;
+}
+@end
+
+@entry std::stringstream
+@also stringstream std::istringstream istringstream std::ostringstream ostringstream sstream
+@header sstream
+@syntax std::ostringstream o;  o << x;  o.str()     std::istringstream in(text);  in >> x;
+@summary Build strings with << or take them apart with >>.
+@desc
+std::ostringstream collects output like std::cout, then .str() gives the
+text - an easy way to format numbers into a string. std::istringstream
+reads from a string like std::cin, e.g. to split a line into words or
+numbers.
+@see std::string std::cout
+@example
+#include <iostream>
+#include <sstream>
+#include <string>
+
+int main()
+{
+    std::ostringstream o;
+    o << "pi is about " << 3.14 << ", " << 7 << " days";
+    std::string s = o.str();
+    std::cout << s << '\n';
+    std::istringstream in("10 20 30");
+    int x, sum = 0;
+    while (in >> x) sum += x;
+    std::cout << "sum " << sum << '\n';
+    return 0;
+}
+@end
+
+@entry std::thread
+@also std::mutex std::lock_guard lock_guard std::async
+@header thread
+@syntax std::thread t(function, args...);  t.join();
+@syntax std::mutex m;  { std::lock_guard<std::mutex> lock(m); ... }
+@summary Run functions at the same time (build with -pthread).
+@desc
+std::thread starts a function (often a lambda) in a new thread; join()
+waits for it. Threads that change the same data must take turns: a
+std::mutex, held by a std::lock_guard for the length of a block, makes
+sure only one thread is inside. Build with:  g++ prog.cpp -o prog -pthread
+(Code adds -pthread by itself). rozOS runs threads on one CPU for now.
+@see lambda pthread_create pthread_mutex_lock
+@example
+#include <iostream>
+#include <mutex>
+#include <thread>
+
+int main()
+{
+    int total = 0;
+    std::mutex m;
+    auto work = [&](int n) {
+        for (int i = 0; i < n; i++) {
+            std::lock_guard<std::mutex> lock(m);
+            total++;
+        }
+    };
+    std::thread a(work, 1000), b(work, 1000);
+    a.join();
+    b.join();
+    std::cout << "total " << total << '\n';
+    return 0;
+}
+@end
+
+@entry std::chrono
+@also chrono sleep_for std::this_thread::sleep_for steady_clock
+@header chrono
+@syntax auto t0 = std::chrono::steady_clock::now();
+@syntax std::this_thread::sleep_for(std::chrono::milliseconds(100));
+@summary Measure time and wait, with units (ms, s) checked by the compiler.
+@desc
+steady_clock::now() gives a time point; subtracting two gives a duration,
+and duration_cast turns it into milliseconds, seconds ... sleep_for
+(header <thread>) pauses the thread. Units like std::chrono::milliseconds
+cannot be mixed up by accident.
+@see std::thread clock_gettime nanosleep
+@example
+#include <chrono>
+#include <iostream>
+#include <thread>
+
+int main()
+{
+    auto t0 = std::chrono::steady_clock::now();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    auto t1 = std::chrono::steady_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+    std::cout << "slept about " << (ms >= 50 ? "50" : "less than 50") << " ms\n";
+    return 0;
+}
+@end

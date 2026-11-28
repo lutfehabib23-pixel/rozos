@@ -7,6 +7,8 @@
 #      এন্ট্রির @entry বা @also-তে আছে।
 #   ৩. উদাহরণ: প্রতিটা উদাহরণ rozlibc দিয়ে কম্পাইল; "@check run" হলে চালিয়ে দেখা (rozlibc-এর
 #      প্রোগ্রাম হোস্ট Linux-এও চলে — একই syscall), exit 0 আর ৫ সেকেন্ডের মধ্যে শেষ হতে হবে।
+#      ধাপ ১৭গ: C++-এর পাতা (@header "c++" বা iostream, vector …) --cxx দিয়ে (x86_64-rozos-g++,
+#      toolchain/build-rozos-toolchain.sh cross) — না থাকলে সেগুলো বাদ, সংখ্যা ছাপে।
 #
 # Makefile থেকে: make cref-check  (ফেল করলে কোনটা কেন, ছাপে)
 import argparse, os, re, shlex, subprocess, sys, tempfile
@@ -53,6 +55,16 @@ def parse(path):
     return ents
 
 
+# ধাপ ১৭গ: rozcref.c-র cref_is_cpp()-এর একই তালিকা
+CPP_HEADERS = {"c++", "iostream", "string", "vector", "map", "unordered_map", "set", "algorithm", "memory",
+               "fstream", "sstream", "thread", "mutex", "chrono", "stdexcept", "utility", "functional",
+               "array", "list", "deque", "queue", "optional", "numeric"}
+
+
+def is_cpp(e):
+    return e["header"] in CPP_HEADERS
+
+
 def own_decls(header, incdir):
     """হেডার নিজে যে ফাংশন ঘোষণা করে (যেগুলো সে #include করে সেগুলো বাদ)
     ধাপ ১৯গ: incdir একাধিক ডিরেক্টরি হতে পারে (ফাঁকা দিয়ে আলাদা)"""
@@ -93,6 +105,7 @@ def main():
     ap.add_argument("--libs", default="")
     ap.add_argument("--tcc", default="", help="tcc command too (examples must build with tcc in rozOS)")
     ap.add_argument("--only", default="", help="check only these entry names (comma list)")
+    ap.add_argument("--cxx", default="", help="C++ compiler for C++ pages (x86_64-rozos-g++); none = skip them")
     # ধাপ ১৯ছ: প্যাকেজের হেডার (যেমন sqlite3.h) বানানো না থাকলে সেই পাতার উদাহরণ বাদ
     ap.add_argument("--skip-header", default="", help="do not build examples of entries with these @header names")
     # ধাপ ১৯গ: "rozgfx.h=a.a,b.a lua.h=liblua.a" — উদাহরণে সেই হেডার থাকলে এই লাইব্রেরিগুলো যোগ
@@ -135,7 +148,7 @@ def main():
     if a.cc:
         only = set(x for x in a.only.split(",") if x)
         tmp = tempfile.mkdtemp(prefix="cref-")
-        built = ran = skipped = 0
+        built = ran = skipped = cpp_skipped = cpp_built = 0
         for i, e in enumerate(ents):
             if only and e["name"] not in only:
                 continue
@@ -144,9 +157,41 @@ def main():
             if e["header"] in a.skip_header.split():
                 skipped += 1
                 continue
-            src = os.path.join(tmp, f"ex{i}.c")
             exe = os.path.join(tmp, f"ex{i}")
-            open(src, "w").write("\n".join(e["example"]) + "\n")
+            if is_cpp(e):                       # ধাপ ১৭গ: C++ — g++ (rozOS-এর টুলচেইন) দিয়ে
+                if not a.cxx:
+                    cpp_skipped += 1
+                    continue
+                src = os.path.join(tmp, f"ex{i}.cpp")
+                open(src, "w").write("\n".join(e["example"]) + "\n")
+                r = subprocess.run(shlex.split(a.cxx) + ["-O1", "-o", exe, src, "-pthread"], capture_output=True, text=True)
+                if r.returncode != 0:
+                    print(f"{e['file']}: {e['name']}: C++ example does not compile:\n{r.stderr[:1500]}")
+                    errors += 1
+                    continue
+                built += 1
+                cpp_built += 1
+            else:
+                src = os.path.join(tmp, f"ex{i}.c")
+                open(src, "w").write("\n".join(e["example"]) + "\n")
+            if is_cpp(e):                       # C++: চালানো এখানেই (C-র পথ নিচে)
+                if e["check"] != "run":
+                    continue
+                wd = os.path.join(tmp, f"wd{i}")
+                os.makedirs(wd, exist_ok=True)
+                try:
+                    r = subprocess.run([exe], input="\n".join(e["input"]) + ("\n" if e["input"] else ""), cwd=wd,
+                                       capture_output=True, text=True, timeout=5,
+                                       env={"PATH": "/bin:/usr/bin", "HOME": wd, "TZ": "UTC"})
+                except subprocess.TimeoutExpired:
+                    print(f"{e['file']}: {e['name']}: C++ example did not finish in 5 s")
+                    errors += 1
+                    continue
+                ran += 1
+                if r.returncode != 0:
+                    print(f"{e['file']}: {e['name']}: C++ example exited with {r.returncode}\n{(r.stdout + r.stderr)[-800:]}")
+                    errors += 1
+                continue
             extra = []
             for item in a.autolib.split():
                 h, _, libs = item.partition("=")
@@ -184,6 +229,9 @@ def main():
                 print(f"{e['file']}: {e['name']}: example exited with {r.returncode}\n{(r.stdout + r.stderr)[-800:]}")
                 errors += 1
         print(f"cref-check: {built} examples compiled, {ran} run" + (f", {skipped} skipped ({a.skip_header})" if skipped else ""))
+        if cpp_built or cpp_skipped:
+            print(f"cref-check: C++ pages: {cpp_built} examples built with {a.cxx or '-'}" +
+                  (f", {cpp_skipped} skipped (no --cxx: toolchain/build-rozos-toolchain.sh cross)" if cpp_skipped else ""))
     if errors:
         print(f"cref-check: {errors} problem(s)")
         sys.exit(1)

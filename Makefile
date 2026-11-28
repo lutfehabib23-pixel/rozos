@@ -1077,8 +1077,11 @@ CREF_AUTOLIB := rozui.h=$(DL)/librozui.a,$(DL)/librozgame.a,$(DL)/librozgfx.a ro
   rozhttp.h=$(DL)/librozhttp.a$(if $(HAVE_BEARSSL),$(comma)$(DL)/libbearssl.a) \
   lua.h=$(DL)/liblua.a lauxlib.h=$(DL)/liblua.a zlib.h=$(DL)/libz.a \
   rozlock.h=$(DL)/librozlock.a$(if $(HAVE_BEARSSL),$(comma)$(DL)/libbearssl.a) sqlite3.h=$(SQLITE_PKG)/usr/lib/libsqlite3.a
+# ধাপ ১৭গ: C++-এর পাতার উদাহরণ — rozOS-এর ক্রস g++ থাকলে (build-rozos-toolchain.sh cross), নইলে বাদ
+CREF_CXX     ?= $(shell command -v x86_64-rozos-g++ 2>/dev/null)
 cref-check: $(LIBC_A) $(LIBC_CRT0) $(DEV_LIBS)
 	@python3 toolchain/cref-check.py --dir docs/cref --include "$(CREF_INCLUDE)" --cover "$(CREF_COVER)" \
+	  $(if $(CREF_CXX),--cxx "$(CREF_CXX)") \
 	  --cc "$(CC)" --cflags "$(USER_CFLAGS)" --ldflags "$(USER_LDFLAGS) $(LIBC_CRT0)" --libs "$(LIBC_A) -lgcc" \
 	  --autolib "$(CREF_AUTOLIB)" \
 	  $(if $(wildcard $(SQLITE_PKG)/usr/include/sqlite3.h),,--skip-header sqlite3.h) \

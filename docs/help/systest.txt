@@ -1,5 +1,5 @@
 # systest - self-test
-`systest` runs 240 checks and prints [ ok ] or [FAIL] for each:
+`systest` runs 242 checks and prints [ ok ] or [FAIL] for each:
   syscalls through `syscall` and `int 0x80`, bad addresses rejected,
   brk and mmap memory, the stack growing on demand, files in /tmp,
   chdir/getcwd, getdents64, fork/execve/wait, crashing children,
@@ -44,5 +44,6 @@
   17a) C++ support in libc: __cxa_atexit order, vfork, DT_* types,
       fnmatch, the default program path ([[toolchain]]).
   17b) IPv6 types for GCC; socket(AF_INET6) refused ([[gcc]]).
+  17c) C++ reference pages, Code's C++ template ([[cref]]).
 The exit code is the number of failures (0 = all good).
 Source: userland/tests/systest.c. See [[processes]], [[syscalls]].

@@ -18,6 +18,11 @@
 
 #include <stddef.h>
 
+/* ধাপ ১৭গ: C++ থেকেও (g++) */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* রোমান লেখা → বাংলা (UTF-8)। ফেরত লেখা বাইট (শেষের '\0' ছাড়া) */
 int rozbn_convert(const char *roman, char *out, size_t size);
 
@@ -37,4 +42,7 @@ void rozbn_reset(rozbn_comp *c);
  * 0 = সাধারণভাবে বসাও (শব্দ শেষ হয়ে গেছে, c খালি) */
 int  rozbn_key(rozbn_comp *c, int key, int *del, char *ins, size_t size);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

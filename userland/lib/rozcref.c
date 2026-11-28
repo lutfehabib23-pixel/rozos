@@ -154,6 +154,20 @@ int cref_load(const char *dir)
 
 static int is_lang(const cref_entry *e) { return !strcmp(e->header, "language"); }
 
+/* ধাপ ১৭গ */
+int cref_is_cpp(const cref_entry *e)
+{
+    static const char *const h[] = {
+        "c++", "iostream", "string", "vector", "map", "unordered_map", "set", "algorithm", "memory",
+        "fstream", "sstream", "thread", "mutex", "chrono", "stdexcept", "utility", "functional",
+        "array", "list", "deque", "queue", "optional", "numeric", NULL
+    };
+    int i;
+    if (!e || !e->header) return 0;
+    for (i = 0; h[i]; i++) if (!strcmp(e->header, h[i])) return 1;
+    return 0;
+}
+
 static int cmp_ent(const void *a, const void *b)
 {
     const cref_entry *x = (const cref_entry *)a, *y = (const cref_entry *)b;
@@ -309,7 +323,9 @@ char *cref_format(const cref_entry *e, int width)
     if (!e) return NULL;
     if (width < 40) width = 40;
     memset(&b, 0, sizeof(b));
-    if (strcmp(e->header, "language"))
+    if (!strcmp(e->header, "c++"))                        /* ধাপ ১৭গ */
+        snprintf(head, sizeof(head), "%s  -  C++ language\n", e->name);
+    else if (strcmp(e->header, "language"))
         snprintf(head, sizeof(head), "%s  -  <%s>\n", e->name, e->header);
     else
         snprintf(head, sizeof(head), "%s  -  C language\n", e->name);

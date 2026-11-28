@@ -28,5 +28,11 @@ longer). [[tcc]] stays the compiler that Code and edit use.
   "virtual memory exhausted"                 large C++ needs RAM: 1 GB+
   undefined reference to a libc function      rozlibc lacks it ([[posix]])
 
+== In Code and edit (phase 17c) ==
+Code builds .cpp files with g++ (F5 compiles and runs; File > New C++
+file), and Build > "C files: GCC" uses gcc for .c files too. edit's
+Ctrl+R does the same. C++ pages in the reference: `cref cpp-hello`,
+[[cref]].
+
 Package files: `rozpkg info gcc`. Building it: [[toolchain]].
 See [[c-programming]], [[self-hosting]].

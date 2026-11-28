@@ -2241,6 +2241,15 @@ static void test_phase17b(void)
     if (fd >= 0) close(fd);
 }
 
+/* ধাপ ১৭গ: C++-এর সহায়িকা আর Code-এর C++ টেমপ্লেট */
+static void test_phase17c(void)
+{
+    const cref_entry *v, *p;
+    check(cref_load(NULL) > 0 && (v = cref_find("vector")) != NULL && cref_is_cpp(v) &&
+          (p = cref_find("printf")) != NULL && !cref_is_cpp(p), "C++ reference pages (cref vector) and cref_is_cpp");
+    check(access("/usr/share/templates/hello.cpp", R_OK) == 0, "Code's C++ template (File > New C++ file)");
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -2277,6 +2286,7 @@ int main(int argc, char **argv)
     test_phase24a();
     test_phase17a();
     test_phase17b();
+    test_phase17c();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }

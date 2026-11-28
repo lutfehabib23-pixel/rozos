@@ -356,7 +356,7 @@ static const char *base_name(const char *p)
 static void update_title(void)
 {
     char t[96];
-    snprintf(t, sizeof(t), "%s%s - Code", modified ? "*" : "", untitled ? "untitled.c" : base_name(path));
+    snprintf(t, sizeof(t), "%s%s - Code", modified ? "*" : "", base_name(path));   /* ধাপ ১৭গ: untitled.c বা untitled.cpp */
     gfx_set_title(t);
 }
 
@@ -440,7 +440,7 @@ static int confirm_discard(void)
     char m[300];
     int a;
     if (!modified) return 1;
-    snprintf(m, sizeof(m), "Save changes to %s?", untitled ? "untitled.c" : base_name(path));
+    snprintf(m, sizeof(m), "Save changes to %s?", base_name(path));
     a = ui_msgbox("Code", m, UI_MB_YESNOCANCEL | UI_MB_QUESTION);
     if (a == UI_YES) return save_file() == 0;
     return a == UI_NO;
@@ -479,6 +479,24 @@ static void new_game_file(void)
     untitled = 1;
     modified = 1;
     snprintf(status_msg, sizeof(status_msg), "New game - F5 compiles and runs, Ctrl+S asks for a name");
+}
+
+/* ধাপ ১৭গ: File > New C++ file — /usr/share/templates/hello.cpp দিয়ে শুরু (নামহীন .cpp) */
+static void new_cpp_file(void)
+{
+    char cwd[256];
+    if (!confirm_discard()) return;
+    if (load_file("/usr/share/templates/hello.cpp") < 0) {
+        clear_all();
+        insert_line(0, "", 0);
+    }
+    if (!getcwd(cwd, sizeof(cwd))) strcpy(cwd, "/home");
+    if (!strcmp(cwd, "/usr/share/templates") || !strcmp(cwd, "/")) strcpy(cwd, "/home");
+    snprintf(path, sizeof(path), "%s/untitled.cpp", cwd);
+    untitled = 1;
+    modified = 1;
+    hl_dirty = 1;
+    snprintf(status_msg, sizeof(status_msg), "New C++ file - F5 compiles with g++ and runs, Ctrl+S asks for a name");
 }
 
 static void open_file(void)
@@ -605,13 +623,84 @@ static void out_add(const char *s)
     if (nout < 400) outl[nout++] = strdup(s);
 }
 
+/* ---------- ধাপ ১৭গ: C++ (g++) আর C-র কম্পাইলার বাছাই ---------- */
+static int c_use_gcc;                    /* 1 = .c ফাইল GCC দিয়ে (/home/.rozcc-তে "gcc") */
+#define CC_CONF "/home/.rozcc"
+
+static void cc_load(void)
+{
+    char b[16] = "";
+    FILE *f = fopen(CC_CONF, "r");
+    if (f) {
+        if (!fgets(b, sizeof(b), f)) b[0] = '\0';
+        fclose(f);
+    }
+    c_use_gcc = !strncmp(b, "gcc", 3);
+}
+
+static void cc_save(void)
+{
+    FILE *f = fopen(CC_CONF, "w");
+    if (f) {
+        fputs(c_use_gcc ? "gcc\n" : "tcc\n", f);
+        fclose(f);
+    }
+}
+
+/* PATH-এর ফোল্ডারে প্রোগ্রাম আছে কি (gcc/g++ প্যাকেজ /usr/bin-এ) */
+static int have_prog(const char *name)
+{
+    static const char *const dirs[] = { "/bin/", "/usr/bin/", "/usr/local/bin/" };
+    char p[128];
+    int i;
+    for (i = 0; i < 3; i++) {
+        snprintf(p, sizeof(p), "%s%s", dirs[i], name);
+        if (access(p, X_OK) == 0) return 1;
+    }
+    return 0;
+}
+
+static int ends_with(const char *s, const char *e)
+{
+    size_t a = strlen(s), b = strlen(e);
+    return a > b && !strcmp(s + a - b, e);
+}
+
+/* C++ সোর্স: .cpp .cc .cxx .c++ .hpp */
+static int is_cpp_path(const char *p)
+{
+    return ends_with(p, ".cpp") || ends_with(p, ".cc") || ends_with(p, ".cxx") || ends_with(p, ".c++") ||
+           ends_with(p, ".hpp") || ends_with(p, ".hh");
+}
+
 static void exe_name(char *out, size_t size)
 {
     size_t n;
+    static const char *const ext[] = { ".cpp", ".cxx", ".c++", ".cc", ".c" };   /* ধাপ ১৭গ: C++-ও */
+    int i;
     snprintf(out, size, "%s", path);
     n = strlen(out);
-    if (n > 2 && !strcmp(out + n - 2, ".c")) out[n - 2] = '\0';
-    else snprintf(out + n, size - n, ".out");
+    for (i = 0; i < 5; i++) {
+        if (ends_with(out, ext[i])) {
+            out[n - strlen(ext[i])] = '\0';
+            return;
+        }
+    }
+    snprintf(out + n, size - n, ".out");
+}
+
+/* thread ব্যবহার করলে g++/gcc-এ -pthread */
+static int uses_threads(const char *file)
+{
+    char line[512];
+    int yes = 0;
+    FILE *f = fopen(file, "r");
+    if (!f) return 0;
+    while (!yes && fgets(line, sizeof(line), f))
+        if (strstr(line, "include") && (strstr(line, "<thread>") || strstr(line, "<mutex>") ||
+            strstr(line, "<future>") || strstr(line, "<condition_variable>") || strstr(line, "<pthread.h>"))) yes = 1;
+    fclose(f);
+    return yes;
 }
 
 /* 0 = ঠিক আছে */
@@ -648,8 +737,8 @@ static int extra_libs(const char *file, const char **libs, int max)
 static int compile(void)
 {
     char exe[512], dir[512], buf[512];
-    const char *extra[8];
-    int pfd[2], st = 0, errors = 0, warnings = 0, nextra, i;
+    const char *extra[8], *cc;
+    int pfd[2], st = 0, errors = 0, warnings = 0, nextra, i, cpp, threads;
     pid_t pid;
     FILE *f;
     if (modified || untitled) {
@@ -660,16 +749,36 @@ static int compile(void)
     if (strrchr(dir, '/')) *strrchr(dir, '/') = '\0';
     if (!dir[0]) strcpy(dir, "/");
     out_clear();
+    show_output = 1;
+    /* ধাপ ১৭গ: কোন কম্পাইলার — C++ = g++ (না থাকলে বলে দেওয়া), C = TCC বা (বাছাই করলে) GCC */
+    cpp = is_cpp_path(path);
+    if (cpp) {
+        cc = "g++";
+        if (!have_prog("g++")) {
+            out_add("C++ needs GCC, which is not installed yet. In a terminal:");
+            out_add("    rozpkg update && rozpkg install binutils gcc");
+            out_add("(help gcc) - then press F5 again.");
+            snprintf(status_msg, sizeof(status_msg), "C++ needs: rozpkg install binutils gcc");
+            return -1;
+        }
+    } else if (c_use_gcc && have_prog("gcc")) {
+        cc = "gcc";
+    } else {
+        if (c_use_gcc) out_add("(GCC is not installed - using TCC; rozpkg install binutils gcc)");
+        cc = "tcc";
+    }
+    threads = strcmp(cc, "tcc") && uses_threads(path);
     /* ধাপ ১৮ক: -lrozgame -lm — গেমও Build হয় (না লাগলে কিছু যোগ হয় না) */
     nextra = extra_libs(path, extra, 8);
-    snprintf(buf, sizeof(buf), "tcc -o %s %s", base_name(exe), base_name(path));
+    snprintf(buf, sizeof(buf), "%s -o %s %s", cc, base_name(exe), base_name(path));
     for (i = 0; i < nextra; i++) {
         strncat(buf, " ", sizeof(buf) - strlen(buf) - 1);
         strncat(buf, extra[i], sizeof(buf) - strlen(buf) - 1);
     }
     strncat(buf, " -lrozui -lrozgame -lrozgfx -lm", sizeof(buf) - strlen(buf) - 1);
+    if (threads) strncat(buf, " -pthread", sizeof(buf) - strlen(buf) - 1);
     out_add(buf);
-    show_output = 1;
+    if (strcmp(cc, "tcc")) out_add("(GCC is thorough but slower than TCC - a few seconds is normal)");
     if (pipe(pfd) < 0) { out_add("cannot start the compiler (pipe)"); return -1; }
     pid = fork();
     if (pid == 0) {
@@ -681,13 +790,14 @@ static int compile(void)
         {
             const char *av[20];
             int n = 0;
-            av[n++] = "tcc"; av[n++] = "-o"; av[n++] = base_name(exe); av[n++] = base_name(path);
+            av[n++] = cc; av[n++] = "-o"; av[n++] = base_name(exe); av[n++] = base_name(path);
             for (i = 0; i < nextra; i++) av[n++] = extra[i];
             av[n++] = "-lrozui"; av[n++] = "-lrozgame"; av[n++] = "-lrozgfx"; av[n++] = "-lm";
+            if (threads) av[n++] = "-pthread";
             av[n] = NULL;
-            execvp("tcc", (char *const *)av);
+            execvp(cc, (char *const *)av);
         }
-        printf("cannot run tcc: %s\n", strerror(errno));
+        printf("cannot run %s: %s\n", cc, strerror(errno));
         _exit(127);
     }
     close(pfd[1]);
@@ -749,6 +859,14 @@ static const char *const kw[] = {
     "return", "goto", "sizeof", "typedef", "struct", "union", "enum", "static", "extern",
     "const", "volatile", "register", "inline", "auto", "restrict", NULL
 };
+/* ধাপ ১৭গ: C++ ফাইলে (.cpp …) বাড়তি keyword */
+static const char *const cppkw[] = {
+    "class", "namespace", "template", "typename", "public", "private", "protected", "virtual",
+    "override", "final", "new", "delete", "this", "using", "try", "catch", "throw", "operator",
+    "friend", "constexpr", "consteval", "noexcept", "nullptr", "true", "false", "static_cast",
+    "dynamic_cast", "reinterpret_cast", "const_cast", "explicit", "mutable", "decltype", "concept",
+    "requires", "co_await", "co_return", "co_yield", "export", "import", "module", NULL
+};
 static const char *const types[] = {
     "int", "char", "void", "short", "long", "float", "double", "signed", "unsigned", "size_t",
     "ssize_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t", "int8_t", "int16_t", "int32_t",
@@ -809,7 +927,7 @@ static int color_line(const struct line *l, int st, uint32_t *col)
             int b = i;
             uint32_t c;
             while (i < n && (isalnum((unsigned char)s[i]) || s[i] == '_')) i++;
-            c = pre ? C_PRE : in_list(kw, s + b, i - b) ? C_KW : in_list(types, s + b, i - b) ? C_TYPE : C_TEXT;
+            c = pre ? C_PRE : (in_list(kw, s + b, i - b) || (is_cpp_path(path) && in_list(cppkw, s + b, i - b))) ? C_KW : in_list(types, s + b, i - b) ? C_TYPE : C_TEXT;
             while (b < i) col[b++] = c;
             continue;
         }
@@ -841,10 +959,12 @@ enum {
     M_COMPILE, M_RUN, M_COMPILE2, M_RUN2,
     M_NUMS, M_OUT, M_F16, M_F20, M_F24,
     M_KEYS, M_ABOUT,
-    M_CREF_WORD, M_CREF_INDEX                    /* ধাপ ১৯ক */
+    M_CREF_WORD, M_CREF_INDEX,                   /* ধাপ ১৯ক */
+    M_NEWCPP, M_CC_TCC, M_CC_GCC                 /* ধাপ ১৭গ */
 };
 static const struct ui_menuitem file_items[] = {
-    { "New", "Ctrl+N", M_NEW }, { "New game", NULL, M_NEWGAME }, { "Open...", "Ctrl+O", M_OPEN }, { "-", NULL, 0 },
+    { "New", "Ctrl+N", M_NEW }, { "New C++ file", NULL, M_NEWCPP }, { "New game", NULL, M_NEWGAME },
+    { "Open...", "Ctrl+O", M_OPEN }, { "-", NULL, 0 },
     { "Save", "Ctrl+S", M_SAVE }, { "Save As...", "F12", M_SAVEAS }, { "-", NULL, 0 },
     { "Quit", "Ctrl+Q", M_QUIT }
 };
@@ -857,9 +977,11 @@ static const struct ui_menuitem search_items[] = {
     { "Find...", "Ctrl+F", M_FIND }, { "Find Next", "F3", M_NEXT },
     { "Replace...", "Ctrl+E", M_REPL }, { "-", NULL, 0 }, { "Go to Line...", "Ctrl+G", M_GOTO }
 };
-static const struct ui_menuitem build_items[] = {
+/* ধাপ ১৭গ: C ফাইলের কম্পাইলার বাছাই (C++ সবসময় g++) — menu_labels() লেবেল বদলায় */
+static struct ui_menuitem build_items[] = {
     { "Compile", "Ctrl+B", M_COMPILE }, { "Compile and Run", "Ctrl+R", M_RUN }, { "-", NULL, 0 },
-    { "Compile (F7)", "F7", M_COMPILE2 }, { "Run (F5)", "F5", M_RUN2 }
+    { "Compile (F7)", "F7", M_COMPILE2 }, { "Run (F5)", "F5", M_RUN2 }, { "-", NULL, 0 },
+    { "(o) C files: TCC (fast)", NULL, M_CC_TCC }, { "( ) C files: GCC", NULL, M_CC_GCC }
 };
 static struct ui_menuitem view_items[] = {
     { "[x] Line numbers", NULL, M_NUMS }, { "[ ] Output panel", "F8", M_OUT }, { "-", NULL, 0 },
@@ -872,8 +994,8 @@ static const struct ui_menuitem help_items[] = {
     { "-", NULL, 0 }, { "About Code", NULL, M_ABOUT }
 };
 static const struct ui_menu menus[] = {
-    { "File", file_items, 8 }, { "Edit", edit_items, 8 }, { "Search", search_items, 5 },
-    { "Build", build_items, 5 }, { "View", view_items, 6 }, { "Help", help_items, 5 }
+    { "File", file_items, 9 }, { "Edit", edit_items, 8 }, { "Search", search_items, 5 },
+    { "Build", build_items, 8 }, { "View", view_items, 6 }, { "Help", help_items, 5 }
 };
 
 static void set_font(int px)
@@ -908,6 +1030,8 @@ static void menu_labels(void)
     view_items[3].label = font_px == 16 ? "(o) Text size 16" : "( ) Text size 16";
     view_items[4].label = font_px == 20 ? "(o) Text size 20" : "( ) Text size 20";
     view_items[5].label = font_px == 24 ? "(o) Text size 24" : "( ) Text size 24";
+    build_items[6].label = c_use_gcc ? "( ) C files: TCC (fast)" : "(o) C files: TCC (fast)";   /* ধাপ ১৭গ */
+    build_items[7].label = c_use_gcc ? "(o) C files: GCC" : "( ) C files: GCC";
 }
 
 /* ধাপ ১৯ক: C সহায়িকা (crefview) — word = 1 হলে কার্সরের শব্দের পাতা */
@@ -941,6 +1065,13 @@ static void do_action(int id)
     switch (id) {
     case M_NEW: new_file(); break;
     case M_NEWGAME: new_game_file(); break;
+    case M_NEWCPP: new_cpp_file(); break;                      /* ধাপ ১৭গ */
+    case M_CC_TCC: case M_CC_GCC:
+        c_use_gcc = id == M_CC_GCC;
+        cc_save();
+        snprintf(status_msg, sizeof(status_msg), "C files compile with %s%s", c_use_gcc ? "GCC" : "TCC",
+                 c_use_gcc && !have_prog("gcc") ? " - not installed yet: rozpkg install binutils gcc" : "");
+        break;
     case M_OPEN: open_file(); break;
     case M_SAVE: save_file(); break;
     case M_SAVEAS: save_as(); break;
@@ -1350,6 +1481,7 @@ int main(int argc, char **argv)
         return 1;
     }
     font = gfx_font_mono();                      /* ধাপ ২৩ক: JetBrains Mono (না থাকলে PSF) */
+    cc_load();                                   /* ধাপ ১৭গ: C ফাইলের কম্পাইলার (TCC/GCC) */
     cw = gfx_font_width(font);
     chh = gfx_font_height(font);
     if (argc > 1) {

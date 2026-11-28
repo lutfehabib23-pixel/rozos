@@ -36,6 +36,15 @@ error line to jump to it. Run (Ctrl+R / F5) compiles, then starts
 ./NAME in a new terminal window ([[rozterm]] -w: it waits for a key at
 the end). Graphics programs ([[rozgfx]], [[rozui]]) open their own window.
 
+== C++ and GCC (phase 17c) ==
+Files named .cpp (.cc, .cxx) compile with g++ - File > New C++ file
+starts one. Install it first: `rozpkg install binutils gcc` ([[gcc]]);
+without it the Output panel says so. Programs that use std::thread get
+-pthread by themselves. C++ words (class, template, nullptr ...) are
+coloured. For .c files, Build > "C files: TCC (fast)" or "C files: GCC"
+picks the compiler (saved in /home/.rozcc, edit uses it too). GCC takes
+a few seconds; TCC is almost instant.
+
 == Window ==
 Maximise or resize and everything (text, panel, scroll bar) fits the
 new size. [X] with unsaved changes asks Save / Don't save / Cancel.

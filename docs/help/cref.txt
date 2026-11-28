@@ -1,4 +1,4 @@
-# cref, crefview - the C reference (phase 19a, 19b, 19c)
+# cref, crefview - the C (and C++) reference (phase 19a, 19b, 19c, 17c)
 Every function of the C library with its syntax, what it does, what it
 returns, and a small program that uses it - like the help of Turbo C.
 Also the C language itself: types, if/for/while, pointers, structs,
@@ -26,6 +26,14 @@ printf and scanf codes, operators, the preprocessor ...
   `cref -l`            the headers;  `cref -l math.h`  all of one header
   `cref -x qsort > q.c; tcc q.c -o q; ./q`    take an example and run it
   `cref -s fopen`      only the syntax
+
+== C++ (phase 17c) ==
+21 pages under [ C++ language ] and the C++ headers: cpp-hello, class,
+virtual, template, namespace, references, lambda, range-for, try, new,
+operator-overloading, std::cout, std::string, std::vector, std::map,
+std::sort, std::unique_ptr, std::ifstream, std::stringstream, std::thread,
+std::chrono. `cref vector` works too. Try it opens the example as a .cpp
+file - Code builds it with g++ ([[gcc]]).
 
 == What is covered ==
 Phase 19a: the C language, <stdio.h>, <stdlib.h>, <string.h>,

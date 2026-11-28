@@ -340,7 +340,7 @@ int main(void)
 @end
 
 @entry cref_load
-@also rozcref rozcref.h librozcref cref_entry cref_load_file cref_count cref_at cref_find cref_search cref_format cref_headers CREF_DIR .ref
+@also rozcref rozcref.h librozcref cref_entry cref_load_file cref_count cref_at cref_find cref_search cref_format cref_headers cref_is_cpp CREF_DIR .ref
 @header rozcref.h
 @syntax int  cref_load(const char *dir);             /* NULL = /usr/share/cref */
 @syntax int  cref_load_file(const char *path);
@@ -350,6 +350,7 @@ int main(void)
 @syntax int  cref_search(const char *word, const cref_entry **out, int max);
 @syntax char *cref_format(const cref_entry *e, int width);
 @syntax int  cref_headers(const char **out, int max);
+@syntax int  cref_is_cpp(const cref_entry *e);
 @syntax build: tcc prog.c -lrozcref -o prog
 @summary Read this C reference from your own program (cref, crefview and the editors use it).
 @desc
@@ -359,7 +360,9 @@ check, input and example ... end, each written with an at-sign first
 (look at any file there). cref_load reads them all; cref_find
 looks a name up (also the @also names); cref_search finds pages that
 mention a word; cref_format makes the readable page text (free it);
-cref_headers lists the headers. A cref_entry has name, also, header,
+cref_headers lists the headers. cref_is_cpp tells whether a page is C++
+(header "c++" or a C++ library like iostream; its example needs g++ and a
+.cpp name). A cref_entry has name, also, header,
 syntax, summary, desc, returns, see, example, check, input, file. You can
 add your own pages: a new .ref file in /usr/share/cref.
 @returns
