@@ -9,14 +9,15 @@
 # ফল: dist/packages/rozword-VERSION.tar.gz আর index.txt (mkpkg.sh)।
 set -euo pipefail
 
-VERSION=1.1
+VERSION=1.2
 CC=${CC:-${CROSS-x86_64-elf-}gcc}
 STRIP=${STRIP:-strip}
 WORK=build/packages/rozword
 SRC=ports/rozword
 
 [ -f libc/include/stdio.h ] || { echo "rozOS রিপোর মূল ডিরেক্টরি থেকে চালান" >&2; exit 1; }
-for f in build/libc/libc.a build/libc/crt0.o build/userland/lib/librozui.a build/userland/lib/librozgfx.a; do
+for f in build/libc/libc.a build/libc/crt0.o build/userland/lib/librozui.a build/userland/lib/librozgfx.a \
+         build/devlib/libz.a build/zlib/include/zconf.h; do
     [ -f "$f" ] || { echo "আগে make CROSS= চালান ($f লাগে)" >&2; exit 1; }
 done
 command -v "$CC" >/dev/null || { echo "$CC নেই — CROSS= দিলে হোস্টের gcc (যেমন: CROSS= $0)" >&2; exit 1; }
@@ -29,9 +30,9 @@ rm -rf "$WORK" && mkdir -p "$WORK/obj"
 ROOT="$WORK/root"
 mkdir -p "$ROOT/usr/bin" "$ROOT/usr/src/rozword" "$ROOT/usr/share/apps" "$ROOT/usr/share/help" "$ROOT/usr/share/doc/rozword"
 echo "  CC      rozword.c"
-$CC $CFLAGS -c "$SRC/rozword.c" -o "$WORK/obj/rozword.o"
+$CC $CFLAGS -Ibuild/zlib/include -Iports/zlib/src -c "$SRC/rozword.c" -o "$WORK/obj/rozword.o"   # ধাপ ২৬খ-৩: zlib (.docx)
 $CC -nostdlib -static -no-pie -Wl,-z,max-page-size=0x1000 -Wl,--build-id=none -Wl,-Ttext-segment=0x400000 \
-    build/libc/crt0.o "$WORK/obj/rozword.o" build/userland/lib/librozui.a build/userland/lib/librozgfx.a \
+    build/libc/crt0.o "$WORK/obj/rozword.o" build/userland/lib/librozui.a build/userland/lib/librozgfx.a build/devlib/libz.a \
     build/libc/libm.a build/libc/libc.a -lgcc -o "$ROOT/usr/bin/rozword"
 "$STRIP" "$ROOT/usr/bin/rozword"
 
@@ -48,4 +49,4 @@ Source: /usr/src/rozword (make = TCC, make CC=gcc, make install)
 TXT
 
 MKPKG_GZ=1 ports/packages/mkpkg.sh rozword "$VERSION" "$ROOT" \
-    "rozword $VERSION - word processor: fonts, headings, lists, tables, pictures, header/footer, Bangla (.rwd, .txt)"
+    "rozword $VERSION - word processor: Word .docx, tables, pictures, header/footer, lists, Bangla (.rwd, .txt)"

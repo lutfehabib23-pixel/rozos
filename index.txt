@@ -4,4 +4,4 @@ cjson 1.7.18 75e995173c2d0dffa2d042a40a3d3adeccac07e575956efdd1b78a5fea036ddf 13
 binutils 2.46 a5a5755f47c3c093faf6c69622a560021f7a83ade2a22a669281b500472630bd 18186240 binutils-2.46.tar GNU binutils (as, ld, ar, objdump ...) for rozOS
 gcc 15.3.0 2690794d4058c4e5cf45b7287af7ff7a65d45b17628536b695cee43a0290de0c 40330306 gcc-15.3.0.tar.gz GCC 15.3 - C and C++ compiler (gcc, g++; needs binutils)
 rozpdf 1.0 cc2dfb9a308ca09ec9895192db323f2cec72087fa590a169a3b2f2c96c73bd1b 979927 rozpdf-1.0.tar.gz rozpdf 1.0 - PDF reader: text with the PDF's fonts, Bangla, pictures, find, copy text
-rozword 1.1 791074fa9a8582e8a7ce21a5b165eb681f8c1edd7c501e6be0f27a341354a650 538602 rozword-1.1.tar.gz rozword 1.1 - word processor: fonts, headings, lists, tables, pictures, header/footer, Bangla (.rwd, .txt)
+rozword 1.2 529a18b2187373e88084782c5b522eb9bd97b51e3640ae7dee76a439044955d2 603735 rozword-1.2.tar.gz rozword 1.2 - word processor: Word .docx, tables, pictures, header/footer, lists, Bangla (.rwd, .txt)

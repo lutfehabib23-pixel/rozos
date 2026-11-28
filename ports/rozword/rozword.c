@@ -7,7 +7,7 @@
  * বাংলা লেখা আঁকে librozgfx-এর FreeType + shaping (যুক্তাক্ষর), বাংলা ফন্ট আপনিই।
  *
  * ফাইল: .rwd (rozword-এর নিজের ফরম্যাট — সাধারণ লেখা, নিচে বিবরণ) আর .txt (খোলা/সেভ)।
- * .docx পরের ধাপে। ধাপ ২৬খ-২: টেবিল, ছবি, header/footer (পাতা নম্বর)।
+ * ধাপ ২৬খ-২: টেবিল, ছবি, header/footer (পাতা নম্বর)। ধাপ ২৬খ-৩: Word (.docx) খোলা আর সেভ।
  *
  * .rwd ফরম্যাট (UTF-8, লাইনে লাইনে):
  *   rozword 1
@@ -37,8 +37,9 @@
 #include <sys/stat.h>
 #include <rozui.h>
 #include <rozbn.h>
+#include <zlib.h>                  /* ধাপ ২৬খ-৩: .docx (ZIP) */
 
-#define RW_VERSION "1.1 (phase 26b-2)"
+#define RW_VERSION "1.2 (phase 26b-3)"
 
 /* ================= গঠন ================= */
 
@@ -1940,6 +1941,1193 @@ static void reset_undo(void)
     last_kind = 0;
 }
 
+/* ================= ধাপ ২৬খ-৩: Word (.docx) খোলা আর সেভ =================
+ *
+ * .docx = ZIP-এর ভেতরে XML (Office Open XML)। খোলা: word/document.xml-এর অনুচ্ছেদ
+ * (w:p), লেখার অংশ (w:r — bold, italic, underline, strike, রং, মাপ, ফন্ট), alignment,
+ * Title/Heading (styles.xml-এর নাম দেখে), বুলেট/নম্বর (numbering.xml), লাইনের ফাঁক, পাতা ভাঙা,
+ * টেবিল (w:tbl — কলামের চওড়া tblGrid থেকে), ছবি (w:drawing → media/…), header/footer
+ * (PAGE/NUMPAGES ফিল্ড → {page}/{pages})। যা rozword চেনে না তা বাদ পড়ে (লেখা থাকে)।
+ * সেভ: একই জিনিসগুলো দিয়ে নতুন .docx (Word আর LibreOffice খোলে)। */
+
+static int cli_mode;               /* rozword -c (উইন্ডো ছাড়া রূপান্তর) — বার্তা stderr-এ */
+static void table_span(int i, int *a, int *b);
+static int table_rows(int a, int b);
+
+static void report_error(const char *msg)
+{
+    if (cli_mode) fprintf(stderr, "rozword: %s\n", msg);
+    else ui_msgbox("rozword", msg, UI_MB_OK | UI_MB_ERROR);
+}
+
+/* ---------- ZIP পড়া ---------- */
+
+typedef struct { char name[200]; long off, csize, usize; int method; } ZEnt;
+typedef struct { const unsigned char *b; long n; ZEnt *e; int ne; } Zip;
+
+static unsigned rd16(const unsigned char *p) { return (unsigned)(p[0] | p[1] << 8); }
+static unsigned long rd32(const unsigned char *p) { return (unsigned long)p[0] | (unsigned long)p[1] << 8 | (unsigned long)p[2] << 16 | (unsigned long)p[3] << 24; }
+
+static int zip_open(Zip *z, const unsigned char *b, long n)
+{
+    long i, cd, cnt, k, pos;
+    memset(z, 0, sizeof(*z));
+    z->b = b;
+    z->n = n;
+    for (i = n - 22; i >= 0 && i >= n - 65600; i--) if (rd32(b + i) == 0x06054b50UL) break;
+    if (i < 0 || i < n - 65600) return -1;
+    cnt = (long)rd16(b + i + 10);
+    cd = (long)rd32(b + i + 16);
+    if (cd < 0 || cd >= n) return -1;
+    z->e = (ZEnt *)calloc((size_t)(cnt > 0 ? cnt : 1), sizeof(ZEnt));
+    if (!z->e) return -1;
+    for (pos = cd, k = 0; k < cnt && pos + 46 <= n && rd32(b + pos) == 0x02014b50UL; k++) {
+        unsigned nl = rd16(b + pos + 28), el = rd16(b + pos + 30), cl = rd16(b + pos + 32);
+        ZEnt *e = &z->e[z->ne++];
+        e->method = (int)rd16(b + pos + 10);
+        e->csize = (long)rd32(b + pos + 20);
+        e->usize = (long)rd32(b + pos + 24);
+        e->off = (long)rd32(b + pos + 42);
+        snprintf(e->name, sizeof(e->name), "%.*s", (int)(nl < sizeof(e->name) ? nl : sizeof(e->name) - 1), (const char *)b + pos + 46);
+        pos += 46 + nl + el + cl;
+    }
+    return z->ne > 0 ? 0 : -1;
+}
+
+/* ZIP-এর ভেতরের ফাইল (malloc, শেষে '\0'); না থাকলে NULL */
+static char *zip_get(Zip *z, const char *name, long *len)
+{
+    int i;
+    for (i = 0; i < z->ne; i++) {
+        ZEnt *e = &z->e[i];
+        const unsigned char *lh;
+        long data;
+        char *out;
+        if (strcasecmp(e->name, name)) continue;
+        if (e->off + 30 > z->n) return NULL;
+        lh = z->b + e->off;
+        if (rd32(lh) != 0x04034b50UL) return NULL;
+        data = e->off + 30 + (long)rd16(lh + 26) + (long)rd16(lh + 28);
+        if (data + e->csize > z->n || e->usize > 256L * 1024 * 1024) return NULL;
+        out = (char *)malloc((size_t)e->usize + 1);
+        if (!out) return NULL;
+        if (e->method == 0) {
+            memcpy(out, z->b + data, (size_t)e->csize);
+        } else if (e->method == 8) {
+            z_stream s;
+            memset(&s, 0, sizeof(s));
+            if (inflateInit2(&s, -15) != Z_OK) { free(out); return NULL; }
+            s.next_in = (unsigned char *)(z->b + data);
+            s.avail_in = (uInt)e->csize;
+            s.next_out = (unsigned char *)out;
+            s.avail_out = (uInt)e->usize;
+            inflate(&s, Z_FINISH);
+            inflateEnd(&s);
+        } else {
+            free(out);
+            return NULL;
+        }
+        out[e->usize] = '\0';
+        if (len) *len = e->usize;
+        return out;
+    }
+    return NULL;
+}
+
+/* ---------- XML পড়া (ছোট, শুধু যা লাগে) ---------- */
+
+enum { X_EOF, X_OPEN, X_CLOSE, X_EMPTY, X_TEXT };
+typedef struct {
+    int t;
+    char name[64];                 /* "w:p" — namespace prefix সহ */
+    const char *at;                /* attribute-এর শুরু (tag-এর ভেতরে) */
+    int atn;
+    const char *tx;                /* X_TEXT */
+    int txn;
+} XTok;
+typedef struct { const char *p, *e; } XRd;
+
+static int x_next(XRd *r, XTok *t)
+{
+    const char *p = r->p;
+    memset(t, 0, sizeof(*t));
+    if (p >= r->e) return t->t = X_EOF;
+    if (*p != '<') {
+        const char *q = memchr(p, '<', (size_t)(r->e - p));
+        if (!q) q = r->e;
+        t->tx = p;
+        t->txn = (int)(q - p);
+        r->p = q;
+        return t->t = X_TEXT;
+    }
+    if (p + 4 <= r->e && !strncmp(p, "<!--", 4)) {                 /* মন্তব্য */
+        const char *q = strstr(p, "-->");
+        r->p = q ? q + 3 : r->e;
+        return x_next(r, t);
+    }
+    if (p + 9 <= r->e && !strncmp(p, "<![CDATA[", 9)) {
+        const char *q = strstr(p, "]]>");
+        t->tx = p + 9;
+        t->txn = (int)((q ? q : r->e) - (p + 9));
+        r->p = q ? q + 3 : r->e;
+        return t->t = X_TEXT;
+    }
+    if (p + 1 < r->e && (p[1] == '?' || p[1] == '!')) {             /* <?xml ...?>, <!DOCTYPE> */
+        const char *q = memchr(p, '>', (size_t)(r->e - p));
+        r->p = q ? q + 1 : r->e;
+        return x_next(r, t);
+    }
+    {
+        const char *q = p + 1, *ns, *end;
+        int close = 0, n = 0;
+        char quote = 0;
+        if (*q == '/') { close = 1; q++; }
+        ns = q;
+        while (q < r->e && *q != '>' && *q != '/' && *q != ' ' && *q != '\t' && *q != '\r' && *q != '\n') q++;
+        n = (int)(q - ns);
+        snprintf(t->name, sizeof(t->name), "%.*s", n < 63 ? n : 63, ns);
+        t->at = q;
+        for (end = q; end < r->e; end++) {                          /* '>' (উদ্ধৃতির বাইরে) */
+            if (quote) { if (*end == quote) quote = 0; continue; }
+            if (*end == '"' || *end == '\'') quote = *end;
+            else if (*end == '>') break;
+        }
+        t->atn = (int)(end - q);
+        r->p = end < r->e ? end + 1 : r->e;
+        if (close) return t->t = X_CLOSE;
+        if (end > q && end[-1] == '/') { t->atn--; return t->t = X_EMPTY; }
+        return t->t = X_OPEN;
+    }
+}
+
+/* &amp; ইত্যাদি খুলে out-এ (UTF-8) */
+static void x_decode(SB *out, const char *s, int n)
+{
+    int i = 0;
+    while (i < n) {
+        if (s[i] == '&') {
+            const char *semi = memchr(s + i, ';', (size_t)(n - i));
+            if (semi && semi - (s + i) < 12) {
+                int l = (int)(semi - (s + i)) + 1;
+                char buf[8];
+                unsigned long c = 0;
+                int ok = 1;
+                if (!strncmp(s + i, "&lt;", 4)) c = '<';
+                else if (!strncmp(s + i, "&gt;", 4)) c = '>';
+                else if (!strncmp(s + i, "&amp;", 5)) c = '&';
+                else if (!strncmp(s + i, "&quot;", 6)) c = '"';
+                else if (!strncmp(s + i, "&apos;", 6)) c = '\'';
+                else if (s[i + 1] == '#') c = s[i + 2] == 'x' ? strtoul(s + i + 3, NULL, 16) : strtoul(s + i + 2, NULL, 10);
+                else ok = 0;
+                if (ok && c) {
+                    int k = 0;
+                    if (c < 0x80) buf[k++] = (char)c;
+                    else if (c < 0x800) { buf[k++] = (char)(0xC0 | (c >> 6)); buf[k++] = (char)(0x80 | (c & 63)); }
+                    else if (c < 0x10000) { buf[k++] = (char)(0xE0 | (c >> 12)); buf[k++] = (char)(0x80 | ((c >> 6) & 63)); buf[k++] = (char)(0x80 | (c & 63)); }
+                    else { buf[k++] = (char)(0xF0 | (c >> 18)); buf[k++] = (char)(0x80 | ((c >> 12) & 63)); buf[k++] = (char)(0x80 | ((c >> 6) & 63)); buf[k++] = (char)(0x80 | (c & 63)); }
+                    sb_add(out, buf, (size_t)k);
+                    i += l;
+                    continue;
+                }
+            }
+        }
+        sb_add(out, s + i, 1);
+        i++;
+    }
+}
+
+/* attribute-এর মান (decode করে); না থাকলে 0। name-এর prefix না মিললেও local নাম মিলে যায় */
+static int x_attr(const XTok *t, const char *name, char *out, int size)
+{
+    const char *p = t->at, *e = t->at + t->atn;
+    size_t nl = strlen(name);
+    const char *local = strchr(name, ':');
+    local = local ? local + 1 : name;
+    while (p < e) {
+        const char *ks, *ke, *vs, *ve;
+        char q;
+        while (p < e && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' || *p == '/')) p++;
+        ks = p;
+        while (p < e && *p != '=' && *p != ' ') p++;
+        ke = p;
+        while (p < e && *p != '"' && *p != '\'') p++;
+        if (p >= e) break;
+        q = *p++;
+        vs = p;
+        while (p < e && *p != q) p++;
+        ve = p;
+        if (p < e) p++;
+        {
+            size_t kl = (size_t)(ke - ks);
+            const char *kc = memchr(ks, ':', kl);
+            const char *klocal = kc ? kc + 1 : ks;
+            if ((kl == nl && !strncmp(ks, name, nl)) || ((size_t)(ke - klocal) == strlen(local) && !strncmp(klocal, local, strlen(local)))) {
+                SB d = { 0, 0, 0 };
+                x_decode(&d, vs, (int)(ve - vs));
+                snprintf(out, (size_t)size, "%s", d.s ? d.s : "");
+                free(d.s);
+                return 1;
+            }
+        }
+    }
+    if (size > 0) out[0] = 0;
+    return 0;
+}
+
+static int x_is(const XTok *t, const char *name) { return !strcmp(t->name, name); }
+
+/* w:b, w:i — w:val="0"/"false"/"none" হলে বন্ধ */
+static int x_onoff(const XTok *t)
+{
+    char v[16];
+    if (!x_attr(t, "w:val", v, sizeof(v))) return 1;
+    return !(!strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "off") || !strcmp(v, "none"));
+}
+
+/* ---------- .docx → অনুচ্ছেদ ---------- */
+
+typedef struct { char id[32]; char target[160]; } DxRel;
+typedef struct { char id[64]; int style, numid, list; } DxStyle;   /* style 1 Title, 2-4 Heading 1-3; তালিকার style-এ numId */
+typedef struct { int num, abs; } DxNum;
+typedef struct { int abs, fmt; } DxAbs;                        /* fmt 1 bullet, 2 নম্বর */
+
+typedef struct {
+    Zip z;
+    DxRel *rel; int nrel;
+    DxStyle *sty; int nsty;
+    DxNum *num; int nnum;
+    DxAbs *abs; int nabs;
+    int def_size2;
+    char def_font[64];
+    Para *A; int n, cap;
+    int skipped;                   /* চেনা হয়নি এমন জিনিস (বার্তার জন্য) */
+} Dx;
+
+static void dx_rels(Dx *x, const char *file)
+{
+    long len;
+    char *s = zip_get(&x->z, file, &len);
+    XRd r;
+    XTok t;
+    if (!s) return;
+    r.p = s;
+    r.e = s + len;
+    while (x_next(&r, &t) != X_EOF) {
+        if ((t.t == X_EMPTY || t.t == X_OPEN) && x_is(&t, "Relationship")) {
+            DxRel *n = (DxRel *)realloc(x->rel, sizeof(DxRel) * (size_t)(x->nrel + 1));
+            if (!n) break;
+            x->rel = n;
+            x_attr(&t, "Id", n[x->nrel].id, sizeof(n[x->nrel].id));
+            x_attr(&t, "Target", n[x->nrel].target, sizeof(n[x->nrel].target));
+            x->nrel++;
+        }
+    }
+    free(s);
+}
+
+static const char *dx_rel(Dx *x, const char *id)
+{
+    int i;
+    for (i = 0; i < x->nrel; i++) if (!strcmp(x->rel[i].id, id)) return x->rel[i].target;
+    return NULL;
+}
+
+/* word/ থেকে আপেক্ষিক পথ → ZIP-এর নাম */
+static void dx_path(const char *target, char *out, int size)
+{
+    if (target[0] == '/') snprintf(out, (size_t)size, "%s", target + 1);
+    else if (!strncmp(target, "../", 3)) snprintf(out, (size_t)size, "%s", target + 3);
+    else snprintf(out, (size_t)size, "word/%s", target);
+}
+
+static void dx_styles(Dx *x)
+{
+    long len;
+    char *s = zip_get(&x->z, "word/styles.xml", &len), v[64];
+    XRd r;
+    XTok t;
+    int in_def = 0;
+    DxStyle cur;
+    int in_style = 0;
+    if (!s) return;
+    memset(&cur, 0, sizeof(cur));
+    r.p = s;
+    r.e = s + len;
+    while (x_next(&r, &t) != X_EOF) {
+        if (t.t == X_OPEN && x_is(&t, "w:rPrDefault")) in_def = 1;
+        else if (t.t == X_CLOSE && x_is(&t, "w:rPrDefault")) in_def = 0;
+        else if (in_def && (t.t == X_EMPTY || t.t == X_OPEN) && x_is(&t, "w:sz") && x_attr(&t, "w:val", v, sizeof(v))) {
+            int sz = atoi(v);
+            if (sz >= 8 && sz <= 144) x->def_size2 = sz;
+        } else if (in_def && (t.t == X_EMPTY || t.t == X_OPEN) && x_is(&t, "w:rFonts")) {
+            if (!x_attr(&t, "w:ascii", x->def_font, sizeof(x->def_font))) x_attr(&t, "w:hAnsi", x->def_font, sizeof(x->def_font));
+        } else if (t.t == X_OPEN && x_is(&t, "w:style")) {
+            memset(&cur, 0, sizeof(cur));
+            x_attr(&t, "w:styleId", cur.id, sizeof(cur.id));
+            in_style = 1;
+        } else if (in_style && (t.t == X_EMPTY || t.t == X_OPEN) && x_is(&t, "w:name") && x_attr(&t, "w:val", v, sizeof(v))) {
+            if (!strcasecmp(v, "title")) cur.style = 1;
+            else if (!strcasecmp(v, "heading 1")) cur.style = 2;
+            else if (!strcasecmp(v, "heading 2")) cur.style = 3;
+            else if (!strcasecmp(v, "heading 3")) cur.style = 4;
+            else if (!strncasecmp(v, "list bullet", 11)) cur.list = 1;   /* numbering না থাকলেও */
+            else if (!strncasecmp(v, "list number", 11)) cur.list = 2;
+        } else if (in_style && (t.t == X_EMPTY || t.t == X_OPEN) && x_is(&t, "w:numId") && x_attr(&t, "w:val", v, sizeof(v))) {
+            cur.numid = atoi(v);
+        } else if (t.t == X_CLOSE && x_is(&t, "w:style")) {
+            in_style = 0;
+            if (cur.id[0] && (cur.style || cur.numid || cur.list)) {
+                DxStyle *n = (DxStyle *)realloc(x->sty, sizeof(DxStyle) * (size_t)(x->nsty + 1));
+                if (n) { x->sty = n; n[x->nsty++] = cur; }
+            }
+        }
+    }
+    free(s);
+}
+
+static void dx_numbering(Dx *x)
+{
+    long len;
+    char *s = zip_get(&x->z, "word/numbering.xml", &len), v[32];
+    XRd r;
+    XTok t;
+    int cur_abs = -1, cur_num = -1, lvl = -1, got = 0;
+    if (!s) return;
+    r.p = s;
+    r.e = s + len;
+    while (x_next(&r, &t) != X_EOF) {
+        if (t.t == X_OPEN && x_is(&t, "w:abstractNum") && x_attr(&t, "w:abstractNumId", v, sizeof(v))) { cur_abs = atoi(v); got = 0; }
+        else if (t.t == X_OPEN && x_is(&t, "w:lvl") && x_attr(&t, "w:ilvl", v, sizeof(v))) lvl = atoi(v);
+        else if ((t.t == X_EMPTY || t.t == X_OPEN) && x_is(&t, "w:numFmt") && cur_abs >= 0 && lvl == 0 && !got &&
+                 x_attr(&t, "w:val", v, sizeof(v))) {
+            DxAbs *n = (DxAbs *)realloc(x->abs, sizeof(DxAbs) * (size_t)(x->nabs + 1));
+            if (n) {
+                x->abs = n;
+                n[x->nabs].abs = cur_abs;
+                n[x->nabs].fmt = !strcmp(v, "bullet") || !strcmp(v, "none") ? 1 : 2;
+                x->nabs++;
+                got = 1;
+            }
+        } else if (t.t == X_OPEN && x_is(&t, "w:num") && x_attr(&t, "w:numId", v, sizeof(v))) cur_num = atoi(v);
+        else if ((t.t == X_EMPTY || t.t == X_OPEN) && x_is(&t, "w:abstractNumId") && cur_num >= 0 && x_attr(&t, "w:val", v, sizeof(v))) {
+            DxNum *n = (DxNum *)realloc(x->num, sizeof(DxNum) * (size_t)(x->nnum + 1));
+            if (n) {
+                x->num = n;
+                n[x->nnum].num = cur_num;
+                n[x->nnum].abs = atoi(v);
+                x->nnum++;
+            }
+            cur_num = -1;
+        }
+    }
+    free(s);
+}
+
+static int dx_list_kind(Dx *x, int numid)
+{
+    int i, j;
+    if (numid <= 0) return 0;
+    for (i = 0; i < x->nnum; i++)
+        if (x->num[i].num == numid)
+            for (j = 0; j < x->nabs; j++) if (x->abs[j].abs == x->num[i].abs) return x->abs[j].fmt;
+    return 1;
+}
+
+/* বড়-ছোট হাতের অক্ষর না দেখে খোঁজা */
+static int strcasestr_(const char *h, const char *n)
+{
+    size_t nl = strlen(n);
+    for (; *h; h++) if (!strncasecmp(h, n, nl)) return 1;
+    return 0;
+}
+
+/* Word-এর ফন্টের নাম → rozword-এর পরিবার */
+static int font_for_name(const char *n)
+{
+    int f;
+    if (!n || !*n) return -1;
+    if ((f = fam_by_name(n)) >= 0 && fams[f].present) return f;
+    if (strcasestr_(n, "mono") || strcasestr_(n, "courier") || strcasestr_(n, "consolas")) f = fam_by_name("JetBrains Mono");
+    else if (strcasestr_(n, "bangla") || strcasestr_(n, "bengali") || strcasestr_(n, "vrinda") || strcasestr_(n, "nikosh") ||
+             strcasestr_(n, "solaiman") || strcasestr_(n, "kalpurush") || strcasestr_(n, "siyam")) f = fam_by_name("Noto Sans Bengali");
+    else if (strcasestr_(n, "times") || strcasestr_(n, "georgia") || strcasestr_(n, "cambria") || strcasestr_(n, "garamond") ||
+             strcasestr_(n, "serif") || strcasestr_(n, "book")) f = fam_by_name("Noto Serif");
+    else f = -1;
+    return (f >= 0 && fams[f].present) ? f : -1;
+}
+
+static Para *dx_new_para(Dx *x, int ai)
+{
+    if (x->n == x->cap) {
+        Para *n;
+        x->cap = x->cap ? x->cap * 2 : 64;
+        n = (Para *)realloc(x->A, sizeof(Para) * (size_t)x->cap);
+        if (!n) { fprintf(stderr, "rozword: out of memory\n"); exit(1); }
+        x->A = n;
+    }
+    para_init(&x->A[x->n], ai);
+    return &x->A[x->n++];
+}
+
+static const int style_size2[5] = { 22, 52, 40, 32, 26 };
+
+/* একটা অংশের (document বা header/footer) XML → অনুচ্ছেদ; hf != NULL হলে শুধু লেখা জমায় */
+typedef struct {
+    Attr base;                     /* অনুচ্ছেদের style থেকে */
+    Attr run;
+    char ascii[64], cs[64];
+    int has_font, has_size, has_bold, has_color;
+} DxRun;
+
+static int is_bangla_family(int f);
+
+/* বাংলা লেখায় w:cs ফন্টটা বাংলা হলে সেটা, নইলে w:ascii (বাংলার অক্ষর এমনিতেই বাংলা ফন্ট থেকে আসে) */
+static int dx_run_attr(DxRun *rn, int bengali)
+{
+    Attr a = rn->run;
+    int f = -1;
+    if (bengali && rn->cs[0]) {
+        f = font_for_name(rn->cs);
+        if (f >= 0 && !is_bangla_family(f)) f = -1;
+    }
+    if (f < 0) f = font_for_name(rn->ascii[0] ? rn->ascii : rn->cs);
+    if (f >= 0) a.font = (unsigned char)f;
+    return attr_id(&a);
+}
+
+static int has_bengali(const char *s, int n)
+{
+    int i;
+    for (i = 0; i + 2 < n; i++) if ((unsigned char)s[i] == 0xE0 && ((unsigned char)s[i + 1] == 0xA6 || (unsigned char)s[i + 1] == 0xA7)) return 1;
+    return 0;
+}
+
+static void dx_body(Dx *x, const char *xml, long len, SB *hf, int *hf_align)
+{
+    XRd r;
+    XTok t;
+    char v[200];
+    Para *cur = NULL;
+    DxRun rn;
+    int in_ppr = 0, in_rpr = 0, in_t = 0, skip = 0, in_instr = 0, fld_skip = 0, fld_kind = 0, pend_pbreak = 0;
+    int tdepth = 0, tid = 0, row = -1, col = -1, cell_paras = 0, gspan = 1, grid_w[TBL_MAXCOL], ngrid = 0, maxcol = 0;
+    int para_style = 0, para_align = 0, para_list = 0, para_spacing = 115, para_pb = 0;
+    char img_id[64] = "";
+    long img_cx = 0, img_cy = 0;
+    memset(&rn, 0, sizeof(rn));
+    r.p = xml;
+    r.e = xml + len;
+    while (x_next(&r, &t) != X_EOF) {
+        int open = t.t == X_OPEN || t.t == X_EMPTY;
+        if (skip) {                                    /* w:del (মুছে ফেলা লেখা), w:instrText ইত্যাদি */
+            if (t.t == X_OPEN) skip++;
+            else if (t.t == X_CLOSE) skip--;
+            continue;
+        }
+        if (t.t == X_TEXT) {
+            if (in_instr) {                            /* ফিল্ড: PAGE / NUMPAGES */
+                SB d = { 0, 0, 0 };
+                x_decode(&d, t.tx, t.txn);
+                if (d.s && strstr(d.s, "NUMPAGES")) fld_kind = 2;
+                else if (d.s && strstr(d.s, "PAGE")) fld_kind = 1;
+                free(d.s);
+            } else if (in_t && !fld_skip) {
+                SB d = { 0, 0, 0 };
+                x_decode(&d, t.tx, t.txn);
+                if (d.s && d.n) {
+                    if (hf) sb_add(hf, d.s, d.n);
+                    else if (cur) {
+                        int ai = dx_run_attr(&rn, has_bengali(d.s, (int)d.n));
+                        para_insert_bytes(cur, cur->n, d.s, NULL, (int)d.n, ai);
+                        cur->eattr = (unsigned short)ai;
+                    }
+                }
+                free(d.s);
+            }
+            continue;
+        }
+        if (open && (x_is(&t, "w:del") || x_is(&t, "w:delText") || x_is(&t, "w:moveFrom"))) {
+            if (t.t == X_OPEN) skip = 1;
+            continue;
+        }
+        /* ---- টেবিল ---- */
+        if (x_is(&t, "w:tbl")) {
+            if (t.t == X_OPEN) {
+                tdepth++;
+                if (tdepth == 1 && !hf) { tid = tbl_new(1); row = -1; ngrid = 0; maxcol = 0; }
+            } else if (t.t == X_CLOSE && tdepth > 0) {
+                if (tdepth == 1 && tid) {
+                    int c, cols = maxcol > 0 ? maxcol : 1, tot = 0;
+                    if (cols > TBL_MAXCOL) cols = TBL_MAXCOL;
+                    tbls[tid].cols = cols;
+                    for (c = 0; c < cols; c++) tot += c < ngrid ? grid_w[c] : 0;
+                    for (c = 0; c < cols; c++) tbls[tid].w[c] = (c < ngrid && tot > 0 && grid_w[c] > 0) ? (int)((long)grid_w[c] * 1000 / tot) : 1000 / cols;
+                    tid = 0;
+                }
+                tdepth--;
+                cur = NULL;
+            }
+            continue;
+        }
+        if (tdepth == 1 && !hf) {
+            if (open && x_is(&t, "w:gridCol") && ngrid < TBL_MAXCOL && x_attr(&t, "w:w", v, sizeof(v))) { grid_w[ngrid++] = atoi(v); continue; }
+            if (t.t == X_OPEN && x_is(&t, "w:tr")) { row++; col = -1; gspan = 1; continue; }
+            if (t.t == X_OPEN && x_is(&t, "w:tc")) { col += gspan; gspan = 1; cell_paras = 0; continue; }
+            if (open && x_is(&t, "w:gridSpan") && x_attr(&t, "w:val", v, sizeof(v))) { gspan = atoi(v) > 1 ? atoi(v) : 1; continue; }
+            if (t.t == X_CLOSE && x_is(&t, "w:tc")) {
+                if (!cell_paras) {                     /* খালি ঘর */
+                    Para *q = dx_new_para(x, attr_id(&rn.base));
+                    q->tbl = tid; q->row = row; q->col = col < TBL_MAXCOL ? col : TBL_MAXCOL - 1;
+                }
+                if (col + gspan > maxcol) maxcol = col + gspan;
+                cur = NULL;
+                continue;
+            }
+        }
+        /* ---- অনুচ্ছেদ ---- */
+        if (x_is(&t, "w:p")) {
+            if (open) {
+                para_style = 0; para_align = 0; para_list = 0; para_spacing = 115; para_pb = pend_pbreak;
+                pend_pbreak = 0;
+                memset(&rn.base, 0, sizeof(rn.base));
+                rn.base.font = (unsigned char)(font_for_name(x->def_font) >= 0 ? font_for_name(x->def_font) : default_family());
+                rn.base.size2 = (unsigned short)(x->def_size2 ? x->def_size2 : 22);
+                if (!hf) {
+                    cur = dx_new_para(x, attr_id(&rn.base));
+                    cur->pbreak = (unsigned char)para_pb;
+                    if (tdepth >= 1 && tid) {
+                        cur->tbl = tid; cur->row = row; cur->col = col < TBL_MAXCOL ? col : TBL_MAXCOL - 1;
+                        cell_paras++;
+                    }
+                } else if (hf->n) {
+                    sb_str(hf, " ");
+                }
+                if (t.t == X_EMPTY) cur = NULL;
+            } else {
+                cur = NULL;
+            }
+            continue;
+        }
+        if (x_is(&t, "w:pPr")) { in_ppr = t.t == X_OPEN; continue; }
+        if (in_ppr && open && !in_rpr) {
+            if (x_is(&t, "w:pStyle") && x_attr(&t, "w:val", v, sizeof(v))) {
+                int i;
+                for (i = 0; i < x->nsty; i++) {
+                    if (strcmp(x->sty[i].id, v)) continue;
+                    para_style = x->sty[i].style;
+                    if (x->sty[i].numid > 0) para_list = dx_list_kind(x, x->sty[i].numid);   /* "List Bullet" ধাঁচের style */
+                    else if (x->sty[i].list) para_list = x->sty[i].list;
+                }
+                if (!para_style) {                     /* id নিজেই "Heading1"/"Title" */
+                    if (!strcasecmp(v, "Title")) para_style = 1;
+                    else if (!strncasecmp(v, "Heading", 7) && v[7] >= '1' && v[7] <= '3' && !v[8]) para_style = v[7] - '0' + 1;
+                }
+                if (para_style) {
+                    rn.base.size2 = (unsigned short)style_size2[para_style];
+                    if (para_style >= 2) { rn.base.flags |= A_BOLD; rn.base.color = 0x2F5496; }
+                }
+            } else if (x_is(&t, "w:jc") && x_attr(&t, "w:val", v, sizeof(v))) {
+                para_align = !strcmp(v, "center") ? 1 : (!strcmp(v, "right") || !strcmp(v, "end")) ? 2 :
+                             (!strcmp(v, "both") || !strcmp(v, "distribute")) ? 3 : 0;
+            } else if (x_is(&t, "w:numId") && x_attr(&t, "w:val", v, sizeof(v))) {
+                para_list = dx_list_kind(x, atoi(v));
+            } else if (x_is(&t, "w:spacing") && x_attr(&t, "w:line", v, sizeof(v))) {
+                char rule[16];
+                int l = atoi(v);
+                if (!x_attr(&t, "w:lineRule", rule, sizeof(rule)) || !strcmp(rule, "auto")) {
+                    l = l * 100 / 240;
+                    if (l >= 80 && l <= 400) para_spacing = l;
+                }
+            } else if (x_is(&t, "w:pageBreakBefore") && x_onoff(&t)) {
+                para_pb = 1;
+            }
+            if (cur && !hf) {
+                cur->style = (unsigned char)para_style;
+                cur->align = (unsigned char)para_align;
+                cur->list = (unsigned char)para_list;
+                cur->spacing = para_spacing;
+                if (para_pb) cur->pbreak = 1;
+                cur->eattr = (unsigned short)attr_id(&rn.base);
+            }
+            if (hf && x_is(&t, "w:jc") && hf_align) *hf_align = para_align < 3 ? para_align : 0;
+            continue;
+        }
+        /* ---- লেখার অংশ ---- */
+        if (x_is(&t, "w:r")) {
+            if (t.t == X_OPEN) { rn.run = rn.base; rn.ascii[0] = rn.cs[0] = 0; }
+            continue;
+        }
+        if (x_is(&t, "w:rPr")) { in_rpr = t.t == X_OPEN; continue; }
+        if (in_rpr && open) {
+            if (in_ppr) continue;                       /* অনুচ্ছেদ-চিহ্নের ফরম্যাট — বাদ */
+            if (x_is(&t, "w:b")) { if (x_onoff(&t)) rn.run.flags |= A_BOLD; else rn.run.flags &= (unsigned char)~A_BOLD; }
+            else if (x_is(&t, "w:i")) { if (x_onoff(&t)) rn.run.flags |= A_ITALIC; else rn.run.flags &= (unsigned char)~A_ITALIC; }
+            else if (x_is(&t, "w:u")) { if (x_onoff(&t)) rn.run.flags |= A_UNDER; else rn.run.flags &= (unsigned char)~A_UNDER; }
+            else if (x_is(&t, "w:strike") || x_is(&t, "w:dstrike")) { if (x_onoff(&t)) rn.run.flags |= A_STRIKE; }
+            else if (x_is(&t, "w:color") && x_attr(&t, "w:val", v, sizeof(v)) && strcmp(v, "auto")) rn.run.color = (uint32_t)strtoul(v, NULL, 16) & 0xFFFFFF;
+            else if (x_is(&t, "w:sz") && x_attr(&t, "w:val", v, sizeof(v))) {
+                int sz = atoi(v);
+                if (sz >= 2 && sz <= 800) rn.run.size2 = (unsigned short)sz;
+            } else if (x_is(&t, "w:rFonts")) {
+                if (!x_attr(&t, "w:ascii", rn.ascii, sizeof(rn.ascii))) x_attr(&t, "w:hAnsi", rn.ascii, sizeof(rn.ascii));
+                x_attr(&t, "w:cs", rn.cs, sizeof(rn.cs));
+            }
+            continue;
+        }
+        if (x_is(&t, "w:t")) { in_t = t.t == X_OPEN; continue; }
+        if (x_is(&t, "w:instrText")) { in_instr = t.t == X_OPEN; continue; }
+        if (open && x_is(&t, "w:fldChar") && x_attr(&t, "w:fldCharType", v, sizeof(v))) {
+            if (!strcmp(v, "begin")) fld_kind = 0;
+            else if (!strcmp(v, "separate")) {
+                if (hf && fld_kind) { sb_str(hf, fld_kind == 2 ? "{pages}" : "{page}"); fld_skip = 1; }
+            } else if (!strcmp(v, "end")) { fld_skip = 0; fld_kind = 0; }
+            continue;
+        }
+        if (x_is(&t, "w:fldSimple")) {
+            if (open && hf && x_attr(&t, "w:instr", v, sizeof(v))) {
+                sb_str(hf, strstr(v, "NUMPAGES") ? "{pages}" : strstr(v, "PAGE") ? "{page}" : "");
+                if (t.t == X_OPEN && (strstr(v, "PAGE"))) fld_skip = 1;
+            } else if (t.t == X_CLOSE) fld_skip = 0;
+            continue;
+        }
+        if (open && x_is(&t, "w:tab")) {
+            if (in_ppr) continue;                       /* tab stop-এর সংজ্ঞা */
+            if (hf) sb_str(hf, "    ");
+            else if (cur) para_insert_bytes(cur, cur->n, "    ", NULL, 4, dx_run_attr(&rn, 0));
+            continue;
+        }
+        if (open && (x_is(&t, "w:br") || x_is(&t, "w:cr"))) {
+            if (hf) { sb_str(hf, " "); continue; }
+            if (x_attr(&t, "w:type", v, sizeof(v)) && !strcmp(v, "page")) {
+                if (cur && cur->n == 0) cur->pbreak = 1;   /* লেখার আগে: এই অনুচ্ছেদই নতুন পাতায় */
+                else if (cur) {                          /* লেখার মাঝে: বাকিটা নতুন অনুচ্ছেদে, নতুন পাতায় */
+                    Para *q, *prev;
+                    int idx = (int)(cur - x->A);
+                    q = dx_new_para(x, attr_id(&rn.run));
+                    prev = &x->A[idx];
+                    q->style = prev->style; q->align = prev->align; q->spacing = prev->spacing;
+                    q->tbl = prev->tbl; q->row = prev->row; q->col = prev->col;
+                    q->pbreak = 1;
+                    cur = q;
+                } else {
+                    pend_pbreak = 1;
+                }
+            } else if (cur && !tdepth) {                 /* লাইন ভাঙা: নতুন অনুচ্ছেদ (একই ফরম্যাট) */
+                Para *q, *prev;
+                int idx = (int)(cur - x->A);
+                q = dx_new_para(x, attr_id(&rn.run));
+                prev = &x->A[idx];
+                q->style = prev->style; q->align = prev->align; q->spacing = prev->spacing; q->list = 0;
+                cur = q;
+            } else if (cur) {
+                para_insert_bytes(cur, cur->n, " ", NULL, 1, dx_run_attr(&rn, 0));
+            }
+            continue;
+        }
+        /* ---- ছবি ---- */
+        if (open && x_is(&t, "wp:extent")) {
+            if (x_attr(&t, "cx", v, sizeof(v))) img_cx = atol(v);
+            if (x_attr(&t, "cy", v, sizeof(v))) img_cy = atol(v);
+            continue;
+        }
+        if (open && x_is(&t, "a:blip")) {
+            x_attr(&t, "r:embed", img_id, sizeof(img_id));
+            continue;
+        }
+        if (t.t == X_CLOSE && x_is(&t, "w:drawing")) {
+            const char *tg = img_id[0] ? dx_rel(x, img_id) : NULL;
+            if (tg && !hf) {
+                char zp[200];
+                long ilen = 0;
+                char *data;
+                dx_path(tg, zp, sizeof(zp));
+                data = zip_get(&x->z, zp, &ilen);
+                if (data) {
+                    const char *dot = strrchr(zp, '.');
+                    int id = img_add((unsigned char *)data, ilen, dot ? dot + 1 : "png");
+                    if (id >= 0) {
+                        int idx = cur ? (int)(cur - x->A) : -1;
+                        Para *q = dx_new_para(x, attr_id(&rn.base));
+                        q->kind = 1;
+                        q->img = id;
+                        q->img_w = img_cx > 0 ? (int)(img_cx / 9525) : (imgs[id].s ? imgs[id].s->w : 100);
+                        q->img_h = img_cy > 0 ? (int)(img_cy / 9525) : (imgs[id].s ? imgs[id].s->h : 100);
+                        if (idx >= 0) {
+                            Para *prev = &x->A[idx];
+                            q->align = prev->align;
+                            q->tbl = prev->tbl; q->row = prev->row; q->col = prev->col;
+                            if (prev->n == 0 && prev->kind == 0) {        /* ছবির আগে খালি অনুচ্ছেদ — ছবিটাই সেটা */
+                                Para tmp = *q;
+                                x->n--;
+                                para_free(&x->A[idx]);
+                                x->A[idx] = tmp;
+                                q = &x->A[idx];
+                            }
+                        }
+                        {                                                  /* বাকি লেখার জন্য নতুন অনুচ্ছেদ */
+                            Para *after = dx_new_para(x, attr_id(&rn.base));
+                            Para *img_p = &x->A[x->n - 2];
+                            after->align = img_p->align;
+                            after->tbl = img_p->tbl; after->row = img_p->row; after->col = img_p->col;
+                            after->style = (unsigned char)para_style;
+                            cur = after;
+                        }
+                        if (tdepth >= 1 && tid) cell_paras++;
+                    }
+                }
+            } else if (!hf) {
+                x->skipped++;
+            }
+            img_id[0] = 0;
+            img_cx = img_cy = 0;
+            continue;
+        }
+        if (open && (x_is(&t, "w:pict") || x_is(&t, "w:object") || x_is(&t, "mc:Fallback"))) {
+            if (t.t == X_OPEN) skip = 1;               /* পুরোনো VML ছবি / mc:Fallback-এর দ্বিতীয় কপি */
+            if (!x_is(&t, "mc:Fallback")) x->skipped++;
+            continue;
+        }
+    }
+    (void)maxcol;
+}
+
+/* ছবির পরে রেখে দেওয়া খালি অনুচ্ছেদ (শেষে বা অন্য অনুচ্ছেদের ঠিক আগে) বাদ */
+static void dx_cleanup(Dx *x)
+{
+    int i;
+    for (i = x->n - 1; i > 0; i--) {
+        Para *p = &x->A[i];
+        if (p->kind == 0 && p->n == 0 && x->A[i - 1].kind == 1 && p->tbl == x->A[i - 1].tbl &&
+            (!p->tbl || (p->row == x->A[i - 1].row && p->col == x->A[i - 1].col)) && !p->pbreak) {
+            int keep = i + 1 < x->n && x->A[i + 1].kind == 0 && x->A[i + 1].tbl == p->tbl &&
+                       (!p->tbl || (x->A[i + 1].row == p->row && x->A[i + 1].col == p->col));
+            if (keep || i == x->n - 1) {
+                if (i == x->n - 1 && !p->tbl) continue;   /* শেষে লেখার জায়গা থাকুক */
+                para_free(p);
+                memmove(&x->A[i], &x->A[i + 1], sizeof(Para) * (size_t)(x->n - i - 1));
+                x->n--;
+            }
+        }
+    }
+}
+
+static void dx_header_footer(Dx *x, const char *docxml, long dlen)
+{
+    /* শেষ sectPr-এর default header/footer */
+    const char *p = docxml, *last = NULL;
+    while ((p = strstr(p, "<w:sectPr")) != NULL) { last = p; p++; }
+    if (!last) return;
+    {
+        XRd r;
+        XTok t;
+        char ty[32], id[64];
+        r.p = last;
+        r.e = docxml + dlen;
+        while (x_next(&r, &t) != X_EOF) {
+            int footer;
+            if (t.t == X_CLOSE && x_is(&t, "w:sectPr")) break;
+            if (t.t != X_EMPTY && t.t != X_OPEN) continue;
+            footer = x_is(&t, "w:footerReference");
+            if (!footer && !x_is(&t, "w:headerReference")) continue;
+            if (x_attr(&t, "w:type", ty, sizeof(ty)) && strcmp(ty, "default")) continue;
+            if (x_attr(&t, "r:id", id, sizeof(id))) {
+                const char *tg = dx_rel(x, id);
+                char zp[200];
+                long hl = 0;
+                char *hx;
+                SB hb = { 0, 0, 0 };
+                int al = 0;                            /* Word-এ jc না থাকলে বাঁয়ে */
+                if (!tg) continue;
+                dx_path(tg, zp, sizeof(zp));
+                hx = zip_get(&x->z, zp, &hl);
+                if (!hx) continue;
+                dx_body(x, hx, hl, &hb, &al);
+                free(hx);
+                if (hb.s) {
+                    char *s = hb.s, *e;
+                    while (*s == ' ') s++;
+                    e = s + strlen(s);
+                    while (e > s && e[-1] == ' ') *--e = 0;
+                    if (footer) { snprintf(ftr_text, sizeof(ftr_text), "%s", s); ftr_align = al; }
+                    else { snprintf(hdr_text, sizeof(hdr_text), "%s", s); hdr_align = al; }
+                    free(hb.s);
+                }
+            }
+        }
+    }
+}
+
+/* .docx → অনুচ্ছেদ (header/footer গ্লোবালে); ফেরত সংখ্যা, ভুলে -1 */
+static int load_docx(const unsigned char *buf, long len, Para **out, int *skipped)
+{
+    Dx x;
+    long dlen = 0;
+    char *doc;
+    memset(&x, 0, sizeof(x));
+    if (zip_open(&x.z, buf, len) < 0) return -1;
+    doc = zip_get(&x.z, "word/document.xml", &dlen);
+    if (!doc) { free(x.z.e); return -1; }
+    dx_rels(&x, "word/_rels/document.xml.rels");
+    dx_styles(&x);
+    dx_numbering(&x);
+    dx_body(&x, doc, dlen, NULL, NULL);
+    dx_header_footer(&x, doc, dlen);
+    free(doc);
+    dx_cleanup(&x);
+    if (x.n == 0) dx_new_para(&x, default_attr());
+    *out = x.A;
+    if (skipped) *skipped = x.skipped;
+    free(x.z.e); free(x.rel); free(x.sty); free(x.num); free(x.abs);
+    return x.n;
+}
+
+/* ---------- ZIP লেখা ---------- */
+
+typedef struct { char name[64]; unsigned long crc; long csize, usize, off; } ZOut;
+typedef struct { SB b; ZOut e[64]; int ne; } ZipW;
+
+static void zw16(SB *b, unsigned v) { char c[2] = { (char)(v & 255), (char)(v >> 8) }; sb_add(b, c, 2); }
+static void zw32(SB *b, unsigned long v) { char c[4] = { (char)(v & 255), (char)(v >> 8), (char)(v >> 16), (char)(v >> 24) }; sb_add(b, c, 4); }
+
+static int zip_add(ZipW *z, const char *name, const void *data, long n)
+{
+    ZOut *e;
+    unsigned char *cbuf;
+    uLong bound = compressBound((uLong)n) + 64;
+    z_stream s;
+    long cn;
+    if (z->ne >= 64) return -1;
+    cbuf = (unsigned char *)malloc((size_t)bound);
+    if (!cbuf) return -1;
+    memset(&s, 0, sizeof(s));
+    if (deflateInit2(&s, 6, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY) != Z_OK) { free(cbuf); return -1; }
+    s.next_in = (unsigned char *)data;
+    s.avail_in = (uInt)n;
+    s.next_out = cbuf;
+    s.avail_out = (uInt)bound;
+    deflate(&s, Z_FINISH);
+    cn = (long)s.total_out;
+    deflateEnd(&s);
+    e = &z->e[z->ne++];
+    snprintf(e->name, sizeof(e->name), "%s", name);
+    e->crc = crc32(0L, (const Bytef *)data, (uInt)n);
+    e->csize = cn;
+    e->usize = n;
+    e->off = (long)z->b.n;
+    zw32(&z->b, 0x04034b50UL); zw16(&z->b, 20); zw16(&z->b, 0); zw16(&z->b, 8);
+    zw16(&z->b, 0); zw16(&z->b, 0x5B21);               /* সময়/তারিখ (২০২৫-০৯-০১) */
+    zw32(&z->b, e->crc); zw32(&z->b, (unsigned long)cn); zw32(&z->b, (unsigned long)n);
+    zw16(&z->b, (unsigned)strlen(name)); zw16(&z->b, 0);
+    sb_str(&z->b, name);
+    sb_add(&z->b, (const char *)cbuf, (size_t)cn);
+    free(cbuf);
+    return 0;
+}
+
+static void zip_finish(ZipW *z)
+{
+    long cd = (long)z->b.n;
+    int i;
+    for (i = 0; i < z->ne; i++) {
+        ZOut *e = &z->e[i];
+        zw32(&z->b, 0x02014b50UL); zw16(&z->b, 20); zw16(&z->b, 20); zw16(&z->b, 0); zw16(&z->b, 8);
+        zw16(&z->b, 0); zw16(&z->b, 0x5B21);
+        zw32(&z->b, e->crc); zw32(&z->b, (unsigned long)e->csize); zw32(&z->b, (unsigned long)e->usize);
+        zw16(&z->b, (unsigned)strlen(e->name)); zw16(&z->b, 0); zw16(&z->b, 0); zw16(&z->b, 0); zw16(&z->b, 0);
+        zw32(&z->b, 0); zw32(&z->b, (unsigned long)e->off);
+        sb_str(&z->b, e->name);
+    }
+    {
+        long cdsize = (long)z->b.n - cd;                 /* EOCD লেখার আগে মাপা */
+        zw32(&z->b, 0x06054b50UL); zw16(&z->b, 0); zw16(&z->b, 0); zw16(&z->b, (unsigned)z->ne); zw16(&z->b, (unsigned)z->ne);
+        zw32(&z->b, (unsigned long)cdsize); zw32(&z->b, (unsigned long)cd); zw16(&z->b, 0);
+    }
+}
+
+/* ---------- অনুচ্ছেদ → .docx ---------- */
+
+static void xml_esc(SB *b, const char *s, int n)
+{
+    int i;
+    for (i = 0; i < n; i++) {
+        char c = s[i];
+        if (c == '<') sb_str(b, "&lt;");
+        else if (c == '>') sb_str(b, "&gt;");
+        else if (c == '&') sb_str(b, "&amp;");
+        else if (c == '"') sb_str(b, "&quot;");
+        else if ((unsigned char)c < 32 && c != '\t') continue;
+        else sb_add(b, &c, 1);
+    }
+}
+
+static int is_bangla_family(int f)
+{
+    const char *n = fams[f < NFAM ? f : 0].name;
+    return strstr(n, "Bengali") || strstr(n, "Bangla") || strstr(n, "Hind");
+}
+
+static void dw_rpr(SB *b, int ai)
+{
+    const Attr *a = &attrs[ai];
+    char tmp[200];
+    const char *fn = fams[a->font < NFAM ? a->font : 0].name;
+    sb_str(b, "<w:rPr>");
+    snprintf(tmp, sizeof(tmp), "<w:rFonts w:ascii=\"%s\" w:hAnsi=\"%s\" w:cs=\"%s\"/>", fn, fn,
+             is_bangla_family(a->font) ? fn : "Nirmala UI");
+    sb_str(b, tmp);
+    if (a->flags & A_BOLD) sb_str(b, "<w:b/><w:bCs/>");
+    if (a->flags & A_ITALIC) sb_str(b, "<w:i/><w:iCs/>");
+    if (a->flags & A_STRIKE) sb_str(b, "<w:strike/>");
+    if (a->color & 0xFFFFFF) { snprintf(tmp, sizeof(tmp), "<w:color w:val=\"%06X\"/>", (unsigned)(a->color & 0xFFFFFF)); sb_str(b, tmp); }
+    snprintf(tmp, sizeof(tmp), "<w:sz w:val=\"%d\"/><w:szCs w:val=\"%d\"/>", a->size2, a->size2);
+    sb_str(b, tmp);
+    if (a->flags & A_UNDER) sb_str(b, "<w:u w:val=\"single\"/>");
+    sb_str(b, "</w:rPr>");
+}
+
+static int dw_numid;               /* নম্বর তালিকার চলতি numId (২ থেকে; ১ = বুলেট) */
+
+static void dw_para(SB *b, int i, int *img_no)
+{
+    Para *q = &P[i];
+    char tmp[300];
+    static const char *const sty[5] = { NULL, "Title", "Heading1", "Heading2", "Heading3" };
+    static const char *const jc[4] = { "left", "center", "right", "both" };
+    sb_str(b, "<w:p><w:pPr>");
+    if (q->style > 0 && q->style < 5) { snprintf(tmp, sizeof(tmp), "<w:pStyle w:val=\"%s\"/>", sty[q->style]); sb_str(b, tmp); }
+    if (q->pbreak) sb_str(b, "<w:pageBreakBefore/>");
+    if (q->list == 1) sb_str(b, "<w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"1\"/></w:numPr>");
+    else if (q->list == 2) {
+        if (i == 0 || P[i - 1].list != 2) dw_numid++;   /* নতুন নম্বর তালিকা আবার ১ থেকে */
+        snprintf(tmp, sizeof(tmp), "<w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"%d\"/></w:numPr>", dw_numid);
+        sb_str(b, tmp);
+    }
+    snprintf(tmp, sizeof(tmp), "<w:spacing w:after=\"%d\" w:line=\"%d\" w:lineRule=\"auto\"/>", q->tbl ? 0 : 120, q->spacing * 240 / 100);
+    sb_str(b, tmp);
+    if (q->align) { snprintf(tmp, sizeof(tmp), "<w:jc w:val=\"%s\"/>", jc[q->align & 3]); sb_str(b, tmp); }
+    sb_str(b, "</w:pPr>");
+    if (q->kind == 1 && q->img >= 0 && q->img < nimgs) {
+        long cx = (long)q->img_w * 9525, cy = (long)q->img_h * 9525;
+        int n = ++*img_no;
+        snprintf(tmp, sizeof(tmp), "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">"
+                 "<wp:extent cx=\"%ld\" cy=\"%ld\"/><wp:docPr id=\"%d\" name=\"Picture %d\"/>", cx, cy, n, n);
+        sb_str(b, tmp);
+        snprintf(tmp, sizeof(tmp), "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">"
+                 "<pic:pic><pic:nvPicPr><pic:cNvPr id=\"%d\" name=\"image%d\"/><pic:cNvPicPr/></pic:nvPicPr>", n, n);
+        sb_str(b, tmp);
+        snprintf(tmp, sizeof(tmp), "<pic:blipFill><a:blip r:embed=\"rIdImg%d\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>"
+                 "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"%ld\" cy=\"%ld\"/></a:xfrm>", q->img, cx, cy);
+        sb_str(b, tmp);
+        sb_str(b, "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic>"
+                  "</wp:inline></w:drawing></w:r>");
+    } else {
+        int a = 0;
+        while (a < q->n) {
+            int j = a;
+            while (j < q->n && q->a[j] == q->a[a]) j++;
+            sb_str(b, "<w:r>");
+            dw_rpr(b, q->a[a]);
+            sb_str(b, "<w:t xml:space=\"preserve\">");
+            xml_esc(b, q->t + a, j - a);
+            sb_str(b, "</w:t></w:r>");
+            a = j;
+        }
+    }
+    sb_str(b, "</w:p>");
+}
+
+#define DOCX_NS "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" " \
+                "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" " \
+                "xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" " \
+                "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" " \
+                "xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\""
+
+static void dw_hf(SB *b, const char *text, int align, int footer)
+{
+    static const char *const jc[3] = { "left", "center", "right" };
+    const char *s = text;
+    char tmp[200];
+    sb_str(b, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
+    sb_str(b, footer ? "<w:ftr " DOCX_NS ">" : "<w:hdr " DOCX_NS ">");
+    snprintf(tmp, sizeof(tmp), "<w:p><w:pPr><w:jc w:val=\"%s\"/></w:pPr>", jc[align >= 0 && align < 3 ? align : 1]);
+    sb_str(b, tmp);
+    while (*s) {
+        const char *f1 = strstr(s, "{page}"), *f2 = strstr(s, "{pages}"), *f = NULL;
+        int pages = 0;
+        if (f1 && (!f2 || f1 < f2)) f = f1;
+        else if (f2) { f = f2; pages = 1; }
+        if (f > s || !f) {
+            sb_str(b, "<w:r><w:rPr><w:sz w:val=\"20\"/><w:color w:val=\"404040\"/></w:rPr><w:t xml:space=\"preserve\">");
+            xml_esc(b, s, f ? (int)(f - s) : (int)strlen(s));
+            sb_str(b, "</w:t></w:r>");
+        }
+        if (!f) break;
+        sb_str(b, pages ? "<w:fldSimple w:instr=\" NUMPAGES \">" : "<w:fldSimple w:instr=\" PAGE \">");
+        sb_str(b, "<w:r><w:rPr><w:sz w:val=\"20\"/><w:color w:val=\"404040\"/></w:rPr><w:t>1</w:t></w:r></w:fldSimple>");
+        s = f + (pages ? 7 : 6);
+    }
+    sb_str(b, "</w:p>");
+    sb_str(b, footer ? "</w:ftr>" : "</w:hdr>");
+}
+
+static const char *img_mime(const char *ext)
+{
+    if (!strcasecmp(ext, "jpg") || !strcasecmp(ext, "jpeg")) return "image/jpeg";
+    if (!strcasecmp(ext, "gif")) return "image/gif";
+    if (!strcasecmp(ext, "bmp")) return "image/bmp";
+    if (!strcasecmp(ext, "tga")) return "image/x-tga";
+    return "image/png";
+}
+
+static int save_docx(const char *p)
+{
+    SB d = { 0, 0, 0 }, s = { 0, 0, 0 }, ct = { 0, 0, 0 }, rel = { 0, 0, 0 }, num = { 0, 0, 0 }, h = { 0, 0, 0 }, f = { 0, 0, 0 };
+    ZipW z;
+    char tmp[400], name[64];
+    int i, img_no = 0, k;
+    unsigned char *used = (unsigned char *)calloc((size_t)nimgs + 1, 1);
+    FILE *fp;
+    memset(&z, 0, sizeof(z));
+    dw_numid = 1;
+    /* document.xml */
+    sb_str(&d, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:document " DOCX_NS "><w:body>");
+    for (i = 0; i < np;) {
+        if (P[i].tbl) {
+            int a, b, r, c, rows, cols = tbls[P[i].tbl].cols, tot = 0;
+            table_span(i, &a, &b);
+            rows = table_rows(a, b);
+            for (c = 0; c < cols; c++) tot += tbls[P[i].tbl].w[c] > 0 ? tbls[P[i].tbl].w[c] : 1;
+            sb_str(&d, "<w:tbl><w:tblPr><w:tblW w:w=\"5000\" w:type=\"pct\"/><w:tblBorders>"
+                       "<w:top w:val=\"single\" w:sz=\"4\" w:color=\"595959\"/><w:left w:val=\"single\" w:sz=\"4\" w:color=\"595959\"/>"
+                       "<w:bottom w:val=\"single\" w:sz=\"4\" w:color=\"595959\"/><w:right w:val=\"single\" w:sz=\"4\" w:color=\"595959\"/>"
+                       "<w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"595959\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"595959\"/>"
+                       "</w:tblBorders><w:tblLayout w:type=\"fixed\"/></w:tblPr><w:tblGrid>");
+            for (c = 0; c < cols; c++) {
+                snprintf(tmp, sizeof(tmp), "<w:gridCol w:w=\"%d\"/>", (int)(9026L * (tbls[P[i].tbl].w[c] > 0 ? tbls[P[i].tbl].w[c] : 1) / (tot > 0 ? tot : 1)));
+                sb_str(&d, tmp);
+            }
+            sb_str(&d, "</w:tblGrid>");
+            for (r = 0; r < rows; r++) {
+                sb_str(&d, "<w:tr>");
+                for (c = 0; c < cols; c++) {
+                    int any = 0;
+                    snprintf(tmp, sizeof(tmp), "<w:tc><w:tcPr><w:tcW w:w=\"%d\" w:type=\"dxa\"/></w:tcPr>",
+                             (int)(9026L * (tbls[P[i].tbl].w[c] > 0 ? tbls[P[i].tbl].w[c] : 1) / (tot > 0 ? tot : 1)));
+                    sb_str(&d, tmp);
+                    for (k = a; k < b; k++) {
+                        if (P[k].row != r || P[k].col != c) continue;
+                        if (P[k].kind == 1 && P[k].img >= 0 && P[k].img < nimgs) used[P[k].img] = 1;
+                        dw_para(&d, k, &img_no);
+                        any = 1;
+                    }
+                    if (!any) sb_str(&d, "<w:p/>");
+                    sb_str(&d, "</w:tc>");
+                }
+                sb_str(&d, "</w:tr>");
+            }
+            sb_str(&d, "</w:tbl>");
+            i = b;
+            continue;
+        }
+        if (P[i].kind == 1 && P[i].img >= 0 && P[i].img < nimgs) used[P[i].img] = 1;
+        dw_para(&d, i, &img_no);
+        i++;
+    }
+    sb_str(&d, "<w:sectPr>");
+    if (hdr_text[0]) sb_str(&d, "<w:headerReference w:type=\"default\" r:id=\"rIdHdr\"/>");
+    if (ftr_text[0]) sb_str(&d, "<w:footerReference w:type=\"default\" r:id=\"rIdFtr\"/>");
+    sb_str(&d, "<w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" "
+               "w:left=\"1440\" w:header=\"720\" w:footer=\"720\" w:gutter=\"0\"/></w:sectPr></w:body></w:document>");
+    /* styles.xml */
+    snprintf(name, sizeof(name), "%s", fams[default_family()].name);
+    sb_str(&s, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:styles " DOCX_NS ">");
+    snprintf(tmp, sizeof(tmp), "<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii=\"%s\" w:hAnsi=\"%s\" w:cs=\"Nirmala UI\"/>"
+             "<w:sz w:val=\"22\"/><w:szCs w:val=\"22\"/></w:rPr></w:rPrDefault>", name, name);
+    sb_str(&s, tmp);
+    sb_str(&s, "<w:pPrDefault><w:pPr><w:spacing w:after=\"120\" w:line=\"276\" w:lineRule=\"auto\"/></w:pPr></w:pPrDefault></w:docDefaults>"
+               "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:qFormat/></w:style>"
+               "<w:style w:type=\"paragraph\" w:styleId=\"Title\"><w:name w:val=\"Title\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:qFormat/>"
+               "<w:rPr><w:sz w:val=\"52\"/><w:szCs w:val=\"52\"/></w:rPr></w:style>"
+               "<w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:qFormat/>"
+               "<w:pPr><w:keepNext/><w:spacing w:before=\"240\"/><w:outlineLvl w:val=\"0\"/></w:pPr><w:rPr><w:b/><w:color w:val=\"2F5496\"/><w:sz w:val=\"40\"/></w:rPr></w:style>"
+               "<w:style w:type=\"paragraph\" w:styleId=\"Heading2\"><w:name w:val=\"heading 2\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:qFormat/>"
+               "<w:pPr><w:keepNext/><w:spacing w:before=\"200\"/><w:outlineLvl w:val=\"1\"/></w:pPr><w:rPr><w:b/><w:color w:val=\"2F5496\"/><w:sz w:val=\"32\"/></w:rPr></w:style>"
+               "<w:style w:type=\"paragraph\" w:styleId=\"Heading3\"><w:name w:val=\"heading 3\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:qFormat/>"
+               "<w:pPr><w:keepNext/><w:spacing w:before=\"160\"/><w:outlineLvl w:val=\"2\"/></w:pPr><w:rPr><w:b/><w:color w:val=\"2F5496\"/><w:sz w:val=\"26\"/></w:rPr></w:style>"
+               "</w:styles>");
+    /* numbering.xml */
+    sb_str(&num, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:numbering " DOCX_NS ">"
+                 "<w:abstractNum w:abstractNumId=\"0\"><w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"bullet\"/>"
+                 "<w:lvlText w:val=\"\xE2\x80\xA2\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr></w:lvl></w:abstractNum>"
+                 "<w:abstractNum w:abstractNumId=\"1\"><w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"decimal\"/>"
+                 "<w:lvlText w:val=\"%1.\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr></w:lvl></w:abstractNum>"
+                 "<w:num w:numId=\"1\"><w:abstractNumId w:val=\"0\"/></w:num>");
+    for (k = 2; k <= dw_numid; k++) {
+        snprintf(tmp, sizeof(tmp), "<w:num w:numId=\"%d\"><w:abstractNumId w:val=\"1\"/><w:lvlOverride w:ilvl=\"0\"><w:startOverride w:val=\"1\"/></w:lvlOverride></w:num>", k);
+        sb_str(&num, tmp);
+    }
+    sb_str(&num, "</w:numbering>");
+    /* সম্পর্ক আর ধরন */
+    sb_str(&rel, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                 "<Relationship Id=\"rIdStyles\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>"
+                 "<Relationship Id=\"rIdNum\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering\" Target=\"numbering.xml\"/>");
+    if (hdr_text[0]) sb_str(&rel, "<Relationship Id=\"rIdHdr\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/header\" Target=\"header1.xml\"/>");
+    if (ftr_text[0]) sb_str(&rel, "<Relationship Id=\"rIdFtr\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer\" Target=\"footer1.xml\"/>");
+    sb_str(&ct, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+                "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
+                "<Default Extension=\"xml\" ContentType=\"application/xml\"/>");
+    {
+        static const char *const exts[] = { "png", "jpg", "jpeg", "gif", "bmp", "tga" };
+        int e;
+        for (e = 0; e < 6; e++) {
+            snprintf(tmp, sizeof(tmp), "<Default Extension=\"%s\" ContentType=\"%s\"/>", exts[e], img_mime(exts[e]));
+            sb_str(&ct, tmp);
+        }
+    }
+    sb_str(&ct, "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>"
+                "<Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/>"
+                "<Override PartName=\"/word/numbering.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml\"/>");
+    if (hdr_text[0]) sb_str(&ct, "<Override PartName=\"/word/header1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml\"/>");
+    if (ftr_text[0]) sb_str(&ct, "<Override PartName=\"/word/footer1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml\"/>");
+    sb_str(&ct, "</Types>");
+    {
+        static const char rels[] = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
+            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+            "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/>"
+            "</Relationships>";
+        zip_add(&z, "[Content_Types].xml", ct.s, (long)ct.n);
+        zip_add(&z, "_rels/.rels", rels, (long)strlen(rels));
+    }
+    for (k = 0; k < nimgs; k++) {
+        if (!used || !used[k]) continue;
+        snprintf(tmp, sizeof(tmp), "<Relationship Id=\"rIdImg%d\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/image%d.%s\"/>",
+                 k, k, imgs[k].ext);
+        sb_str(&rel, tmp);
+        snprintf(name, sizeof(name), "word/media/image%d.%s", k, imgs[k].ext);
+        zip_add(&z, name, imgs[k].data, imgs[k].len);
+    }
+    sb_str(&rel, "</Relationships>");
+    zip_add(&z, "word/document.xml", d.s, (long)d.n);
+    zip_add(&z, "word/styles.xml", s.s, (long)s.n);
+    zip_add(&z, "word/numbering.xml", num.s, (long)num.n);
+    zip_add(&z, "word/_rels/document.xml.rels", rel.s, (long)rel.n);
+    if (hdr_text[0]) { dw_hf(&h, hdr_text, hdr_align, 0); zip_add(&z, "word/header1.xml", h.s, (long)h.n); }
+    if (ftr_text[0]) { dw_hf(&f, ftr_text, ftr_align, 1); zip_add(&z, "word/footer1.xml", f.s, (long)f.n); }
+    zip_finish(&z);
+    free(d.s); free(s.s); free(ct.s); free(rel.s); free(num.s); free(h.s); free(f.s); free(used);
+    fp = fopen(p, "wb");
+    if (!fp || fwrite(z.b.s, 1, z.b.n, fp) != z.b.n) {
+        if (fp) fclose(fp);
+        free(z.b.s);
+        return -1;
+    }
+    fclose(fp);
+    free(z.b.s);
+    return 0;
+}
+
+static int is_docx, docx_skipped;  /* ধাপ ২৬খ-৩: খোলা ফাইলটা .docx */
+
 static int load_doc(const char *p)
 {
     size_t len = 0;
@@ -1949,18 +3137,30 @@ static int load_doc(const char *p)
     if (!b) return -1;
     hdr_text[0] = ftr_text[0] = 0;                   /* ধাপ ২৬খ-২: ফাইলে থাকলে parse বসাবে */
     hdr_align = ftr_align = 1;
+    is_docx = 0;
     if (!strncmp(b, "rozword ", 8)) n = parse_rwd(b, &A, 1);
-    else n = parse_plain(b, len, default_attr(), NULL, &A);
+    else if (len > 4 && b[0] == 'P' && b[1] == 'K' && b[2] == 3 && b[3] == 4) {   /* ধাপ ২৬খ-৩: .docx */
+        int skipped = 0;
+        n = load_docx((const unsigned char *)b, (long)len, &A, &skipped);
+        is_docx = 1;
+        docx_skipped = skipped;
+    } else n = parse_plain(b, len, default_attr(), NULL, &A);
     free(b);
     if (n <= 0) return -1;
     doc_replace(A, n);
+    if (P[np - 1].tbl || P[np - 1].kind == 1) {       /* শেষে লেখার জায়গা */
+        paras_insert_at(np, 1);
+        para_init(&P[np - 1], default_attr());
+    }
     cp = ci = sp = si = 0;
     scroll_y = 0;
     snprintf(path, sizeof(path), "%s", p);
     untitled = 0;
     modified = 0;
     reset_undo();
-    snprintf(status_msg, sizeof(status_msg), "Opened %s", base_name(p));
+    if (is_docx) snprintf(status_msg, sizeof(status_msg), "Opened Word document %s%s", base_name(p),
+                          docx_skipped ? " - some objects rozword cannot show were left out" : "");
+    else snprintf(status_msg, sizeof(status_msg), "Opened %s", base_name(p));
     return 0;
 }
 
@@ -1969,6 +3169,20 @@ static int save_doc(const char *p)
     SB b = { 0, 0, 0 };
     FILE *f;
     int as_text = has_ext(p, ".txt");
+    if (has_ext(p, ".docx")) {                         /* ধাপ ২৬খ-৩ */
+        if (save_docx(p) < 0) {
+            char msg[700];
+            snprintf(msg, sizeof(msg), "Cannot save %s", p);
+            report_error(msg);
+            return -1;
+        }
+        snprintf(path, sizeof(path), "%s", p);
+        untitled = 0;
+        modified = 0;
+        is_docx = 1;
+        snprintf(status_msg, sizeof(status_msg), "Saved as a Word document: %s", base_name(p));
+        return 0;
+    }
     if (as_text) { plain_range(&b, 0, 0, np - 1, P[np - 1].n, 1); sb_str(&b, "\n"); }
     else serialize_range(&b, 0, 0, np - 1, P[np - 1].n, SER_META | SER_EMBED);
     f = fopen(p, "wb");
@@ -1977,16 +3191,17 @@ static int save_doc(const char *p)
         if (f) fclose(f);
         free(b.s);
         snprintf(msg, sizeof(msg), "Cannot save %s", p);
-        ui_msgbox("rozword", msg, UI_MB_OK | UI_MB_ERROR);
+        report_error(msg);
         return -1;
     }
     fclose(f);
     free(b.s);
-    if (!as_text) { snprintf(path, sizeof(path), "%s", p); untitled = 0; modified = 0; }
+    if (!as_text) { snprintf(path, sizeof(path), "%s", p); untitled = 0; modified = 0; is_docx = 0; }
     snprintf(status_msg, sizeof(status_msg), as_text ? "Exported as text: %s" : "Saved %s", base_name(p));
     return 0;
 }
 
+/* as_text: 0 = .rwd (বা নাম .docx/.txt দিলে সেটা), 1 = লেখা হিসেবে, 2 = Word (.docx) — ধাপ ২৬খ-৩ */
 static int save_as(int as_text)
 {
     char p[512];
@@ -1994,15 +3209,18 @@ static int save_as(int as_text)
     if (as_text) {
         char *dot = strrchr(p, '.');
         if (dot && dot > strrchr(p, '/')) *dot = '\0';
-        strncat(p, ".txt", sizeof(p) - strlen(p) - 1);
+        strncat(p, as_text == 2 ? ".docx" : ".txt", sizeof(p) - strlen(p) - 1);
     }
-    if (!ui_filedlg(as_text ? "Export as text" : "Save document", p, sizeof(p), 1)) return -1;
-    if (!as_text && !has_ext(p, ".rwd") && !has_ext(p, ".txt")) strncat(p, ".rwd", sizeof(p) - strlen(p) - 1);
+    if (!ui_filedlg(as_text == 1 ? "Export as text" : as_text == 2 ? "Save as Word document" : "Save document", p, sizeof(p), 1))
+        return -1;
+    if (as_text == 2 && !has_ext(p, ".docx")) strncat(p, ".docx", sizeof(p) - strlen(p) - 1);
+    if (!as_text && !has_ext(p, ".rwd") && !has_ext(p, ".txt") && !has_ext(p, ".docx")) strncat(p, ".rwd", sizeof(p) - strlen(p) - 1);
     return save_doc(p);
 }
 
 static int do_save(void)
 {
+    if (!untitled && has_ext(path, ".docx")) return save_doc(path);   /* ধাপ ২৬খ-৩: Word ফাইল Word হিসেবেই */
     if (untitled || !has_ext(path, ".rwd")) return save_as(0);
     return save_doc(path);
 }
@@ -2404,14 +3622,16 @@ enum {
     M_KEYS, M_ABOUT,
     /* ধাপ ২৬খ-২ */
     M_TABLE, M_PICTURE, M_PICSIZE, M_HEADER, M_FOOTER, M_PAGENUM,
-    M_ROWADD, M_COLADD, M_ROWDEL, M_COLDEL, M_TBLDEL, M_COLWIDER, M_COLNARROW
+    M_ROWADD, M_COLADD, M_ROWDEL, M_COLDEL, M_TBLDEL, M_COLWIDER, M_COLNARROW,
+    M_SAVEDOCX                     /* ধাপ ২৬খ-৩ */
 };
 
 /* "Ctrl+I " (শেষে ফাঁকা) — শুধু দেখানোর জন্য: Ctrl+I/J/H-এর কোড Tab/Enter/Backspace-এর সমান,
  * তাই এগুলো handle_key নিজে Ctrl দেখে ধরে (মেনু-ফিতা ধরলে সাধারণ Tab-ও Italic হয়ে যেত) */
 static const struct ui_menuitem file_items[] = {
     { "New", "Ctrl+N", M_NEW }, { "Open...", "Ctrl+O", M_OPEN }, { "Save", "Ctrl+S", M_SAVE },
-    { "Save as...", "F12", M_SAVEAS }, { "Export as text...", NULL, M_EXPORT }, { "-", NULL, 0 },
+    { "Save as...", "F12", M_SAVEAS }, { "Save as Word (.docx)...", NULL, M_SAVEDOCX },
+    { "Export as text...", NULL, M_EXPORT }, { "-", NULL, 0 },
     { "Quit", "Ctrl+Q", M_QUIT },
 };
 static const struct ui_menuitem edit_items[] = {
@@ -2582,6 +3802,7 @@ static void do_action(int a)
     case M_SAVE: do_save(); break;
     case M_SAVEAS: save_as(0); break;
     case M_EXPORT: save_as(1); break;
+    case M_SAVEDOCX: save_as(2); break;
     case M_QUIT: if (confirm_discard()) ui_quit(&U); break;
     case M_UNDO: do_undo(0); break;
     case M_REDO: do_undo(1); break;
@@ -2657,7 +3878,7 @@ static void do_action(int a)
         break;
     case M_ABOUT:
         ui_msgbox("About rozword", "rozword " RW_VERSION "\nA word processor for rozOS.\n"
-                  "Documents: .rwd (rozword) and .txt.\nTables, pictures, header and footer.\nBangla: Ctrl+Space (Avro phonetic).\nhelp rozword",
+                  "Documents: .rwd (rozword), Word .docx and .txt.\nTables, pictures, header and footer.\nBangla: Ctrl+Space (Avro phonetic).\nhelp rozword",
                   UI_MB_OK | UI_MB_INFO);
         break;
     }
@@ -3098,7 +4319,18 @@ int main(int argc, char **argv)
     int was_mod = -1;
     char was_path[512] = "";
     if (argc > 1 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))) {
-        printf("usage: rozword [FILE.rwd | FILE.txt]   - word processor (help rozword)\n");
+        printf("usage: rozword [FILE.rwd | FILE.docx | FILE.txt]   - word processor (help rozword)\n"
+               "       rozword -c IN OUT    convert between .rwd, .docx and .txt (no window)\n");
+        return 0;
+    }
+    if (argc > 1 && !strcmp(argv[1], "-c")) {           /* ধাপ ২৬খ-৩: উইন্ডো ছাড়া রূপান্তর */
+        if (argc < 4) { fprintf(stderr, "usage: rozword -c IN OUT\n"); return 2; }
+        cli_mode = 1;
+        fonts_init();
+        doc_clear();
+        if (load_doc(argv[2]) < 0) { fprintf(stderr, "rozword: cannot open %s\n", argv[2]); return 1; }
+        if (save_doc(argv[3]) < 0) return 1;
+        printf("%s -> %s (%d paragraphs%s)\n", argv[2], argv[3], np, docx_skipped ? ", some objects left out" : "");
         return 0;
     }
     if (gfx_init_window("rozword", 960, 660) < 0) {

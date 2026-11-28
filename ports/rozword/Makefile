@@ -2,7 +2,7 @@
 CC = tcc
 CFLAGS = -O2
 rozword: rozword.c
-	$(CC) $(CFLAGS) rozword.c -lrozui -lrozgfx -lm -o rozword
+	$(CC) $(CFLAGS) rozword.c -lrozui -lrozgfx -lz -lm -o rozword
 install: rozword
 	cp rozword /usr/bin/rozword
 clean:

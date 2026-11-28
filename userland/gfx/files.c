@@ -98,6 +98,9 @@ static void classify(struct ent *e)
     if (has_ext(n, ".rwd")) {                    /* ধাপ ২৬ক: rozword-এর দলিল (rozpkg install rozword) */
         e->kind = 'd'; e->image = "file"; e->type = "rozword document"; return;
     }
+    if (has_ext(n, ".docx")) {                   /* ধাপ ২৬খ-৩: Word (rozpkg install rozword) */
+        e->kind = 'd'; e->image = "file"; e->type = "Word document"; return;
+    }
     if (has_ext(n, ".pdf")) {                    /* ধাপ ২৬খ: PDF (rozpkg install rozpdf) */
         e->kind = 'd'; e->image = "file"; e->type = "PDF document"; return;
     }
@@ -295,6 +298,12 @@ static void open_entry(int i, int with_code)
     if (E[i].isdir && !with_code) { go(E[i].name, 1); return; }
     /* ধাপ ২৬ক: .rwd → rozword (প্যাকেজ বসানো থাকলে; না থাকলে আগের মতো Code-এ লেখা হিসেবে) */
     if (!with_code && has_ext(E[i].name, ".rwd") && access("/usr/bin/rozword", X_OK) == 0) launch2("rozword", p);
+    /* ধাপ ২৬খ-৩: .docx → rozword; না থাকলে বলে দেওয়া (ZIP — Code-এ খুলে লাভ নেই) */
+    else if (!with_code && has_ext(E[i].name, ".docx")) {
+        if (access("/usr/bin/rozword", X_OK) == 0) launch2("rozword", p);
+        else ui_msgbox("Files", "To open Word documents, install the word processor:\n\n    rozpkg install rozword",
+                       UI_MB_OK | UI_MB_INFO);
+    }
     /* ধাপ ২৬খ: .pdf → rozpdf; না থাকলে বলে দেওয়া (Code-এ PDF খুলে লাভ নেই) */
     else if (!with_code && has_ext(E[i].name, ".pdf")) {
         if (access("/usr/bin/rozpdf", X_OK) == 0) launch2("rozpdf", p);
