@@ -98,6 +98,9 @@ static void classify(struct ent *e)
     if (has_ext(n, ".rwd")) {                    /* ধাপ ২৬ক: rozword-এর দলিল (rozpkg install rozword) */
         e->kind = 'd'; e->image = "file"; e->type = "rozword document"; return;
     }
+    if (has_ext(n, ".pdf")) {                    /* ধাপ ২৬খ: PDF (rozpkg install rozpdf) */
+        e->kind = 'd'; e->image = "file"; e->type = "PDF document"; return;
+    }
     if (has_ext(n, ".txt") || has_ext(n, ".md") || has_ext(n, ".conf") || has_ext(n, ".app") ||
         has_ext(n, ".mk") || has_ext(n, ".sh") || !strcmp(n, "Makefile") || has_ext(n, ".S") || has_ext(n, ".ld")) {
         e->kind = 'd'; e->image = "file"; e->type = "Text"; return;
@@ -292,6 +295,12 @@ static void open_entry(int i, int with_code)
     if (E[i].isdir && !with_code) { go(E[i].name, 1); return; }
     /* ধাপ ২৬ক: .rwd → rozword (প্যাকেজ বসানো থাকলে; না থাকলে আগের মতো Code-এ লেখা হিসেবে) */
     if (!with_code && has_ext(E[i].name, ".rwd") && access("/usr/bin/rozword", X_OK) == 0) launch2("rozword", p);
+    /* ধাপ ২৬খ: .pdf → rozpdf; না থাকলে বলে দেওয়া (Code-এ PDF খুলে লাভ নেই) */
+    else if (!with_code && has_ext(E[i].name, ".pdf")) {
+        if (access("/usr/bin/rozpdf", X_OK) == 0) launch2("rozpdf", p);
+        else ui_msgbox("Files", "To read PDF files, install the PDF reader:\n\n    rozpkg install rozpdf",
+                       UI_MB_OK | UI_MB_INFO);
+    }
     else if (with_code || E[i].kind == 'c' || E[i].kind == 'd') launch2("code", p);
     else if (E[i].kind == 'i') launch2("imgview", p);
     else if (E[i].kind == 'p') run_in_terminal(p);

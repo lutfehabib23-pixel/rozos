@@ -9,7 +9,7 @@
 # ফল: dist/packages/rozword-VERSION.tar.gz আর index.txt (mkpkg.sh)।
 set -euo pipefail
 
-VERSION=1.0
+VERSION=1.1
 CC=${CC:-${CROSS-x86_64-elf-}gcc}
 STRIP=${STRIP:-strip}
 WORK=build/packages/rozword
@@ -48,4 +48,4 @@ Source: /usr/src/rozword (make = TCC, make CC=gcc, make install)
 TXT
 
 MKPKG_GZ=1 ports/packages/mkpkg.sh rozword "$VERSION" "$ROOT" \
-    "rozword $VERSION - word processor: fonts, headings, lists, Bangla (.rwd, .txt)"
+    "rozword $VERSION - word processor: fonts, headings, lists, tables, pictures, header/footer, Bangla (.rwd, .txt)"

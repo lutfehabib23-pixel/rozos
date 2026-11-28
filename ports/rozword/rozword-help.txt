@@ -1,5 +1,6 @@
 # rozword - the word processor
-A word processor like MS Word, for rozOS (phase 26a). Install it with
+A word processor like MS Word, for rozOS (phase 26a; tables, pictures,
+header and footer in 1.1, phase 26b-2). Install it with
   `rozpkg install rozword`
 then Start > Office > rozword, or `rozword` in the terminal, or double-
 click a .rwd file in [[filemanager|Files]].
@@ -22,6 +23,28 @@ Bangla/English.
 Select text first to change it; without a selection the change is for
 what you type next. Enter on an empty bullet ends the list.
 
+== Tables ==
+  Insert > Table...   columns x rows, e.g. `3 x 2`
+  Tab / Shift+Tab     next / previous cell; Tab in the last cell adds a row
+  Table menu          add a row below, a column to the right, delete a
+                      row / column / the whole table, wider / narrower
+                      column
+A cell can hold several paragraphs, lists and pictures; rows that do not
+fit on the page move to the next page.
+
+== Pictures ==
+  Insert > Picture...   PNG, JPEG, GIF, BMP, TGA, PPM - placed centered,
+                        as wide as the text at most
+  Format > Picture size...   width in % of the text width
+  click it, then Backspace / Delete   remove it
+The picture itself is kept inside the .rwd file.
+
+== Header and footer ==
+  Insert > Header... / Footer...   text at the top / bottom of every page,
+                                   left, center or right
+  {page} and {pages}               the page number and the number of pages
+  Insert > Page numbers            footer "Page 1 of 3" at once
+
 == Bangla ==
 Ctrl+Space switches to Bangla (Avro phonetic, see [[bangla]]):
 "ami bangla likhi" -> আমি বাংলা লিখি. Conjuncts (ক্ষ, ন্ধ্য ...) are joined
@@ -42,7 +65,7 @@ programs it pastes plain text.
   .rwd   rozword's own format (keeps everything; plain UTF-8 text inside)
   .txt   open any text file; File > Export as text writes one
 Save: Ctrl+S, Save as: F12. A sample: /usr/share/doc/rozword/welcome.rwd
-Word (.docx) files come in the next version.
+Word (.docx) files and saving as PDF come in the next versions.
 
 == Build it yourself ==
 The source is in /usr/src/rozword:

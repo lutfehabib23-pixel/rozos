@@ -78,6 +78,7 @@ Type [[help|how to use this viewer]] if you are new here.
   [[binutils]]        GNU as, ld, ar, objdump ... inside rozOS
   [[gcc]]             GCC and G++ (C/C++) inside rozOS
   [[rozword]]         word processor like Word (rozpkg install rozword)
+  [[rozpdf]]          PDF reader, Bangla too (rozpkg install rozpdf)
   [[packages]]        make and publish your own packages
 
 == How rozOS works ==

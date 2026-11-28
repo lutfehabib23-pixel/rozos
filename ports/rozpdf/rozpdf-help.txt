@@ -1,0 +1,35 @@
+# rozpdf - the PDF reader (phase 26b-1)
+Install: `rozpkg install rozpdf`. Open: Start > Office > rozpdf, double-click
+a .pdf in [[files]], or `rozpdf FILE.pdf [PAGE]` in a terminal.
+
+== Reading ==
+  Wheel, arrows, PgUp/PgDn, Space   move through the pages
+  drag with the mouse                move the page (also sideways)
+  Home / End, Ctrl+G                 first / last page, go to a page
+  + / -, Ctrl+wheel                  zoom
+  Ctrl+W / Ctrl+P                    fit the width / the whole page
+  Ctrl+F, F3                         find, find the next one (Esc clears)
+  Ctrl+C                             copy the text of this page
+  File > Document info               pages, size, title, author
+
+== In a terminal ==
+  `rozpdf -t FILE.pdf [FIRST [LAST]]`    print the text (pages FIRST-LAST)
+  `rozpdf -i FILE.pdf`                   pages, page size, title, author
+  `rozpdf -r FILE.pdf PAGE OUT.png [ZOOM]`   save a page as a picture
+  `rozpdf -t book.pdf | grep -n word`    find a word with line numbers
+
+== What it shows ==
+Text is drawn with the fonts stored inside the PDF (TrueType, OpenType,
+CFF, Type 1, Type 3) - so Bangla, with its joined letters, looks exactly
+as in the original. A font that is not inside the PDF is replaced by a
+rozOS font of the same kind (serif, sans, mono; bold and italic made by
+rozpdf). Pictures: JPEG and the PDF's own picture formats, masks and
+transparency. Lines, shapes, colours (RGB, CMYK, grey, indexed).
+Damaged files are repaired while reading.
+
+== Not yet ==
+Password-protected (encrypted) PDFs, JPEG 2000 and JBIG2 pictures (shown
+as grey boxes), colour gradients, form fields and comments. Copying the
+text of scanned pages is not possible (they are only pictures).
+
+Source: /usr/src/rozpdf (`make` builds it with TCC). See [[rozword]].

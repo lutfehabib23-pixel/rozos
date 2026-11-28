@@ -7,7 +7,7 @@
  * বাংলা লেখা আঁকে librozgfx-এর FreeType + shaping (যুক্তাক্ষর), বাংলা ফন্ট আপনিই।
  *
  * ফাইল: .rwd (rozword-এর নিজের ফরম্যাট — সাধারণ লেখা, নিচে বিবরণ) আর .txt (খোলা/সেভ)।
- * .docx পরের ধাপে।
+ * .docx পরের ধাপে। ধাপ ২৬খ-২: টেবিল, ছবি, header/footer (পাতা নম্বর)।
  *
  * .rwd ফরম্যাট (UTF-8, লাইনে লাইনে):
  *   rozword 1
@@ -17,6 +17,12 @@
  *   STYLE 0 Normal 1 Title 2-4 Heading 1-3; ALIGN 0 বাঁ 1 মাঝ 2 ডান 3 দুই পাশ;
  *   LIST 0 নেই 1 বুলেট 2 নম্বর; SPACING ১০০ = একক লাইন; SIZE2 = পয়েন্ট × ২;
  *   FLAGS 1 bold 2 italic 4 underline 8 strike; FONT-এর নামে ফাঁকা জায়গা = '_'
+ * ধাপ ২৬খ-২ ("rozword 2"; "rozword 1"-ও খোলে):
+ *   p ... PAGEBREAK TBL ROW COL                 টেবিলের ঘরে হলে TBL > 0
+ *   T ID COLS W1 W2 ...                         টেবিল (কলামের চওড়া, হাজার ভাগে)
+ *   i ID EXT BASE64                             ছবির আসল ফাইল (png/jpg ...)
+ *   g ID W H                                    ছবির অনুচ্ছেদ (W H = px, ৯৬ dpi)
+ *   h ALIGN TEXT / f ALIGN TEXT                 header / footer ({page} {pages})
  *
  * বানানো (rozOS-এ):  tcc rozword.c -lrozui -lrozgfx -o rozword   (বা gcc, একই)
  *   /usr/src/rozword/Makefile-এ: make  বা  make CC=gcc */
@@ -32,7 +38,7 @@
 #include <rozui.h>
 #include <rozbn.h>
 
-#define RW_VERSION "1.0 (phase 26a)"
+#define RW_VERSION "1.1 (phase 26b-2)"
 
 /* ================= গঠন ================= */
 
@@ -69,7 +75,39 @@ typedef struct {
     int nl, lcap;
     int dirty;
     int before, after;             /* অনুচ্ছেদের আগে/পরে ফাঁক (px) */
+    /* ধাপ ২৬খ-২ */
+    unsigned char kind;            /* 0 লেখা, 1 ছবি (লেখা নেই; img, img_w/h) */
+    int img, img_w, img_h;         /* ছবির নম্বর (imgs[]), মাপ px-এ (১০০% zoom-এ, ৯৬ dpi) */
+    int tbl, row, col;             /* টেবিলের ঘর (tbl = 0 মানে টেবিলে নয়) */
+    int cell_x, cell_w;            /* লেআউটের সময়: ঘরের বাঁ ধার আর চওড়া (px) */
+    int lay_w, lay_x;              /* শেষ লেআউট কোন চওড়া/x-এ হয়েছিল */
 } Para;
+
+/* ধাপ ২৬খ-২: ছবির ভাণ্ডার — দলিলে ছবি নম্বর দিয়ে (undo/কপিতে শুধু নম্বর, ফাইলে আসল ছবি) */
+typedef struct {
+    unsigned char *data;           /* আসল ফাইলের বাইট (PNG/JPEG ...) */
+    long len;
+    char ext[8];
+    gfx_surface *s;                /* খোলা ছবি */
+    gfx_surface *scaled;           /* শেষ যে মাপে আঁকা হয়েছিল */
+} RImg;
+static RImg *imgs;
+static int nimgs;
+
+/* ধাপ ২৬খ-২: টেবিল — কলাম আর প্রতি কলামের চওড়া (লেখার জায়গার হাজার ভাগে) */
+#define TBL_MAXCOL 16
+typedef struct { int cols; int w[TBL_MAXCOL]; } RTable;
+static RTable *tbls;               /* tbls[0] ফাঁকা (tbl = 0 মানে টেবিল নয়) */
+static int ntbls;
+
+/* ধাপ ২৬খ-২: header/footer — {page} আর {pages} বসে */
+static char hdr_text[256], ftr_text[256];
+static int hdr_align = 1, ftr_align = 1;
+
+/* টেবিলের ঘরের দাগ আঁকার জন্য (paginate ভরে) */
+typedef struct { int page, x, y, w, h; } CellRect;
+static CellRect *crects;
+static int ncrects, crcap;
 
 static Attr attrs[4096];
 static int nattr;
@@ -459,9 +497,29 @@ static void add_line(Para *p, int s, int e)
 
 static int list_indent(const Para *p) { return p->list ? zpx(LIST_INDENT) : 0; }
 
+/* ধাপ ২৬খ-২: টেবিলের ঘরে লেখার জায়গা ঘরের ভেতরে (দুই পাশে CELL_PAD) */
+#define CELL_PAD 6
+static int para_x0(const Para *p) { return p->tbl ? p->cell_x + zpx(CELL_PAD) : 0; }
+static int para_wrap(const Para *p)
+{
+    int w = p->tbl ? p->cell_w - 2 * zpx(CELL_PAD) : content_w();
+    return w < 20 ? 20 : w;
+}
+
+/* ছবির আঁকার মাপ (zoom সহ, জায়গার চেয়ে বড় হলে ছোট করে) */
+static void img_disp(const Para *p, int *w, int *h)
+{
+    int iw = zpx(p->img_w > 0 ? p->img_w : 100), ih = zpx(p->img_h > 0 ? p->img_h : 100), avail = para_wrap(p);
+    if (iw > avail) { ih = (int)((long)ih * avail / iw); iw = avail; }
+    if (iw < 1) iw = 1;
+    if (ih < 1) ih = 1;
+    *w = iw;
+    *h = ih;
+}
+
 static void finish_line(Para *p, Line *L, int last)
 {
-    int asc = 0, desc = 0, i, te, avail = content_w() - list_indent(p);
+    int asc = 0, desc = 0, i, te, avail = para_wrap(p) - list_indent(p);
     Face fc;
     if (L->s == L->e) {                              /* খালি লাইন: কার্সরের ফরম্যাটের উচ্চতা */
         face_of(L->s > 0 ? p->a[L->s - 1] : (p->n ? p->a[0] : p->eattr), &fc);
@@ -485,17 +543,34 @@ static void finish_line(Para *p, Line *L, int last)
     L->nsp = 0;
     for (i = L->s; i < te; i++) if (p->t[i] == ' ') L->nsp++;
     L->extra = 0;
-    L->x = list_indent(p);
+    L->x = para_x0(p) + list_indent(p);
     if (p->align == 1) L->x += (avail - L->w) / 2;
     else if (p->align == 2) L->x += avail - L->w;
     else if (p->align == 3 && !last && L->nsp > 0 && avail > L->w) L->extra = (avail - L->w) * 100 / L->nsp;
-    if (L->x < 0) L->x = 0;
+    if (L->x < para_x0(p)) L->x = para_x0(p);
 }
 
 static void layout_para(Para *p)
 {
-    int avail = content_w() - list_indent(p), ls = 0, lw = 0, i = 0, k;
+    int avail = para_wrap(p) - list_indent(p), ls = 0, lw = 0, i = 0, k;
     p->nl = 0;
+    p->lay_w = para_wrap(p);
+    p->lay_x = para_x0(p);
+    if (p->kind == 1) {                              /* ধাপ ২৬খ-২: ছবি — একটা লাইন, ছবির মাপের */
+        int w, h;
+        Line *L;
+        add_line(p, 0, 0);
+        L = &p->ln[0];
+        img_disp(p, &w, &h);
+        L->asc = h;
+        L->h = h + zpx(4);
+        L->w = w;
+        L->x = para_x0(p);
+        if (p->align == 1) L->x += (avail - w) / 2;
+        else if (p->align == 2) L->x += avail - w;
+        p->dirty = 0;
+        return;
+    }
     while (i < p->n) {
         int we = i, se, ww, sw;
         while (we < p->n && p->t[we] != ' ') we++;
@@ -533,13 +608,111 @@ static void layout_para(Para *p)
 /* সব লাইনের ক্রম (ওপর/নিচে যাওয়া, ক্লিক) */
 static int *gl_p, *gl_l, ngl, glcap;
 
+static void gl_add(int pi, int k)
+{
+    if (ngl == glcap) {
+        glcap = glcap ? glcap * 2 : 256;
+        gl_p = (int *)realloc(gl_p, (size_t)glcap * sizeof(int));
+        gl_l = (int *)realloc(gl_l, (size_t)glcap * sizeof(int));
+        if (!gl_p || !gl_l) { fprintf(stderr, "rozword: out of memory\n"); exit(1); }
+    }
+    gl_p[ngl] = pi;
+    gl_l[ngl] = k;
+    ngl++;
+}
+
+static void crect_add(int page, int x, int y, int w, int h)
+{
+    if (ncrects == crcap) {
+        crcap = crcap ? crcap * 2 : 64;
+        crects = (CellRect *)realloc(crects, (size_t)crcap * sizeof(CellRect));
+        if (!crects) { fprintf(stderr, "rozword: out of memory\n"); exit(1); }
+    }
+    crects[ncrects].page = page;
+    crects[ncrects].x = x;
+    crects[ncrects].y = y;
+    crects[ncrects].w = w;
+    crects[ncrects].h = h;
+    ncrects++;
+}
+
+static void relayout_if(Para *p)
+{
+    if (layout_all || p->dirty || p->lay_w != para_wrap(p) || p->lay_x != para_x0(p)) layout_para(p);
+}
+
+/* ধাপ ২৬খ-২: টেবিল (P[i] থেকে একই tbl-এর অনুচ্ছেদগুলো) — সারি ধরে; সারি পাতায় না আঁটলে
+ * পরের পাতায় (সারি ভাঙে না)। ফেরত: টেবিলের পরের অনুচ্ছেদ */
+static int paginate_table(int i, int *page, int *y)
+{
+    int tid = P[i].tbl, j = i, c, ch = content_h(), cw = content_w(), pad = zpx(CELL_PAD);
+    int cx[TBL_MAXCOL + 1], cols;
+    RTable *T = (tid > 0 && tid < ntbls) ? &tbls[tid] : NULL;
+    while (j < np && P[j].tbl == tid) j++;
+    cols = T ? T->cols : 1;
+    if (cols < 1) cols = 1;
+    if (cols > TBL_MAXCOL) cols = TBL_MAXCOL;
+    {
+        int tot = 0, x = 0;
+        for (c = 0; c < cols; c++) tot += T && T->w[c] > 0 ? T->w[c] : 1000 / cols;
+        for (c = 0; c < cols; c++) {
+            cx[c] = x;
+            x += (int)((long)cw * (T && T->w[c] > 0 ? T->w[c] : 1000 / cols) / (tot > 0 ? tot : 1));
+        }
+        cx[cols] = cw;
+    }
+    if (*y > 0) *y += zpx(4);
+    while (i < j) {
+        int r = P[i].row, k, e = i, cellh[TBL_MAXCOL], cury[TBL_MAXCOL], rowh = 0;
+        while (e < j && P[e].row == r) e++;              /* [i, e) = এই সারি */
+        for (c = 0; c < cols; c++) cellh[c] = 0;
+        for (k = i; k < e; k++) {
+            Para *p = &P[k];
+            int col = p->col < 0 ? 0 : p->col >= cols ? cols - 1 : p->col, l;
+            p->cell_x = cx[col];
+            p->cell_w = cx[col + 1] - cx[col];
+            relayout_if(p);
+            p->before = 0;
+            p->after = zpx(2);
+            for (l = 0; l < p->nl; l++) cellh[col] += p->ln[l].h;
+            cellh[col] += p->after;
+        }
+        for (c = 0; c < cols; c++) if (cellh[c] + 2 * pad > rowh) rowh = cellh[c] + 2 * pad;
+        if (rowh < zpx(16)) rowh = zpx(16);
+        if (*y > 0 && *y + rowh > ch) { (*page)++; *y = 0; }
+        for (c = 0; c < cols; c++) cury[c] = *y + pad;
+        for (k = i; k < e; k++) {
+            Para *p = &P[k];
+            int col = p->col < 0 ? 0 : p->col >= cols ? cols - 1 : p->col, l;
+            for (l = 0; l < p->nl; l++) {
+                p->ln[l].page = *page;
+                p->ln[l].y = cury[col];
+                cury[col] += p->ln[l].h;
+                gl_add(k, l);
+            }
+            cury[col] += p->after;
+        }
+        for (c = 0; c < cols; c++) crect_add(*page, cx[c], *y, cx[c + 1] - cx[c], rowh);
+        *y += rowh;
+        i = e;
+    }
+    *y += zpx(10);
+    return j;
+}
+
 static void paginate(void)
 {
     int page = 0, y = 0, ch = content_h(), i, k;
     ngl = 0;
-    for (i = 0; i < np; i++) {
+    ncrects = 0;
+    for (i = 0; i < np;) {
         Para *p = &P[i];
-        if (layout_all || p->dirty) layout_para(p);
+        if (p->tbl) {                                 /* ধাপ ২৬খ-২ */
+            if (p->pbreak && (y > 0 || i > 0)) { page++; y = 0; }
+            i = paginate_table(i, &page, &y);
+            continue;
+        }
+        relayout_if(p);
         p->before = p->style ? zpx(p->style == 1 ? 6 : 14) : 0;
         p->after = zpx(p->style == 1 ? 10 : 8);
         if (p->pbreak && (y > 0 || i > 0)) { page++; y = 0; }
@@ -550,17 +723,10 @@ static void paginate(void)
             L->page = page;
             L->y = y;
             y += L->h;
-            if (ngl == glcap) {
-                glcap = glcap ? glcap * 2 : 256;
-                gl_p = (int *)realloc(gl_p, (size_t)glcap * sizeof(int));
-                gl_l = (int *)realloc(gl_l, (size_t)glcap * sizeof(int));
-                if (!gl_p || !gl_l) { fprintf(stderr, "rozword: out of memory\n"); exit(1); }
-            }
-            gl_p[ngl] = i;
-            gl_l[ngl] = k;
-            ngl++;
+            gl_add(i, k);
         }
         y += p->after;
+        i++;
     }
     npages = page + 1;
     layout_all = 0;
@@ -616,7 +782,26 @@ static void hit_test(int x, int y, int *op, int *oi)
     int g, best = -1, k, pos, bestd = 1 << 30, s, e;
     Para *p;
     Line *L;
-    for (g = 0; g < ngl; g++) {
+    {
+        /* ধাপ ২৬খ-২: টেবিলে একই উচ্চতায় কয়েকটা ঘর — আগে x দেখে ঘর বাছা */
+        int cx = x - page_left() - zpx(MARGIN), cell_best = -1, r;
+        long cell_d = 1L << 40;
+        CellRect *in = NULL;
+        for (r = 0; r < ncrects; r++) {              /* মাউস কোন ঘরের ভেতরে */
+            long t = page_top_doc(crects[r].page) + zpx(MARGIN) + crects[r].y;
+            if (dy >= t && dy < t + crects[r].h && cx >= crects[r].x && cx < crects[r].x + crects[r].w) { in = &crects[r]; break; }
+        }
+        for (g = 0; in && g < ngl; g++) {
+            Para *q = &P[gl_p[g]];
+            Line *l = &q->ln[gl_l[g]];
+            long top = line_top_doc(l), d;
+            if (!q->tbl || l->page != in->page || q->cell_x != in->x || l->y < in->y || l->y >= in->y + in->h) continue;
+            d = dy < top ? top - dy : dy >= top + l->h ? dy - top - l->h + 1 : 0;
+            if (d < cell_d) { cell_d = d; cell_best = g; }
+        }
+        if (cell_best >= 0) best = cell_best;
+    }
+    for (g = 0; g < ngl && best < 0; g++) {
         Line *l = &P[gl_p[g]].ln[gl_l[g]];
         long top = line_top_doc(l);
         if (dy < top + l->h || (g + 1 < ngl && P[gl_p[g + 1]].ln[gl_l[g + 1]].page > l->page &&
@@ -707,11 +892,42 @@ static int list_number(int pi)
     return n;
 }
 
+/* ধাপ ২৬খ-২: ছবি আঁকা (মাপমতো ছোট-বড় করা কপি মনে রাখা হয়) */
+static void draw_image(gfx_surface *s, Para *p, int x, int y, int w, int h)
+{
+    RImg *im = (p->img >= 0 && p->img < nimgs) ? &imgs[p->img] : NULL;
+    if (!im || !im->s) {
+        gfx_fill_rect(s, x, y, w, h, GFX_RGB(230, 230, 230));
+        gfx_rect(s, x, y, w, h, GFX_RGB(150, 150, 150));
+        gfx_text(s, NULL, x + 6, y + 6, "(picture)", GFX_RGB(100, 100, 100));
+        return;
+    }
+    if (!im->scaled || im->scaled->w != w || im->scaled->h != h) {
+        if (im->scaled) gfx_surface_free(im->scaled);
+        im->scaled = gfx_surface_new(w, h);
+        if (im->scaled) {
+            gfx_clear(im->scaled, GFX_WHITE);
+            gfx_blit_scaled(im->scaled, 0, 0, w, h, im->s);
+        }
+    }
+    if (im->scaled) gfx_blit(s, x, y, im->scaled, 0, 0, w, h);
+}
+
 static void draw_line(gfx_surface *s, int pi, int k, int sx, int sy)
 {
     Para *p = &P[pi];
     Line *L = &p->ln[k];
     int p1, i1, p2, i2, x100, i, baseline = sy + L->asc, te;
+    if (p->kind == 1) {                              /* ধাপ ২৬খ-২: ছবি */
+        int w, h;
+        img_disp(p, &w, &h);
+        draw_image(s, p, sx + L->x, sy, w, h);
+        if (sel_range(&p1, &i1, &p2, &i2) && pi >= p1 && pi <= p2 && !(pi == p2 && i2 == 0 && p1 < p2)) {
+            gfx_fill_rect_alpha(s, sx + L->x, sy, w, h, GFX_RGBA(60, 120, 230, 90));
+            gfx_rect(s, sx + L->x - 1, sy - 1, w + 2, h + 2, GFX_RGB(60, 120, 230));
+        }
+        return;
+    }
     /* নির্বাচন */
     if (sel_range(&p1, &i1, &p2, &i2) && pi >= p1 && pi <= p2) {
         int a = pi == p1 ? i1 : 0, b = pi == p2 ? i2 : p->n, xa, xb;
@@ -763,6 +979,46 @@ static void draw_line(gfx_surface *s, int pi, int k, int sx, int sy)
     }
 }
 
+/* {page}/{pages} বসানো */
+static void hf_expand(const char *src, int page, char *out, size_t n)
+{
+    size_t o = 0;
+    while (*src && o + 12 < n) {
+        if (!strncmp(src, "{page}", 6)) { o += (size_t)snprintf(out + o, n - o, "%d", page + 1); src += 6; }
+        else if (!strncmp(src, "{pages}", 7)) { o += (size_t)snprintf(out + o, n - o, "%d", npages); src += 7; }
+        else out[o++] = *src++;
+    }
+    out[o] = 0;
+}
+
+static int hf_attr(void)
+{
+    Attr a;
+    a.font = (unsigned char)default_family();
+    a.flags = 0;
+    a.size2 = 20;
+    a.color = 0x404040;
+    return attr_id(&a);
+}
+
+static void draw_header_footer(gfx_surface *s, int pg, int pl, int top)
+{
+    char t[400];
+    int which;
+    for (which = 0; which < 2; which++) {
+        const char *src = which ? ftr_text : hdr_text;
+        int align = which ? ftr_align : hdr_align, ai = hf_attr(), w, x, base;
+        Face fc;
+        if (!src[0]) continue;
+        hf_expand(src, pg, t, sizeof(t));
+        w = run_w(ai, t, (int)strlen(t));
+        face_of(ai, &fc);
+        x = pl + zpx(MARGIN) + (align == 1 ? (content_w() - w) / 2 : align == 2 ? content_w() - w : 0);
+        base = which ? top + zpx(PAGE_H) - zpx(MARGIN) / 2 + fc.asc / 2 : top + zpx(MARGIN) / 2 + fc.asc / 2;
+        draw_piece(s, ai, t, (int)strlen(t), x, base);
+    }
+}
+
 static void draw_pages(gfx_surface *s)
 {
     int pg, g, pl = page_left(), pw = zpx(PAGE_W), ph = zpx(PAGE_H);
@@ -772,6 +1028,18 @@ static void draw_pages(gfx_surface *s)
         if (top > view_y0 + view_h || top + ph < view_y0) continue;
         gfx_fill_rect(s, pl + 4, (int)top + 4, pw, ph, GFX_RGB(110, 114, 120));    /* ছায়া */
         gfx_fill_rect(s, pl, (int)top, pw, ph, GFX_WHITE);
+    }
+    /* ধাপ ২৬খ-২: header/footer আর টেবিলের দাগ */
+    for (pg = 0; pg < npages; pg++) {
+        long top = page_top_doc(pg) - scroll_y + view_y0;
+        int c;
+        if (top > view_y0 + view_h || top + ph < view_y0) continue;
+        draw_header_footer(s, pg, pl, (int)top);
+        for (c = 0; c < ncrects; c++) {
+            if (crects[c].page != pg) continue;
+            gfx_rect(s, pl + zpx(MARGIN) + crects[c].x, (int)top + zpx(MARGIN) + crects[c].y, crects[c].w + 1,
+                     crects[c].h + 1, GFX_RGB(90, 90, 90));
+        }
     }
     for (g = 0; g < ngl; g++) {
         Para *p = &P[gl_p[g]];
@@ -822,17 +1090,132 @@ static void ser_attr(SB *b, int ai)
     sb_str(b, tmp);
 }
 
-/* (p1,i1)–(p2,i2) অংশ .rwd লেখায় (পুরো দলিল: 0,0 – np-1,শেষ) */
-static void serialize_range(SB *b, int p1, int i1, int p2, int i2)
+/* ধাপ ২৬খ-২: base64 (ছবি .rwd-তে) */
+static const char b64c[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static void sb_base64(SB *b, const unsigned char *d, long n)
 {
-    int p;
-    char tmp[96];
-    sb_str(b, "rozword 1\n");
+    long i;
+    char q[4];
+    for (i = 0; i + 2 < n; i += 3) {
+        q[0] = b64c[d[i] >> 2]; q[1] = b64c[((d[i] & 3) << 4) | (d[i + 1] >> 4)];
+        q[2] = b64c[((d[i + 1] & 15) << 2) | (d[i + 2] >> 6)]; q[3] = b64c[d[i + 2] & 63];
+        sb_add(b, q, 4);
+    }
+    if (n - i == 1) { q[0] = b64c[d[i] >> 2]; q[1] = b64c[(d[i] & 3) << 4]; q[2] = q[3] = '='; sb_add(b, q, 4); }
+    else if (n - i == 2) {
+        q[0] = b64c[d[i] >> 2]; q[1] = b64c[((d[i] & 3) << 4) | (d[i + 1] >> 4)]; q[2] = b64c[(d[i + 1] & 15) << 2]; q[3] = '=';
+        sb_add(b, q, 4);
+    }
+}
+
+static unsigned char *base64_decode(const char *s, long *outn)
+{
+    long n = (long)strlen(s), o = 0;
+    unsigned char *out = (unsigned char *)malloc((size_t)(n / 4 * 3 + 4));
+    int v = 0, bits = 0;
+    if (!out) return NULL;
+    for (; *s; s++) {
+        const char *k = strchr(b64c, *s);
+        if (*s == '=' || !k) continue;
+        v = (v << 6) | (int)(k - b64c);
+        bits += 6;
+        if (bits >= 8) { bits -= 8; out[o++] = (unsigned char)(v >> bits); }
+    }
+    *outn = o;
+    return out;
+}
+
+/* ছবি ভাণ্ডারে (data-র মালিকানা নেয়); ফেরত নম্বর, ভুলে -1 */
+static int img_add(unsigned char *data, long len, const char *ext)
+{
+    RImg *n;
+    if (nimgs % 16 == 0) {
+        n = (RImg *)realloc(imgs, sizeof(RImg) * (size_t)(nimgs + 16));
+        if (!n) { free(data); return -1; }
+        imgs = n;
+    }
+    n = &imgs[nimgs];
+    memset(n, 0, sizeof(*n));
+    n->data = data;
+    n->len = len;
+    snprintf(n->ext, sizeof(n->ext), "%s", ext && *ext ? ext : "png");
+    n->s = gfx_load_image_stb(data, len);
+    return nimgs++;
+}
+
+static int tbl_new(int cols)
+{
+    RTable *n;
+    int c;
+    if (ntbls == 0) ntbls = 1;                       /* ০ নম্বর ফাঁকা */
+    n = (RTable *)realloc(tbls, sizeof(RTable) * (size_t)(ntbls + 1));
+    if (!n) return 0;
+    tbls = n;
+    if (cols < 1) cols = 1;
+    if (cols > TBL_MAXCOL) cols = TBL_MAXCOL;
+    memset(&tbls[ntbls], 0, sizeof(RTable));
+    tbls[ntbls].cols = cols;
+    for (c = 0; c < cols; c++) tbls[ntbls].w[c] = 1000 / cols;
+    return ntbls++;
+}
+
+static void ser_text(SB *b, const char *t, int n)
+{
+    int k;
+    for (k = 0; k < n; k++) {
+        if (t[k] == '\\') sb_str(b, "\\\\");
+        else if (t[k] == '\n') sb_str(b, "\\n");
+        else sb_add(b, t + k, 1);
+    }
+}
+
+#define SER_META  1                /* header/footer (পুরো দলিল: সেভ, undo) */
+#define SER_EMBED 2                /* ছবির আসল বাইট (ফাইলে সেভ) */
+
+/* (p1,i1)–(p2,i2) অংশ .rwd লেখায় (পুরো দলিল: 0,0 – np-1,শেষ) */
+static void serialize_range(SB *b, int p1, int i1, int p2, int i2, int flags)
+{
+    int p, k;
+    char tmp[200];
+    unsigned char *tdone = (unsigned char *)calloc((size_t)(ntbls + 1), 1);
+    unsigned char *idone = (unsigned char *)calloc((size_t)(nimgs + 1), 1);
+    sb_str(b, "rozword 2\n");
+    if (flags & SER_META) {
+        snprintf(tmp, sizeof(tmp), "h %d ", hdr_align);
+        sb_str(b, tmp);
+        ser_text(b, hdr_text, (int)strlen(hdr_text));
+        snprintf(tmp, sizeof(tmp), "\nf %d ", ftr_align);
+        sb_str(b, tmp);
+        ser_text(b, ftr_text, (int)strlen(ftr_text));
+        sb_str(b, "\n");
+    }
     for (p = p1; p <= p2; p++) {
         Para *q = &P[p];
         int a = p == p1 ? i1 : 0, e = p == p2 ? i2 : q->n;
-        snprintf(tmp, sizeof(tmp), "p %d %d %d %d %d\n", q->style, q->align, q->list, q->spacing, q->pbreak);
+        if (q->tbl > 0 && q->tbl < ntbls && tdone && !tdone[q->tbl]) {   /* টেবিলের বিবরণ আগে */
+            RTable *T = &tbls[q->tbl];
+            tdone[q->tbl] = 1;
+            snprintf(tmp, sizeof(tmp), "T %d %d", q->tbl, T->cols);
+            sb_str(b, tmp);
+            for (k = 0; k < T->cols; k++) { snprintf(tmp, sizeof(tmp), " %d", T->w[k]); sb_str(b, tmp); }
+            sb_str(b, "\n");
+        }
+        if (q->kind == 1 && (flags & SER_EMBED) && q->img >= 0 && q->img < nimgs && idone && !idone[q->img]) {
+            idone[q->img] = 1;                          /* ছবির বাইট (base64) প্রথমবার */
+            snprintf(tmp, sizeof(tmp), "i %d %s ", q->img, imgs[q->img].ext);
+            sb_str(b, tmp);
+            sb_base64(b, imgs[q->img].data, imgs[q->img].len);
+            sb_str(b, "\n");
+        }
+        snprintf(tmp, sizeof(tmp), "p %d %d %d %d %d %d %d %d\n", q->style, q->align, q->list, q->spacing, q->pbreak,
+                 q->tbl, q->row, q->col);
         sb_str(b, tmp);
+        if (q->kind == 1) {
+            snprintf(tmp, sizeof(tmp), "g %d %d %d\n", q->img, q->img_w, q->img_h);
+            sb_str(b, tmp);
+            continue;
+        }
         if (a >= e) {
             sb_str(b, "e ");
             ser_attr(b, q->n ? attr_before(p, a) : q->eattr);
@@ -840,20 +1223,18 @@ static void serialize_range(SB *b, int p1, int i1, int p2, int i2)
             continue;
         }
         while (a < e) {
-            int j = a, k;
+            int j = a;
             while (j < e && q->a[j] == q->a[a]) j++;
             sb_str(b, "r ");
             ser_attr(b, q->a[a]);
             sb_str(b, " ");
-            for (k = a; k < j; k++) {
-                if (q->t[k] == '\\') sb_str(b, "\\\\");
-                else if (q->t[k] == '\n') sb_str(b, "\\n");
-                else sb_add(b, q->t + k, 1);
-            }
+            ser_text(b, q->t + a, j - a);
             sb_str(b, "\n");
             a = j;
         }
     }
+    free(tdone);
+    free(idone);
 }
 
 /* "FONT SIZE2 FLAGS COLOR" পড়ে Attr; *rest = পরের অংশ */
@@ -875,11 +1256,31 @@ static int parse_attr(char *s, char **rest)
 }
 
 /* .rwd লেখা → অনুচ্ছেদের নতুন সারি (out); ফেরত সংখ্যা, ভুলে -1 */
-static int parse_rwd(const char *text, Para **out)
+/* apply_meta = 1: header/footer-ও বসানো (ফাইল খোলা, undo); paste-এ 0 */
+static int map_id(int *from, int *to, int n, int id)
+{
+    int i;
+    for (i = 0; i < n; i++) if (from[i] == id) return to[i];
+    return -1;
+}
+
+static void unescape(char *s)
+{
+    char *d = s;
+    for (; *s; s++) {
+        if (*s == '\\' && s[1] == 'n') { *d++ = '\n'; s++; }
+        else if (*s == '\\' && s[1] == '\\') { *d++ = '\\'; s++; }
+        else *d++ = *s;
+    }
+    *d = 0;
+}
+
+static int parse_rwd(const char *text, Para **out, int apply_meta)
 {
     char *buf = strdup(text), *line, *next;
     Para *A = NULL;
     int n = 0, cap = 0, ok = 0;
+    int tfrom[64], tto[64], ntm = 0, ifrom[256], ito[256], nim = 0;
     if (!buf) return -1;
     for (line = buf; line && *line; line = next) {
         next = strchr(line, '\n');
@@ -898,13 +1299,57 @@ static int parse_rwd(const char *text, Para **out)
                 if (!A) { free(buf); return -1; }
             }
             para_init(&A[n], default_attr());
-            sscanf(line + 2, "%d %d %d %d %d", &st, &al, &li, &spc, &pb);
+            {
+                int tb = 0, rw = 0, cl = 0;
+                if (sscanf(line + 2, "%d %d %d %d %d %d %d %d", &st, &al, &li, &spc, &pb, &tb, &rw, &cl) >= 8 && tb > 0) {
+                    int m = map_id(tfrom, tto, ntm, tb);
+                    A[n].tbl = m > 0 ? m : (tb < ntbls ? tb : 0);   /* T লাইন না থাকলে (undo) চলতি নম্বর */
+                    A[n].row = rw < 0 ? 0 : rw;
+                    A[n].col = cl < 0 ? 0 : cl;
+                }
+            }
             A[n].style = (unsigned char)(st >= 0 && st <= 4 ? st : 0);
             A[n].align = (unsigned char)(al >= 0 && al <= 3 ? al : 0);
             A[n].list = (unsigned char)(li >= 0 && li <= 2 ? li : 0);
             A[n].spacing = spc >= 80 && spc <= 400 ? spc : 115;
             A[n].pbreak = (unsigned char)(pb != 0);
             n++;
+        } else if (line[0] == 'T' && line[1] == ' ') {          /* ধাপ ২৬খ-২: টেবিল */
+            int id = 0, cols = 1, k = 0, off = 0, w, nt;
+            char *q;
+            if (sscanf(line + 2, "%d %d%n", &id, &cols, &off) >= 2 && ntm < 64) {
+                nt = tbl_new(cols);
+                q = line + 2 + off;
+                while (k < tbls[nt].cols && sscanf(q, "%d%n", &w, &off) == 1) { tbls[nt].w[k++] = w > 0 ? w : 1; q += off; }
+                tfrom[ntm] = id;
+                tto[ntm] = nt;
+                ntm++;
+            }
+        } else if (line[0] == 'i' && line[1] == ' ') {          /* ধাপ ২৬খ-২: ছবির বাইট */
+            int id = 0, off = 0;
+            char ext[8] = "png";
+            if (sscanf(line + 2, "%d %7s %n", &id, ext, &off) >= 2 && nim < 256) {
+                long dl = 0;
+                unsigned char *d = base64_decode(line + 2 + off, &dl);
+                int ni = d ? img_add(d, dl, ext) : -1;
+                if (ni >= 0) { ifrom[nim] = id; ito[nim] = ni; nim++; }
+            }
+        } else if (n > 0 && line[0] == 'g' && line[1] == ' ') {  /* ছবির অনুচ্ছেদ */
+            int id = -1, w = 0, h = 0, m;
+            sscanf(line + 2, "%d %d %d", &id, &w, &h);
+            m = map_id(ifrom, ito, nim, id);
+            A[n - 1].kind = 1;
+            A[n - 1].img = m >= 0 ? m : (id >= 0 && id < nimgs ? id : -1);
+            A[n - 1].img_w = w > 0 ? w : 100;
+            A[n - 1].img_h = h > 0 ? h : 100;
+        } else if ((line[0] == 'h' || line[0] == 'f') && line[1] == ' ') {   /* header/footer */
+            int al = 1, off = 0;
+            if (apply_meta && sscanf(line + 2, "%d %n", &al, &off) >= 1) {
+                char *t = line + 2 + off;
+                unescape(t);
+                if (line[0] == 'h') { snprintf(hdr_text, sizeof(hdr_text), "%s", t); hdr_align = al; }
+                else { snprintf(ftr_text, sizeof(ftr_text), "%s", t); ftr_align = al; }
+            }
         } else if (n > 0 && (line[0] == 'r' || line[0] == 'e') && line[1] == ' ') {
             char *rest = line + 2;
             int ai = parse_attr(line + 2, &rest);
@@ -993,8 +1438,12 @@ static void plain_range(SB *b, int p1, int i1, int p2, int i2, int marks)
             else snprintf(m, sizeof(m), "%d. ", list_number(p));
             sb_str(b, m);
         }
-        sb_add(b, P[p].t + a, (size_t)(e - a));
-        if (p < p2) sb_str(b, "\n");
+        if (P[p].kind == 1) sb_str(b, "[picture]");   /* ধাপ ২৬খ-২ */
+        else sb_add(b, P[p].t + a, (size_t)(e - a));
+        if (p < p2) {                                 /* টেবিলের একই সারির পরের ঘর: Tab */
+            if (P[p].tbl && P[p + 1].tbl == P[p].tbl && P[p + 1].row == P[p].row && P[p + 1].col != P[p].col) sb_str(b, "\t");
+            else sb_str(b, "\n");
+        }
     }
 }
 
@@ -1020,7 +1469,7 @@ static long last_edit_ms;
 static void snap_take(Snap *s)
 {
     SB b = { 0, 0, 0 };
-    serialize_range(&b, 0, 0, np - 1, P[np - 1].n);
+    serialize_range(&b, 0, 0, np - 1, P[np - 1].n, SER_META);
     s->doc = b.s;
     s->cp = cp;
     s->ci = ci;
@@ -1029,7 +1478,7 @@ static void snap_take(Snap *s)
 static void snap_restore(Snap *s)
 {
     Para *A;
-    int n = parse_rwd(s->doc, &A);
+    int n = parse_rwd(s->doc, &A, 1);
     if (n > 0) doc_replace(A, n);
     cp = sp = s->cp < np ? s->cp : np - 1;
     ci = si = s->ci <= P[cp].n ? s->ci : P[cp].n;
@@ -1077,8 +1526,52 @@ static void do_undo(int redo)
 
 /* ================= সম্পাদনা ================= */
 
+/* ধাপ ২৬খ-২ */
+static int same_cell(int a, int b)
+{
+    return P[a].tbl == P[b].tbl && (!P[a].tbl || (P[a].row == P[b].row && P[a].col == P[b].col));
+}
+
+/* অনুচ্ছেদ i সরানো — টেবিলের ঘরের শেষ অনুচ্ছেদ হলে খালি লেখার অনুচ্ছেদ করে রাখা (ঘর থাকে);
+ * দলিল কখনো খালি হয় না */
+static void remove_para_keep_cell(int i)
+{
+    int alone = P[i].tbl && !((i > 0 && same_cell(i - 1, i)) || (i + 1 < np && same_cell(i + 1, i)));
+    if (alone || np == 1) {
+        int ea = default_attr();
+        Para keep = P[i];
+        para_free(&P[i]);
+        para_init(&P[i], ea);
+        P[i].tbl = keep.tbl;
+        P[i].row = keep.row;
+        P[i].col = keep.col;
+        layout_all = 1;
+        return;
+    }
+    paras_remove(i, i + 1);
+}
+
 static void delete_range(int p1, int i1, int p2, int i2)
 {
+    int p, structural = 0;
+    for (p = p1; p <= p2; p++) if (!same_cell(p, p1) || P[p].kind == 1) structural = 1;
+    if (structural && p1 != p2) {
+        /* ধাপ ২৬খ-২: টেবিল/ছবি জুড়ে নির্বাচন — গঠন রেখে শুধু লেখা মোছা; পুরো বাছা ছবি সরে যায় */
+        for (p = p2; p >= p1; p--) {
+            int a = p == p1 ? i1 : 0, e = p == p2 ? i2 : P[p].n;
+            if (P[p].kind == 1) {
+                if ((p > p1 || i1 == 0) && (p < p2 || i2 > 0 || p1 == p2)) remove_para_keep_cell(p);
+                continue;
+            }
+            para_delete_bytes(&P[p], a, e);
+            P[p].dirty = 1;
+        }
+        if (p1 >= np) p1 = np - 1;
+        cp = sp = p1;
+        ci = si = i1 <= P[p1].n ? i1 : P[p1].n;
+        layout_all = 1;
+        return;
+    }
     if (p1 == p2) {
         para_delete_bytes(&P[p1], i1, i2);
     } else {
@@ -1105,9 +1598,13 @@ static int cur_attr(void)
     return attr_before(cp, ci);
 }
 
+static void split_para(void);
+
 static void insert_plain(const char *s, int n)
 {
-    int ai = cur_attr();
+    int ai;
+    if (P[cp].kind == 1) split_para();              /* ধাপ ২৬খ-২: ছবিতে লিখলে পরের নতুন অনুচ্ছেদে */
+    ai = cur_attr();
     para_insert_bytes(&P[cp], ci, s, NULL, n, ai);
     ci += n;
     sp = cp;
@@ -1118,9 +1615,34 @@ static void insert_plain(const char *s, int n)
 /* অনুচ্ছেদের সারি কার্সরে বসানো (paste); F-এর মালিকানা নেয় */
 static void insert_paras(Para *F, int nf)
 {
-    int i, endlen;
+    int i, endlen, structural = 0;
     Para *cur;
     if (nf <= 0) return;
+    /* ধাপ ২৬খ-২: টেবিলের ঘরে বসালে সব অনুচ্ছেদ সেই ঘরের (টেবিলের ভেতরে টেবিল নয়) */
+    for (i = 0; i < nf; i++) {
+        if (P[cp].tbl) { F[i].tbl = P[cp].tbl; F[i].row = P[cp].row; F[i].col = P[cp].col; }
+        if (F[i].tbl || F[i].kind == 1) structural = 1;
+    }
+    if (P[cp].kind == 1) structural = 1;
+    if (structural) {                                 /* গোটা অনুচ্ছেদ হিসেবে: কার্সরে ভেঙে মাঝে বসানো */
+        int at;
+        if (P[cp].kind == 1) at = cp + 1;
+        else if (ci == 0 && P[cp].n > 0) at = cp;
+        else if (ci >= P[cp].n) at = cp + 1;
+        else { split_para(); at = cp; }
+        paras_insert_at(at, nf);
+        for (i = 0; i < nf; i++) P[at + i] = F[i];
+        free(F);
+        if (!P[cp].tbl && at + nf - 1 == np - 1 && (P[np - 1].tbl || P[np - 1].kind == 1)) {   /* শেষে লেখার জায়গা */
+            paras_insert_at(np, 1);
+            para_init(&P[np - 1], default_attr());
+        }
+        cp = at + nf - 1;
+        ci = P[cp].n;
+        sp = cp;
+        si = ci;
+        return;
+    }
     if (nf == 1) {
         para_insert_bytes(&P[cp], ci, F[0].t, F[0].a, F[0].n, 0);
         ci += F[0].n;
@@ -1152,6 +1674,21 @@ static void split_para(void)
     Para *a = &P[cp], *b;
     int ai = cur_attr();                         /* Enter-এর আগে বাছা ফরম্যাট (Ctrl+B বন্ধ ইত্যাদি) সহ */
     int at_end = ci == a->n;
+    if (a->kind == 1) {                          /* ধাপ ২৬খ-২: ছবির পরে নতুন খালি অনুচ্ছেদ (একই ঘরে) */
+        paras_insert_at(cp + 1, 1);
+        a = &P[cp];
+        para_init(&P[cp + 1], default_attr());
+        P[cp + 1].align = a->align;
+        P[cp + 1].tbl = a->tbl;
+        P[cp + 1].row = a->row;
+        P[cp + 1].col = a->col;
+        cp++;
+        ci = 0;
+        sp = cp;
+        si = 0;
+        typing_attr = -1;
+        return;
+    }
     if (a->n == 0 && a->list) { a->list = 0; a->dirty = 1; layout_all = 1; return; }   /* খালি বুলেটে Enter = তালিকা শেষ */
     paras_insert_at(cp + 1, 1);
     a = &P[cp];
@@ -1161,6 +1698,9 @@ static void split_para(void)
     b->list = a->list;
     b->spacing = a->spacing;
     b->style = a->style;
+    b->tbl = a->tbl;                             /* ধাপ ২৬খ-২: একই ঘরে */
+    b->row = a->row;
+    b->col = a->col;
     para_insert_bytes(b, 0, a->t + ci, a->a + ci, a->n - ci, 0);
     para_delete_bytes(a, ci, a->n);
     if (a->n == 0) a->eattr = (unsigned short)ai;
@@ -1407,7 +1947,9 @@ static int load_doc(const char *p)
     Para *A = NULL;
     int n;
     if (!b) return -1;
-    if (!strncmp(b, "rozword ", 8)) n = parse_rwd(b, &A);
+    hdr_text[0] = ftr_text[0] = 0;                   /* ধাপ ২৬খ-২: ফাইলে থাকলে parse বসাবে */
+    hdr_align = ftr_align = 1;
+    if (!strncmp(b, "rozword ", 8)) n = parse_rwd(b, &A, 1);
     else n = parse_plain(b, len, default_attr(), NULL, &A);
     free(b);
     if (n <= 0) return -1;
@@ -1428,7 +1970,7 @@ static int save_doc(const char *p)
     FILE *f;
     int as_text = has_ext(p, ".txt");
     if (as_text) { plain_range(&b, 0, 0, np - 1, P[np - 1].n, 1); sb_str(&b, "\n"); }
-    else serialize_range(&b, 0, 0, np - 1, P[np - 1].n);
+    else serialize_range(&b, 0, 0, np - 1, P[np - 1].n, SER_META | SER_EMBED);
     f = fopen(p, "wb");
     if (!f || fwrite(b.s, 1, b.n, f) != b.n) {
         char msg[700];
@@ -1495,7 +2037,7 @@ static void do_copy(int cut)
     int p1, i1, p2, i2;
     SB r = { 0, 0, 0 }, t = { 0, 0, 0 };
     if (!sel_range(&p1, &i1, &p2, &i2)) return;
-    serialize_range(&r, p1, i1, p2, i2);
+    serialize_range(&r, p1, i1, p2, i2, 0);
     plain_range(&t, p1, i1, p2, i2, 0);
     free(rich_doc);
     free(rich_plain);
@@ -1517,12 +2059,335 @@ static void do_paste(void)
     undo_point(2);
     delete_selection();
     if (rich_doc && (!clip || (rich_plain && (int)strlen(rich_plain) == len && !memcmp(clip, rich_plain, (size_t)len))))
-        n = parse_rwd(rich_doc, &F);
+        n = parse_rwd(rich_doc, &F, 0);
     else
         n = parse_plain(clip, (size_t)len, cur_attr(), &P[cp], &F);
     free(clip);
     if (n > 0) insert_paras(F, n);
     follow_cursor = 1;
+}
+
+/* ================= ধাপ ২৬খ-২: টেবিল, ছবি, header/footer ================= */
+
+static void table_span(int i, int *a, int *b)      /* P[i]-এর টেবিলের অনুচ্ছেদ [a, b) */
+{
+    int t = P[i].tbl;
+    *a = i;
+    *b = i + 1;
+    while (*a > 0 && P[*a - 1].tbl == t) (*a)--;
+    while (*b < np && P[*b].tbl == t) (*b)++;
+}
+
+static int cell_first(int a, int b, int row, int col)
+{
+    int k;
+    for (k = a; k < b; k++) if (P[k].row == row && P[k].col == col) return k;
+    return -1;
+}
+
+static int cell_last(int a, int b, int row, int col)
+{
+    int k, r = -1;
+    for (k = a; k < b; k++) if (P[k].row == row && P[k].col == col) r = k;
+    return r;
+}
+
+static int table_rows(int a, int b)
+{
+    int k, r = 0;
+    for (k = a; k < b; k++) if (P[k].row + 1 > r) r = P[k].row + 1;
+    return r;
+}
+
+static void new_cell_para(int at, int tid, int row, int col)
+{
+    para_init(&P[at], default_attr());
+    P[at].tbl = tid;
+    P[at].row = row;
+    P[at].col = col;
+}
+
+/* শেষে টেবিল/ছবি থাকলে তার পরে লেখার জন্য খালি অনুচ্ছেদ */
+static void ensure_text_after(int i)
+{
+    if (i + 1 >= np || P[i + 1].tbl) {
+        if (i + 1 < np && !P[i].tbl) return;
+        paras_insert_at(i + 1, 1);
+        para_init(&P[i + 1], default_attr());
+    }
+}
+
+/* নতুন অনুচ্ছেদের জায়গা (টেবিল/ছবি): কার্সর যেখানে — টেবিলের ভেতরে থাকলে টেবিলের পরে */
+static int block_insert_pos(int allow_in_cell)
+{
+    int a, b;
+    if (P[cp].tbl && !allow_in_cell) { table_span(cp, &a, &b); return b; }
+    if (P[cp].kind == 1) return cp + 1;
+    if (ci == 0) return cp;
+    if (ci >= P[cp].n) return cp + 1;
+    split_para();
+    return cp;
+}
+
+static void insert_table(void)
+{
+    char buf[32] = "3 x 3";
+    int cols = 3, rows = 3, at, tid, r, c;
+    char *x;
+    if (!ui_inputbox("Insert table", "Columns x rows (for example 3 x 2):", buf, sizeof(buf))) return;
+    cols = atoi(buf);
+    x = strchr(buf, 'x');
+    if (!x) x = strchr(buf, 'X');
+    if (!x) x = strchr(buf, '*');
+    rows = x ? atoi(x + 1) : 2;
+    if (cols < 1 || cols > TBL_MAXCOL || rows < 1 || rows > 200) {
+        ui_msgbox("rozword", "Columns: 1 to 16, rows: 1 to 200", UI_MB_OK | UI_MB_WARN);
+        return;
+    }
+    undo_point(2);
+    tid = tbl_new(cols);
+    if (!tid) return;
+    at = block_insert_pos(0);
+    paras_insert_at(at, rows * cols);
+    for (r = 0; r < rows; r++)
+        for (c = 0; c < cols; c++) new_cell_para(at + r * cols + c, tid, r, c);
+    ensure_text_after(at + rows * cols - 1);
+    cp = sp = at;
+    ci = si = 0;
+    typing_attr = -1;
+    layout_all = 1;
+    snprintf(status_msg, sizeof(status_msg), "Table %d x %d - Tab goes to the next cell; Table menu adds rows/columns", cols, rows);
+}
+
+static void table_add_row(void)
+{
+    int a, b, r, k, at, c, cols;
+    if (!P[cp].tbl) return;
+    undo_point(2);
+    table_span(cp, &a, &b);
+    r = P[cp].row;
+    cols = tbls[P[cp].tbl].cols;
+    for (k = a; k < b; k++) if (P[k].row > r) P[k].row++;
+    at = a;
+    for (k = a; k < b; k++) if (P[k].row == r) at = k + 1;
+    paras_insert_at(at, cols);
+    for (c = 0; c < cols; c++) new_cell_para(at + c, P[a].tbl, r + 1, c);
+    cp = sp = at;
+    ci = si = 0;
+    layout_all = 1;
+}
+
+static void table_add_col(void)
+{
+    int a, b, c, r, rows, tid, k;
+    RTable *T;
+    if (!P[cp].tbl) return;
+    tid = P[cp].tbl;
+    T = &tbls[tid];
+    if (T->cols >= TBL_MAXCOL) { snprintf(status_msg, sizeof(status_msg), "At most %d columns", TBL_MAXCOL); return; }
+    undo_point(2);
+    c = P[cp].col;
+    table_span(cp, &a, &b);
+    rows = table_rows(a, b);
+    for (r = rows - 1; r >= 0; r--) {
+        int last;
+        table_span(a, &a, &b);
+        for (k = a; k < b; k++) if (P[k].row == r && P[k].col > c) P[k].col++;
+        last = cell_last(a, b, r, c);
+        if (last < 0) {                              /* ঘর নেই: সারির শেষে */
+            last = a - 1;
+            for (k = a; k < b; k++) if (P[k].row <= r) last = k;
+        }
+        paras_insert_at(last + 1, 1);
+        new_cell_para(last + 1, tid, r, c + 1);
+    }
+    for (k = TBL_MAXCOL - 1; k > c + 1; k--) T->w[k] = T->w[k - 1];
+    T->cols++;
+    for (k = 0; k < T->cols; k++) T->w[k] = 1000 / T->cols;
+    layout_all = 1;
+}
+
+static void table_delete(void)
+{
+    int a, b;
+    if (!P[cp].tbl) return;
+    undo_point(2);
+    table_span(cp, &a, &b);
+    paras_remove(a, b);
+    if (np == 0) { paras_insert_at(0, 1); para_init(&P[0], default_attr()); }
+    cp = sp = a < np ? a : np - 1;
+    ci = si = 0;
+    layout_all = 1;
+}
+
+static void table_del_row(void)
+{
+    int a, b, r, k;
+    if (!P[cp].tbl) return;
+    table_span(cp, &a, &b);
+    if (table_rows(a, b) <= 1) { table_delete(); return; }
+    undo_point(2);
+    r = P[cp].row;
+    for (k = b - 1; k >= a; k--) if (P[k].row == r) paras_remove(k, k + 1);
+    table_span(a, &a, &b);
+    for (k = a; k < b; k++) if (P[k].row > r) P[k].row--;
+    cp = sp = a;
+    for (k = a; k < b; k++) if (P[k].row == (r > 0 ? r - 1 : 0)) { cp = sp = k; break; }
+    ci = si = 0;
+    layout_all = 1;
+}
+
+static void table_del_col(void)
+{
+    int a, b, c, k, tid;
+    RTable *T;
+    if (!P[cp].tbl) return;
+    tid = P[cp].tbl;
+    T = &tbls[tid];
+    if (T->cols <= 1) { table_delete(); return; }
+    undo_point(2);
+    c = P[cp].col;
+    table_span(cp, &a, &b);
+    for (k = b - 1; k >= a; k--) if (P[k].col == c) paras_remove(k, k + 1);
+    table_span(a, &a, &b);
+    for (k = a; k < b; k++) if (P[k].col > c) P[k].col--;
+    for (k = c; k < TBL_MAXCOL - 1; k++) T->w[k] = T->w[k + 1];
+    T->cols--;
+    cp = sp = a;
+    ci = si = 0;
+    layout_all = 1;
+}
+
+static void table_col_width(int delta)
+{
+    RTable *T;
+    int c;
+    if (!P[cp].tbl) return;
+    T = &tbls[P[cp].tbl];
+    c = P[cp].col;
+    if (c >= T->cols) return;
+    undo_point(2);
+    T->w[c] += delta;
+    if (T->w[c] < 50) T->w[c] = 50;
+    if (T->w[c] > 4000) T->w[c] = 4000;
+    layout_all = 1;
+}
+
+/* Tab / Shift+Tab: পরের/আগের ঘর; শেষ ঘরে Tab = নতুন সারি */
+static void table_tab(int dir)
+{
+    int a, b, r = P[cp].row, c = P[cp].col, cols = tbls[P[cp].tbl].cols, rows, k;
+    table_span(cp, &a, &b);
+    rows = table_rows(a, b);
+    for (;;) {
+        c += dir;
+        if (c >= cols) { c = 0; r++; }
+        if (c < 0) { c = cols - 1; r--; }
+        if (r < 0) return;
+        if (r >= rows) { table_add_row(); return; }
+        k = cell_first(a, b, r, c);
+        if (k >= 0) { cp = sp = k; ci = si = 0; follow_cursor = 1; return; }
+    }
+}
+
+static void insert_picture(void)
+{
+    char p[512];
+    size_t len = 0;
+    char *data;
+    const char *dot;
+    int id, at, w, h, cw100 = PAGE_W - 2 * MARGIN;
+    snprintf(p, sizeof(p), "%s", path);
+    {
+        char *sl = strrchr(p, '/');
+        if (sl) sl[1] = 0;
+    }
+    if (!ui_filedlg("Insert picture", p, sizeof(p), 0)) return;
+    data = read_file(p, &len);
+    if (!data) { ui_msgbox("rozword", "Cannot read the picture", UI_MB_OK | UI_MB_ERROR); return; }
+    dot = strrchr(p, '.');
+    id = img_add((unsigned char *)data, (long)len, dot ? dot + 1 : "png");
+    if (id >= 0 && !imgs[id].s) {                     /* stb চেনে না (যেমন .ppm): PNG বানিয়ে রাখা */
+        gfx_surface *sf = gfx_load_image(p);
+        if (sf && gfx_save_png(sf, "/tmp/.rozword-img.png") == 0) {
+            size_t l2 = 0;
+            char *d2 = read_file("/tmp/.rozword-img.png", &l2);
+            if (d2) {
+                free(imgs[id].data);
+                imgs[id].data = (unsigned char *)d2;
+                imgs[id].len = (long)l2;
+                snprintf(imgs[id].ext, sizeof(imgs[id].ext), "png");
+                imgs[id].s = sf;
+                sf = NULL;
+            }
+            unlink("/tmp/.rozword-img.png");
+        }
+        if (sf) gfx_surface_free(sf);
+    }
+    if (id < 0 || !imgs[id].s) { ui_msgbox("rozword", "This picture format is not supported", UI_MB_OK | UI_MB_ERROR); return; }
+    undo_point(2);
+    w = imgs[id].s->w;
+    h = imgs[id].s->h;
+    if (w > cw100) { h = (int)((long)h * cw100 / w); w = cw100; }
+    at = block_insert_pos(1);
+    {
+        int tb = P[cp].tbl, rw = P[cp].row, cl = P[cp].col;   /* ঘরের ভেতরে হলে একই ঘরে */
+        paras_insert_at(at, 1);
+        para_init(&P[at], default_attr());
+        P[at].kind = 1;
+        P[at].img = id;
+        P[at].img_w = w;
+        P[at].img_h = h;
+        P[at].align = 1;
+        P[at].tbl = tb;
+        P[at].row = rw;
+        P[at].col = cl;
+    }
+    if (!P[at].tbl) ensure_text_after(at);
+    cp = sp = at;
+    ci = si = 0;
+    layout_all = 1;
+    snprintf(status_msg, sizeof(status_msg), "Picture %dx%d - Format > Picture size changes it", imgs[id].s->w, imgs[id].s->h);
+}
+
+static void picture_size(void)
+{
+    char buf[16];
+    int pct, cw100 = PAGE_W - 2 * MARGIN;
+    Para *q = &P[cp];
+    if (q->kind != 1) { ui_msgbox("rozword", "Click on a picture first", UI_MB_OK | UI_MB_INFO); return; }
+    snprintf(buf, sizeof(buf), "%d", q->img_w * 100 / cw100);
+    if (!ui_inputbox("Picture size", "Width in % of the text width (5 to 100):", buf, sizeof(buf))) return;
+    pct = atoi(buf);
+    if (pct < 5) pct = 5;
+    if (pct > 100) pct = 100;
+    undo_point(2);
+    {
+        int ow = q->img_w > 0 ? q->img_w : 1, oh = q->img_h;
+        q->img_w = cw100 * pct / 100;
+        q->img_h = (int)((long)oh * q->img_w / ow);
+        if (q->img_h < 1) q->img_h = 1;
+    }
+    q->dirty = 1;
+    layout_all = 1;
+}
+
+static void edit_header_footer(int footer)
+{
+    static const struct ui_menuitem al[] = { { "Left", NULL, 1 }, { "Center", NULL, 2 }, { "Right", NULL, 3 } };
+    char buf[256];
+    int r;
+    snprintf(buf, sizeof(buf), "%s", footer ? ftr_text : hdr_text);
+    if (!ui_inputbox(footer ? "Footer" : "Header", footer ? "Footer text ({page} = page number, {pages} = number of pages; empty = none):"
+                                                          : "Header text ({page} = page number, {pages} = number of pages; empty = none):",
+                     buf, sizeof(buf))) return;
+    undo_point(2);
+    if (footer) snprintf(ftr_text, sizeof(ftr_text), "%s", buf);
+    else snprintf(hdr_text, sizeof(hdr_text), "%s", buf);
+    if (buf[0]) {
+        r = ui_popup_menu(al, 3, U.mx, U.my);
+        if (r) { if (footer) ftr_align = r - 1; else hdr_align = r - 1; }
+    }
 }
 
 /* ================= মেনু ================= */
@@ -1536,7 +2401,10 @@ enum {
     M_NORMAL, M_TITLE, M_H1, M_H2, M_H3,
     M_PBREAK, M_DATE,
     M_ZOOMIN, M_ZOOMOUT, M_ZOOM100,
-    M_KEYS, M_ABOUT
+    M_KEYS, M_ABOUT,
+    /* ধাপ ২৬খ-২ */
+    M_TABLE, M_PICTURE, M_PICSIZE, M_HEADER, M_FOOTER, M_PAGENUM,
+    M_ROWADD, M_COLADD, M_ROWDEL, M_COLDEL, M_TBLDEL, M_COLWIDER, M_COLNARROW
 };
 
 /* "Ctrl+I " (শেষে ফাঁকা) — শুধু দেখানোর জন্য: Ctrl+I/J/H-এর কোড Tab/Enter/Backspace-এর সমান,
@@ -1561,14 +2429,23 @@ static const struct ui_menuitem format_items[] = {
     { "Justify", "Ctrl+J ", M_JUSTIFY }, { "-", NULL, 0 },
     { "Bullets", NULL, M_BULLETS }, { "Numbering", NULL, M_NUMBERS }, { "-", NULL, 0 },
     { "Line spacing 1.0", NULL, M_SP100 }, { "Line spacing 1.15", NULL, M_SP115 },
-    { "Line spacing 1.5", NULL, M_SP150 }, { "Line spacing 2.0", NULL, M_SP200 },
+    { "Line spacing 1.5", NULL, M_SP150 }, { "Line spacing 2.0", NULL, M_SP200 }, { "-", NULL, 0 },
+    { "Picture size...", NULL, M_PICSIZE },
 };
 static const struct ui_menuitem style_items[] = {
     { "Normal", "Ctrl+0 ", M_NORMAL }, { "Title", NULL, M_TITLE }, { "Heading 1", "Ctrl+1 ", M_H1 },
     { "Heading 2", "Ctrl+2 ", M_H2 }, { "Heading 3", "Ctrl+3 ", M_H3 },
 };
 static const struct ui_menuitem insert_items[] = {
-    { "Page break (before this paragraph)", NULL, M_PBREAK }, { "Date and time", NULL, M_DATE },
+    { "Page break (before this paragraph)", NULL, M_PBREAK }, { "Date and time", NULL, M_DATE }, { "-", NULL, 0 },
+    { "Table...", NULL, M_TABLE }, { "Picture...", NULL, M_PICTURE }, { "-", NULL, 0 },
+    { "Header...", NULL, M_HEADER }, { "Footer...", NULL, M_FOOTER }, { "Page numbers", NULL, M_PAGENUM },
+};
+static const struct ui_menuitem table_items[] = {
+    { "Insert table...", NULL, M_TABLE }, { "-", NULL, 0 },
+    { "Add row below", NULL, M_ROWADD }, { "Add column to the right", NULL, M_COLADD },
+    { "Delete row", NULL, M_ROWDEL }, { "Delete column", NULL, M_COLDEL }, { "Delete table", NULL, M_TBLDEL },
+    { "-", NULL, 0 }, { "Wider column", NULL, M_COLWIDER }, { "Narrower column", NULL, M_COLNARROW },
 };
 static const struct ui_menuitem view_items[] = {
     { "Zoom in", "Ctrl+= ", M_ZOOMIN }, { "Zoom out", "Ctrl+- ", M_ZOOMOUT }, { "Zoom 100%", NULL, M_ZOOM100 },
@@ -1582,6 +2459,7 @@ static const struct ui_menu menus[] = {
     { "Format", format_items, (int)(sizeof(format_items) / sizeof(format_items[0])) },
     { "Styles", style_items, (int)(sizeof(style_items) / sizeof(style_items[0])) },
     { "Insert", insert_items, (int)(sizeof(insert_items) / sizeof(insert_items[0])) },
+    { "Table", table_items, (int)(sizeof(table_items) / sizeof(table_items[0])) },
     { "View", view_items, (int)(sizeof(view_items) / sizeof(view_items[0])) },
     { "Help", help_items, (int)(sizeof(help_items) / sizeof(help_items[0])) },
 };
@@ -1679,7 +2557,10 @@ static void show_keys(void)
               "Ctrl+S save, F12 save as, Ctrl+O open, Ctrl+N new\n"
               "Ctrl+Space  Bangla typing (Avro phonetic) on/off\n"
               "Ctrl+= / Ctrl+-  zoom; Ctrl+arrows: word by word\n"
-              "Enter on an empty bullet ends the list",
+              "Enter on an empty bullet ends the list\n"
+              "Tables: Tab / Shift+Tab next / previous cell, Tab in the\n"
+              "  last cell adds a row; Table menu: rows, columns, widths\n"
+              "Insert > Picture, Header, Footer, Page numbers",
               UI_MB_OK | UI_MB_INFO);
 }
 
@@ -1754,9 +2635,29 @@ static void do_action(int a)
     case M_ZOOMOUT: set_zoom(zoom - 10); break;
     case M_ZOOM100: set_zoom(100); break;
     case M_KEYS: show_keys(); break;
+    case M_TABLE: insert_table(); break;
+    case M_PICTURE: insert_picture(); break;
+    case M_PICSIZE: picture_size(); break;
+    case M_HEADER: edit_header_footer(0); break;
+    case M_FOOTER: edit_header_footer(1); break;
+    case M_PAGENUM:
+        undo_point(2);
+        snprintf(ftr_text, sizeof(ftr_text), "Page {page} of {pages}");
+        ftr_align = 1;
+        snprintf(status_msg, sizeof(status_msg), "Page numbers in the footer - Insert > Footer changes them");
+        break;
+    case M_ROWADD: case M_COLADD: case M_ROWDEL: case M_COLDEL: case M_TBLDEL: case M_COLWIDER: case M_COLNARROW:
+        if (!P[cp].tbl) { ui_msgbox("rozword", "Click in a table first (Insert > Table makes one)", UI_MB_OK | UI_MB_INFO); break; }
+        if (a == M_ROWADD) table_add_row();
+        else if (a == M_COLADD) table_add_col();
+        else if (a == M_ROWDEL) table_del_row();
+        else if (a == M_COLDEL) table_del_col();
+        else if (a == M_TBLDEL) table_delete();
+        else table_col_width(a == M_COLWIDER ? 100 : -100);
+        break;
     case M_ABOUT:
         ui_msgbox("About rozword", "rozword " RW_VERSION "\nA word processor for rozOS.\n"
-                  "Documents: .rwd (rozword) and .txt.\nBangla: Ctrl+Space (Avro phonetic).\nhelp rozword",
+                  "Documents: .rwd (rozword) and .txt.\nTables, pictures, header and footer.\nBangla: Ctrl+Space (Avro phonetic).\nhelp rozword",
                   UI_MB_OK | UI_MB_INFO);
         break;
     }
@@ -1922,11 +2823,32 @@ static void handle_key(int k, int mods)
             if (j > pi) pi = j;
             para_delete_bytes(&P[cp], pi, ci);
             ci = pi;
+        } else if (P[cp].kind == 1) {               /* ধাপ ২৬খ-২: ছবি মোছা */
+            int had_prev = cp > 0 && same_cell(cp - 1, cp), before = np;
+            undo_point(2);
+            remove_para_keep_cell(cp);
+            if (np < before && had_prev) { cp--; ci = P[cp].n; }
+            else { if (cp >= np) cp = np - 1; ci = 0; }
         } else if (P[cp].list) {
             undo_point(2);
             P[cp].list = 0;
             P[cp].dirty = 1;
             layout_all = 1;
+        } else if (cp > 0 && P[cp - 1].kind == 1 && same_cell(cp - 1, cp)) {   /* আগের ছবিটা মোছা */
+            undo_point(2);
+            paras_remove(cp - 1, cp);                 /* একই ঘরে cp আছে, তাই ঘর খালি হয় না */
+            cp--;
+            ci = 0;
+        } else if (cp > 0 && !same_cell(cp - 1, cp)) {   /* টেবিলের ঘরের শুরু / টেবিলের ঠিক পরে: জোড়া নয় */
+            if (!P[cp].tbl && P[cp].n == 0 && P[cp - 1].tbl && cp + 1 < np) {
+                undo_point(2);                          /* টেবিলের পরের খালি অনুচ্ছেদ মোছা */
+                paras_remove(cp, cp + 1);
+                cp--;
+                ci = P[cp].n;
+            } else if (!P[cp].tbl) {
+                cp--;
+                ci = P[cp].n;
+            }
         } else if (cp > 0) {
             int at = P[cp - 1].n;
             undo_point(2);
@@ -1940,12 +2862,18 @@ static void handle_key(int k, int mods)
     case GFX_KEY_DELETE:
         if (cp != sp || ci != si) { undo_point(2); delete_selection(); break; }
         undo_point(1);
-        if (ci < P[cp].n) para_delete_bytes(&P[cp], ci, next_stop(&P[cp], ci));
-        else if (cp + 1 < np) join_with_next(cp);
+        if (P[cp].kind == 1) {                        /* ধাপ ২৬খ-২ */
+            remove_para_keep_cell(cp);
+            if (cp >= np) cp = np - 1;
+            ci = 0;
+        } else if (ci < P[cp].n) para_delete_bytes(&P[cp], ci, next_stop(&P[cp], ci));
+        else if (cp + 1 < np && same_cell(cp, cp + 1) && P[cp + 1].kind == 1) remove_para_keep_cell(cp + 1);
+        else if (cp + 1 < np && same_cell(cp, cp + 1)) join_with_next(cp);
         sp = cp;
         si = ci;
         break;
     case '\t':
+        if (P[cp].tbl) { table_tab(mods & GFX_MOD_SHIFT ? -1 : 1); break; }   /* ধাপ ২৬খ-২: পরের ঘর */
         undo_point(1);
         delete_selection();
         insert_plain("    ", 4);
