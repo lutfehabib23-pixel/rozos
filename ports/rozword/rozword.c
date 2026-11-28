@@ -8,6 +8,7 @@
  *
  * ফাইল: .rwd (rozword-এর নিজের ফরম্যাট — সাধারণ লেখা, নিচে বিবরণ) আর .txt (খোলা/সেভ)।
  * ধাপ ২৬খ-২: টেবিল, ছবি, header/footer (পাতা নম্বর)। ধাপ ২৬খ-৩: Word (.docx) খোলা আর সেভ।
+ * ধাপ ২৬খ-৪: PDF হিসেবে সেভ (Export as PDF — লেখা, ফন্ট, বাংলা, ছবি, টেবিল)।
  *
  * .rwd ফরম্যাট (UTF-8, লাইনে লাইনে):
  *   rozword 1
@@ -24,7 +25,7 @@
  *   g ID W H                                    ছবির অনুচ্ছেদ (W H = px, ৯৬ dpi)
  *   h ALIGN TEXT / f ALIGN TEXT                 header / footer ({page} {pages})
  *
- * বানানো (rozOS-এ):  tcc rozword.c -lrozui -lrozgfx -o rozword   (বা gcc, একই)
+ * বানানো (rozOS-এ):  tcc -Ift rozword.c -lrozui -lrozgfx -lz -lm -o rozword   (বা gcc, একই)
  *   /usr/src/rozword/Makefile-এ: make  বা  make CC=gcc */
 
 #include <stdio.h>
@@ -38,8 +39,11 @@
 #include <rozui.h>
 #include <rozbn.h>
 #include <zlib.h>                  /* ধাপ ২৬খ-৩: .docx (ZIP) */
+#include <stdarg.h>
+#include <ft2build.h>                /* ধাপ ২৬খ-৪: PDF — ফন্টের glyph আর মাপ (FreeType librozgfx-এর ভেতরেই) */
+#include FT_FREETYPE_H
 
-#define RW_VERSION "1.2 (phase 26b-3)"
+#define RW_VERSION "1.3 (phase 26b-4)"
 
 /* ================= গঠন ================= */
 
@@ -3128,6 +3132,908 @@ static int save_docx(const char *p)
 
 static int is_docx, docx_skipped;  /* ধাপ ২৬খ-৩: খোলা ফাইলটা .docx */
 
+/* ================= ধাপ ২৬খ-৪: PDF হিসেবে সেভ (Export as PDF) =================
+ *
+ * পাতাগুলো পর্দার মতোই (১০০% zoom-এর লেআউট, A4): লেখা লেখা হিসেবেই (বাছাই/কপি/খোঁজা যায়),
+ * ফন্ট PDF-এর ভেতরে (শুধু ব্যবহার করা glyph — glyph নম্বর বদলায় না, বাকিগুলো খালি),
+ * বাংলা librozgfx-এর একই shaping দিয়ে সাজানো glyph (যুক্তাক্ষর পর্দার মতোই), সাথে
+ * ActualText (কপি করলে আসল লেখা)। ছবি: JPEG হুবহু (DCTDecode), বাকিগুলো zlib (FlateDecode)।
+ * এক পিক্সেল (৯৬ dpi) = ০.৭৫ pt; পাতা ৭৯৪×১১২৩ px = ৫৯৫.৫×৮৪২.২৫ pt (A4)। */
+
+struct rozshape;
+typedef void (*rozshape_cb)(void *ud, int font, int glyph, long x, long y, int codepoint);
+struct rozshape *rozshape_open(const char *primary, const char *bengali);
+void rozshape_close(struct rozshape *s);
+int  rozshape_has_complex(const char *str, int len);
+long rozshape_run(struct rozshape *s, const char *str, int len, int px, const int upem[2],
+                  rozshape_cb cb, void *ud);
+void rozft_system_font(int mono, char *path, size_t size, int *px);
+
+#define PDF_PT 0.75                /* px → pt */
+
+typedef struct {
+    char path[256];
+    unsigned char *file;
+    long flen;
+    FT_Face face;
+    int cur_px;
+    int ng, upem;
+    unsigned char *used;           /* glyph নম্বর ধরে */
+    unsigned *uni;                 /* glyph → Unicode (ToUnicode) */
+    int obj;                       /* Type0 ফন্টের object */
+    struct rozshape *shape;        /* এই ফন্টকে মূল ধরে shaping */
+    int shape_tried;
+    int any;                       /* glyph 0 ছাড়া কিছু ব্যবহার হয়েছে */
+} PFont;
+
+static FT_Library pft;
+static int pft_state;              /* 0 চেষ্টা হয়নি, 1 আছে, -1 নেই */
+static PFont *pfs;
+static int npfs;
+static char pdf_bn_path[256];
+
+typedef struct { SB b; long *off; int nobj, cap; } PW;
+static PW pw;
+static SB pc;                      /* চলতি পাতার content */
+static int *pimg_obj;              /* imgs[i] → XObject (0 = এখনো নয়) */
+static int pres_obj;               /* সব পাতার Resources */
+
+static void sb_fmt(SB *b, const char *fmt, ...)
+{
+    char t[600];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(t, sizeof(t), fmt, ap);
+    va_end(ap);
+    sb_str(b, t);
+}
+
+/* সংখ্যা (দুই দশমিক পর্যন্ত, শেষের শূন্য বাদ) — libc-র %f-এর ওপর নির্ভর না করে */
+static void pn(SB *b, double v)
+{
+    char t[40];
+    long m = (long)(v * 100.0 + (v < 0 ? -0.5 : 0.5)), ip, fp;
+    int neg = m < 0;
+    if (neg) m = -m;
+    ip = m / 100;
+    fp = m % 100;
+    if (fp == 0) snprintf(t, sizeof(t), "%s%ld ", neg ? "-" : "", ip);
+    else if (fp % 10 == 0) snprintf(t, sizeof(t), "%s%ld.%ld ", neg ? "-" : "", ip, fp / 10);
+    else snprintf(t, sizeof(t), "%s%ld.%02ld ", neg ? "-" : "", ip, fp);
+    sb_str(b, t);
+}
+
+static double PX(double x) { return x * PDF_PT; }
+static double PY(double y) { return (PAGE_H - y) * PDF_PT; }       /* PDF-এর y নিচ থেকে */
+
+/* ---------- object আর stream ---------- */
+
+static int pw_alloc(void)
+{
+    if (pw.nobj + 1 >= pw.cap) {
+        pw.cap = pw.cap ? pw.cap * 2 : 64;
+        pw.off = (long *)realloc(pw.off, (size_t)pw.cap * sizeof(long));
+        if (!pw.off) { fprintf(stderr, "rozword: out of memory\n"); exit(1); }
+    }
+    pw.nobj++;
+    pw.off[pw.nobj] = 0;
+    return pw.nobj;
+}
+
+static void pw_begin(int id)
+{
+    pw.off[id] = (long)pw.b.n;
+    sb_fmt(&pw.b, "%d 0 obj\n", id);
+}
+
+static void pw_end(void) { sb_str(&pw.b, "\nendobj\n"); }
+
+static unsigned char *zdeflate(const void *in, long n, long *outn)
+{
+    z_stream s;
+    uLong bound = compressBound((uLong)n) + 64;
+    unsigned char *o = (unsigned char *)malloc(bound);
+    if (!o) return NULL;
+    memset(&s, 0, sizeof(s));
+    if (deflateInit(&s, 6) != Z_OK) { free(o); return NULL; }
+    s.next_in = (Bytef *)in;
+    s.avail_in = (uInt)n;
+    s.next_out = o;
+    s.avail_out = (uInt)bound;
+    deflate(&s, Z_FINISH);
+    *outn = (long)s.total_out;
+    deflateEnd(&s);
+    return o;
+}
+
+/* stream object: dict-এর ভেতরের বাড়তি অংশ extra; flate = zlib দিয়ে চেপে */
+static void pw_stream(int id, const char *extra, const void *data, long n, int flate)
+{
+    unsigned char *z = NULL;
+    long zn = 0;
+    if (flate) z = zdeflate(data, n, &zn);
+    pw_begin(id);
+    sb_fmt(&pw.b, "<< %s/Length %ld%s >>\nstream\n", extra ? extra : "", z ? zn : n, z ? " /Filter /FlateDecode" : "");
+    sb_add(&pw.b, z ? (const char *)z : (const char *)data, (size_t)(z ? zn : n));
+    sb_str(&pw.b, "\nendstream");
+    pw_end();
+    free(z);
+}
+
+/* UTF-8 → PDF-এর UTF-16BE hex লেখা <FEFF...> */
+static void pdf_utf16(SB *b, const char *s, int n)
+{
+    int i = 0, len;
+    sb_str(b, "<FEFF");
+    while (i < n) {
+        int c = utf8_decode(s, n, i, &len);
+        i += len;
+        if (c >= 0x10000) {
+            c -= 0x10000;
+            sb_fmt(b, "%04X%04X", 0xD800 + (c >> 10), 0xDC00 + (c & 0x3FF));
+        } else sb_fmt(b, "%04X", c & 0xFFFF);
+    }
+    sb_str(b, ">");
+}
+
+/* ---------- ফন্ট ---------- */
+
+static void pdf_conf_bengali(void)
+{
+    FILE *f = fopen("/etc/rozos.conf", "r");
+    char line[300];
+    snprintf(pdf_bn_path, sizeof(pdf_bn_path), "/usr/share/fonts/NotoSansBengali.ttf");
+    if (!f) return;
+    while (fgets(line, sizeof(line), f)) {
+        if (!strncmp(line, "bengali_font=", 13)) {
+            char *v = line + 13, *e = v + strlen(v);
+            while (e > v && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ')) *--e = 0;
+            if (*v) snprintf(pdf_bn_path, sizeof(pdf_bn_path), "%s", v);
+        }
+    }
+    fclose(f);
+}
+
+/* path-এর ফন্ট (একবার খোলা); -1 = খোলা গেল না */
+static int pdf_font(const char *p)
+{
+    int i;
+    size_t len = 0;
+    char *b;
+    PFont *F;
+    for (i = 0; i < npfs; i++) if (!strcmp(pfs[i].path, p)) return pfs[i].face ? i : -1;
+    pfs = (PFont *)realloc(pfs, (size_t)(npfs + 1) * sizeof(PFont));
+    if (!pfs) { fprintf(stderr, "rozword: out of memory\n"); exit(1); }
+    F = &pfs[npfs];
+    memset(F, 0, sizeof(*F));
+    snprintf(F->path, sizeof(F->path), "%s", p);
+    npfs++;
+    if (pft_state == 0) pft_state = FT_Init_FreeType(&pft) == 0 ? 1 : -1;
+    if (pft_state < 0) return -1;
+    b = read_file(p, &len);
+    if (!b) return -1;
+    if (FT_New_Memory_Face(pft, (const FT_Byte *)b, (FT_Long)len, 0, &F->face) != 0) {
+        free(b);
+        F->face = NULL;
+        return -1;
+    }
+    F->file = (unsigned char *)b;
+    F->flen = (long)len;
+    F->ng = (int)F->face->num_glyphs;
+    F->upem = F->face->units_per_EM ? F->face->units_per_EM : 1000;
+    F->used = (unsigned char *)calloc((size_t)F->ng + 1, 1);
+    F->uni = (unsigned *)calloc((size_t)F->ng + 1, sizeof(unsigned));
+    F->obj = pw_alloc();
+    if (!F->used || !F->uni) { fprintf(stderr, "rozword: out of memory\n"); exit(1); }
+    F->used[0] = 1;
+    return npfs - 1;
+}
+
+static void pdf_size(PFont *F, int px)
+{
+    if (F->cur_px != px) {
+        FT_Set_Pixel_Sizes(F->face, 0, (FT_UInt)px);
+        F->cur_px = px;
+    }
+}
+
+/* face_of()-এর মতোই কোন ফাইল আর কত px */
+static void piece_font_path(int ai, char *out, size_t size, int *px)
+{
+    const Attr *a = &attrs[ai];
+    int fam = a->font < NFAM ? a->font : 0, variant = 0;
+    const char *file;
+    if (a->flags & A_BOLD) { if (fams[fam].bold) variant = 1; }
+    if (a->flags & A_ITALIC) { if (!variant && fams[fam].italic) variant = 2; }
+    *px = pt_to_px(a->size2);
+    if (!fams[fam].present) {                          /* পর্দায় UI ফন্ট */
+        int dummy;
+        rozft_system_font(0, out, size, &dummy);
+        return;
+    }
+    file = variant == 1 ? fams[fam].bold : variant == 2 ? fams[fam].italic : fams[fam].regular;
+    snprintf(out, size, FONT_DIR "%s", file ? file : fams[fam].regular);
+}
+
+/* glyph লেখার অবস্থা (এক BT … ET-এর ভেতরে) */
+typedef struct {
+    int cur_font;
+    double cur_size, skew;
+    int px;
+    double x0, base;               /* px */
+} GState;
+
+static void pdf_glyph(GState *g, int fi, int gid, int cpv, double x, double y)
+{
+    PFont *F = &pfs[fi];
+    double sz = g->px * PDF_PT;
+    if (gid < 0 || gid >= F->ng) gid = 0;
+    F->used[gid] = 1;
+    F->any = 1;
+    if (cpv > 0 && !F->uni[gid]) F->uni[gid] = (unsigned)cpv;
+    if (g->cur_font != fi || g->cur_size != sz) {
+        sb_fmt(&pc, "/F%d ", fi);
+        pn(&pc, sz);
+        sb_str(&pc, "Tf ");
+        g->cur_font = fi;
+        g->cur_size = sz;
+    }
+    sb_str(&pc, "1 0 ");
+    pn(&pc, g->skew);
+    sb_str(&pc, "1 ");
+    pn(&pc, PX(x));
+    pn(&pc, PY(y));
+    sb_fmt(&pc, "Tm <%04X> Tj\n", gid & 0xFFFF);
+}
+
+struct pdf_shape_ud { GState *g; int f0, f1; };
+
+static void pdf_shape_cb(void *ud, int which, int glyph, long x, long y, int cpv)
+{
+    struct pdf_shape_ud *u = (struct pdf_shape_ud *)ud;
+    int fi = which && u->f1 >= 0 ? u->f1 : u->f0;
+    pdf_glyph(u->g, fi, glyph, cpv, u->g->x0 + x / 64.0, u->g->base - y / 64.0);
+}
+
+static void pdf_color(SB *b, uint32_t c, int stroke)
+{
+    pn(b, ((c >> 16) & 255) / 255.0);
+    pn(b, ((c >> 8) & 255) / 255.0);
+    pn(b, (c & 255) / 255.0);
+    sb_str(b, stroke ? "RG\n" : "rg\n");
+}
+
+static void pdf_fill_rect(double x, double y, double w, double h, uint32_t c)
+{
+    pdf_color(&pc, c, 0);
+    pn(&pc, PX(x));
+    pn(&pc, PY(y + h));
+    pn(&pc, PX(w));
+    pn(&pc, PX(h));
+    sb_str(&pc, "re f\n");
+}
+
+/* draw_piece()-এর মতোই — ফেরত চওড়া (px); deco = underline/strike আঁকা */
+static int pdf_piece(int ai, const char *t, int n, int x, int baseline, int deco)
+{
+    Face fc;
+    const Attr *a = &attrs[ai];
+    char fpath[256];
+    int px, fi, w, cap, complex_;
+    GState g;
+    PFont *F;
+    face_of(ai, &fc);
+    if (n > 4000) n = 4000;
+    memcpy(mbuf, t, (size_t)n);
+    mbuf[n] = '\0';
+    w = gfx_text_width(fc.f, mbuf) + fc.fake_bold;
+    piece_font_path(ai, fpath, sizeof(fpath), &px);
+    /* আগে fallback ফন্টগুলো খোলা — পরে pfs[] realloc হলে F পুরোনো হয়ে যেত */
+    {
+        int dj = pdf_font("/usr/share/fonts/DejaVuSans.ttf");
+        pdf_font(pdf_bn_path);
+        fi = pdf_font(fpath);
+        if (fi < 0) fi = dj;
+    }
+    if (fi >= 0) {
+        F = &pfs[fi];
+        pdf_size(F, px);
+        cap = 0;
+        if (FT_Load_Char(F->face, 'H', FT_LOAD_DEFAULT | FT_LOAD_TARGET_LIGHT) == 0)
+            cap = (int)((F->face->glyph->metrics.horiBearingY + 32) >> 6);
+        if (cap <= 0) cap = px * 7 / 10;
+        memset(&g, 0, sizeof(g));
+        g.cur_font = -1;
+        g.px = px;
+        g.skew = fc.fake_italic ? 0.21 : 0;
+        g.x0 = x;
+        g.base = baseline - fc.asc + (fc.h + cap + 1) / 2;   /* librozgfx যেখানে বেসলাইন বসায় */
+        complex_ = rozshape_has_complex(t, n);
+        if (complex_) {                                    /* কপি করলে আসল লেখা */
+            sb_str(&pc, "/Span << /ActualText ");
+            pdf_utf16(&pc, t, n);
+            sb_str(&pc, " >> BDC\n");
+        }
+        sb_str(&pc, "BT\n");
+        pdf_color(&pc, 0xFF000000u | a->color, 0);
+        if (fc.fake_bold) {
+            pdf_color(&pc, a->color, 1);
+            pn(&pc, px * PDF_PT / 30.0 + 0.3);
+            sb_str(&pc, "w 2 Tr\n");
+        } else sb_str(&pc, "0 Tr\n");                   /* Tr BT…ET-এর বাইরেও থেকে যায় */
+        if (complex_) {
+            struct pdf_shape_ud u;
+            int bi;
+            if (!F->shape_tried) {
+                FILE *chk = fopen(pdf_bn_path, "rb");
+                F->shape_tried = 1;
+                if (chk) fclose(chk);
+                F->shape = rozshape_open(F->path, chk ? pdf_bn_path : NULL);
+            }
+            bi = pdf_font(pdf_bn_path);
+            u.g = &g;
+            u.f0 = fi;
+            u.f1 = bi;
+            if (F->shape) {
+                int upem[2];
+                upem[0] = F->upem;
+                upem[1] = bi >= 0 ? pfs[bi].upem : 1000;
+                rozshape_run(F->shape, t, n, px, upem, pdf_shape_cb, &u);
+            } else complex_ = 2;                           /* shaping নেই — সাধারণ পথে */
+        }
+        if (!complex_ || complex_ == 2) {
+            int i = 0, len;
+            double pen = x;
+            while (i < n) {
+                int c = utf8_decode(t, n, i, &len), use = fi;
+                FT_UInt idx;
+                PFont *S;
+                i += len;
+                if (c == '\t') c = ' ';
+                idx = FT_Get_Char_Index(pfs[fi].face, (FT_ULong)c);
+                if (idx == 0 && c > 32) {                  /* librozgfx-এর মতো: DejaVu, তারপর বাংলা */
+                    int fb = pdf_font("/usr/share/fonts/DejaVuSans.ttf");
+                    FT_UInt k = fb >= 0 ? FT_Get_Char_Index(pfs[fb].face, (FT_ULong)c) : 0;
+                    if (k) { use = fb; idx = k; }
+                    else if (c >= 0x0980 && c <= 0x09FF) {
+                        int bi = pdf_font(pdf_bn_path);
+                        k = bi >= 0 ? FT_Get_Char_Index(pfs[bi].face, (FT_ULong)c) : 0;
+                        if (k) { use = bi; idx = k; }
+                    }
+                }
+                S = &pfs[use];
+                pdf_size(S, px);
+                pdf_glyph(&g, use, (int)idx, c, pen, g.base);
+                if (FT_Load_Glyph(S->face, idx, FT_LOAD_TARGET_LIGHT) == 0)
+                    pen += (double)((S->face->glyph->advance.x + 32) >> 6);
+                else pen += px / 3;
+            }
+        }
+        sb_str(&pc, "ET\n");
+        if (complex_) sb_str(&pc, "EMC\n");
+    }
+    if (deco && (a->flags & A_UNDER)) {
+        int th = fc.h / 16 > 1 ? fc.h / 16 : 1;
+        pdf_fill_rect(x, baseline + (fc.h / 12 > 1 ? fc.h / 12 : 1), w, th, a->color);
+    }
+    if (deco && (a->flags & A_STRIKE)) {
+        int th = fc.h / 16 > 1 ? fc.h / 16 : 1;
+        pdf_fill_rect(x, baseline - fc.asc * 3 / 10, w, th, a->color);
+    }
+    return w;
+}
+
+/* ---------- ছবি ---------- */
+
+static int jpeg_info(const unsigned char *d, long n, int *w, int *h, int *comps)
+{
+    long i = 2;
+    if (n < 4 || d[0] != 0xFF || d[1] != 0xD8) return -1;
+    while (i + 4 < n) {
+        int m;
+        long L;
+        if (d[i] != 0xFF) { i++; continue; }
+        m = d[i + 1];
+        if (m == 0xFF) { i++; continue; }
+        if (m == 0xD8 || m == 0x01 || (m >= 0xD0 && m <= 0xD7)) { i += 2; continue; }
+        L = ((long)d[i + 2] << 8) | d[i + 3];
+        if (m >= 0xC0 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC) {
+            if (i + 9 >= n) return -1;
+            *h = (d[i + 5] << 8) | d[i + 6];
+            *w = (d[i + 7] << 8) | d[i + 8];
+            *comps = d[i + 9];
+            return d[i + 4] == 8 ? 0 : -1;
+        }
+        i += 2 + L;
+    }
+    return -1;
+}
+
+/* imgs[k]-এর XObject (প্রথমবার লিখে) — 0 = ছবি নেই */
+static int pdf_image_obj(int k)
+{
+    RImg *im;
+    int w, h, comps, id;
+    char extra[160];
+    if (k < 0 || k >= nimgs) return 0;
+    if (pimg_obj[k]) return pimg_obj[k];
+    im = &imgs[k];
+    if (im->data && jpeg_info(im->data, im->len, &w, &h, &comps) == 0 && (comps == 1 || comps == 3) && w > 0 && h > 0) {
+        id = pw_alloc();
+        snprintf(extra, sizeof(extra), "/Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /%s "
+                 "/BitsPerComponent 8 /Filter /DCTDecode ", w, h, comps == 1 ? "DeviceGray" : "DeviceRGB");
+        pw_stream(id, extra, im->data, im->len, 0);
+    } else if (im->s && im->s->w > 0 && im->s->h > 0) {
+        long n = (long)im->s->w * im->s->h * 3, o = 0;
+        unsigned char *rgb = (unsigned char *)malloc((size_t)n);
+        int x, y;
+        if (!rgb) return 0;
+        for (y = 0; y < im->s->h; y++) {
+            const uint32_t *row = im->s->px + (size_t)y * im->s->stride;
+            for (x = 0; x < im->s->w; x++) {
+                uint32_t c = row[x];
+                int al = (int)(c >> 24), ch;
+                for (ch = 2; ch >= 0; ch--) {
+                    int v = (int)((c >> (ch * 8)) & 255);
+                    rgb[o++] = (unsigned char)((v * al + 255 * (255 - al)) / 255);   /* সাদার ওপর */
+                }
+            }
+        }
+        id = pw_alloc();
+        snprintf(extra, sizeof(extra), "/Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB "
+                 "/BitsPerComponent 8 ", im->s->w, im->s->h);
+        pw_stream(id, extra, rgb, n, 1);
+        free(rgb);
+    } else return 0;
+    pimg_obj[k] = id;
+    return id;
+}
+
+static void pdf_image(Para *p, int x, int y, int w, int h)
+{
+    int id = pdf_image_obj(p->img);
+    if (!id) {
+        pdf_fill_rect(x, y, w, h, GFX_RGB(230, 230, 230) & 0xFFFFFF);
+        return;
+    }
+    sb_str(&pc, "q ");
+    pn(&pc, PX(w)); sb_str(&pc, "0 0 ");
+    pn(&pc, PX(h));
+    pn(&pc, PX(x));
+    pn(&pc, PY(y + h));
+    sb_fmt(&pc, "cm /Im%d Do Q\n", p->img);
+}
+
+/* ---------- পাতা ---------- */
+
+/* draw_line()-এর মতোই (নির্বাচন বাদে) */
+static void pdf_line(int pi, int k, int sx, int sy)
+{
+    Para *p = &P[pi];
+    Line *L = &p->ln[k];
+    int x100, i, baseline = sy + L->asc, te;
+    if (p->kind == 1) {
+        int w, h;
+        img_disp(p, &w, &h);
+        pdf_image(p, sx + L->x, sy, w, h);
+        return;
+    }
+    if (k == 0 && p->list) {
+        int ai = p->n ? p->a[0] : p->eattr;
+        char mark[16];
+        if (p->list == 1) strcpy(mark, "\xE2\x80\xA2");
+        else snprintf(mark, sizeof(mark), "%d.", list_number(pi));
+        pdf_piece(ai, mark, (int)strlen(mark), sx + L->x - zpx(LIST_INDENT) + zpx(10), baseline, 1);
+    }
+    te = L->e;
+    while (te > L->s && p->t[te - 1] == ' ') te--;
+    x100 = (sx + L->x) * 100;
+    for (i = L->s; i < L->e;) {
+        if (p->t[i] == ' ') {
+            int w = run_w(p->a[i], " ", 1) * 100 + (i < te ? L->extra : 0);
+            const Attr *a = &attrs[p->a[i]];
+            if (i < te) pdf_piece(p->a[i], " ", 1, x100 / 100, baseline, 0);   /* কপিতে শব্দের ফাঁক */
+            if ((a->flags & (A_UNDER | A_STRIKE)) && i < te) {
+                Face fc;
+                int th;
+                face_of(p->a[i], &fc);
+                th = fc.h / 16 > 1 ? fc.h / 16 : 1;
+                if (a->flags & A_UNDER)
+                    pdf_fill_rect(x100 / 100, baseline + (fc.h / 12 > 1 ? fc.h / 12 : 1), w / 100 + 1, th, a->color);
+                if (a->flags & A_STRIKE)
+                    pdf_fill_rect(x100 / 100, baseline - fc.asc * 3 / 10, w / 100 + 1, th, a->color);
+            }
+            x100 += w;
+            i++;
+            continue;
+        }
+        {
+            int j = i;
+            while (j < L->e && p->t[j] != ' ' && p->a[j] == p->a[i]) j++;
+            x100 += pdf_piece(p->a[i], p->t + i, j - i, x100 / 100, baseline, 1) * 100;
+            i = j;
+        }
+    }
+}
+
+static void pdf_header_footer(int pg)
+{
+    char t[400];
+    int which;
+    for (which = 0; which < 2; which++) {
+        const char *src = which ? ftr_text : hdr_text;
+        int align = which ? ftr_align : hdr_align, ai = hf_attr(), w, x, base;
+        Face fc;
+        if (!src[0]) continue;
+        hf_expand(src, pg, t, sizeof(t));
+        w = run_w(ai, t, (int)strlen(t));
+        face_of(ai, &fc);
+        x = zpx(MARGIN) + (align == 1 ? (content_w() - w) / 2 : align == 2 ? content_w() - w : 0);
+        base = which ? zpx(PAGE_H) - zpx(MARGIN) / 2 + fc.asc / 2 : zpx(MARGIN) / 2 + fc.asc / 2;
+        pdf_piece(ai, t, (int)strlen(t), x, base, 1);
+    }
+}
+
+/* ---------- TrueType: শুধু ব্যবহার করা glyph রাখা (নম্বর একই) ---------- */
+
+static unsigned long be32(const unsigned char *p) { return (unsigned long)p[0] << 24 | (unsigned long)p[1] << 16 | (unsigned long)p[2] << 8 | p[3]; }
+static unsigned be16(const unsigned char *p) { return (unsigned)(p[0] << 8 | p[1]); }
+static void sb_be16(SB *b, unsigned v) { char c[2] = { (char)(v >> 8), (char)v }; sb_add(b, c, 2); }
+static void sb_be32(SB *b, unsigned long v) { char c[4] = { (char)(v >> 24), (char)(v >> 16), (char)(v >> 8), (char)v }; sb_add(b, c, 4); }
+
+static unsigned long tt_sum(const unsigned char *d, long n)
+{
+    unsigned long s = 0;
+    long i;
+    for (i = 0; i < n; i += 4) {
+        unsigned long v = 0;
+        int k;
+        for (k = 0; k < 4; k++) v = v << 8 | (i + k < n ? d[i + k] : 0);
+        s = (s + v) & 0xFFFFFFFFul;
+    }
+    return s;
+}
+
+/* ০ = ঠিক (out-এ নতুন ফন্ট); -1 = পারা গেল না (পুরো ফাইল বসবে) */
+static int ttf_subset(const PFont *F, SB *out)
+{
+    static const char *keep[] = { "OS/2", "cvt ", "fpgm", "glyf", "head", "hhea", "hmtx", "loca", "maxp", "name", "prep" };
+    const unsigned char *f = F->file;
+    long n = F->flen, toff[11], tlen[11];
+    int nt, i, k, ng, longloca, changed, pass;
+    unsigned char *used;
+    SB glyf = { 0, 0, 0 }, loca = { 0, 0, 0 }, head = { 0, 0, 0 };
+    long *lo;
+    if (n < 12 || (be32(f) != 0x00010000ul && be32(f) != 0x74727565ul)) return -1;
+    nt = (int)be16(f + 4);
+    if (12 + 16L * nt > n) return -1;
+    for (k = 0; k < 11; k++) toff[k] = tlen[k] = -1;
+    for (i = 0; i < nt; i++) {
+        const unsigned char *r = f + 12 + 16 * i;
+        for (k = 0; k < 11; k++)
+            if (!memcmp(r, keep[k], 4)) {
+                toff[k] = (long)be32(r + 8);
+                tlen[k] = (long)be32(r + 12);
+                if (toff[k] < 0 || toff[k] + tlen[k] > n) return -1;
+            }
+    }
+    /* দরকারি: glyf 3, head 4, hhea 5, hmtx 6, loca 7, maxp 8 */
+    for (k = 3; k <= 8; k++) if (toff[k] < 0) return -1;
+    if (tlen[4] < 54 || tlen[8] < 6) return -1;
+    ng = (int)be16(f + toff[8] + 4);
+    longloca = be16(f + toff[4] + 50) != 0;
+    if (ng <= 0 || ng > F->ng || tlen[7] < (long)(ng + 1) * (longloca ? 4 : 2)) return -1;
+    lo = (long *)malloc((size_t)(ng + 1) * sizeof(long));
+    used = (unsigned char *)calloc((size_t)ng, 1);
+    if (!lo || !used) { free(lo); free(used); return -1; }
+    for (i = 0; i <= ng; i++)
+        lo[i] = longloca ? (long)be32(f + toff[7] + 4 * i) : 2L * be16(f + toff[7] + 2 * i);
+    for (i = 0; i < ng; i++) used[i] = F->used[i];
+    used[0] = 1;
+    /* composite glyph-এর অংশগুলোও লাগবে */
+    for (pass = 0, changed = 1; changed && pass < 8; pass++) {
+        changed = 0;
+        for (i = 0; i < ng; i++) {
+            const unsigned char *g;
+            long gl = lo[i + 1] - lo[i], q;
+            if (!used[i] || gl < 10 || lo[i] < 0 || toff[3] + lo[i + 1] > n) continue;
+            g = f + toff[3] + lo[i];
+            if ((short)be16(g) >= 0) continue;
+            q = 10;
+            for (;;) {
+                unsigned fl, gi;
+                if (q + 4 > gl) break;
+                fl = be16(g + q);
+                gi = be16(g + q + 2);
+                if ((int)gi < ng && !used[gi]) { used[gi] = 1; changed = 1; }
+                q += 4 + ((fl & 1) ? 4 : 2);
+                if (fl & 8) q += 2;
+                else if (fl & 0x40) q += 4;
+                else if (fl & 0x80) q += 8;
+                if (!(fl & 0x20)) break;
+            }
+        }
+    }
+    for (i = 0; i < ng; i++) {
+        long gl = lo[i + 1] - lo[i];
+        sb_be32(&loca, (unsigned long)glyf.n);
+        if (used[i] && gl > 0 && lo[i] >= 0 && toff[3] + lo[i + 1] <= n) {
+            sb_add(&glyf, (const char *)f + toff[3] + lo[i], (size_t)gl);
+            while (glyf.n & 3) sb_add(&glyf, "", 1);
+        }
+    }
+    sb_be32(&loca, (unsigned long)glyf.n);
+    sb_add(&head, (const char *)f + toff[4], (size_t)tlen[4]);
+    memset(head.s + 8, 0, 4);                          /* checkSumAdjustment — পরে */
+    head.s[50] = 0;
+    head.s[51] = 1;                                    /* indexToLocFormat = long */
+    free(lo);
+    free(used);
+    {
+        const char *data[11];
+        long len[11], off;
+        int cnt = 0, es = 0, sr;
+        size_t start = out->n;
+        for (k = 0; k < 11; k++) {
+            if (k == 3) { data[k] = glyf.s; len[k] = (long)glyf.n; }
+            else if (k == 4) { data[k] = head.s; len[k] = (long)head.n; }
+            else if (k == 7) { data[k] = loca.s; len[k] = (long)loca.n; }
+            else if (toff[k] >= 0) { data[k] = (const char *)f + toff[k]; len[k] = tlen[k]; }
+            else { data[k] = NULL; len[k] = 0; }
+            if (data[k] || k == 3) cnt++;
+        }
+        while ((1 << (es + 1)) <= cnt) es++;
+        sr = (1 << es) * 16;
+        sb_be32(out, 0x00010000ul);
+        sb_be16(out, (unsigned)cnt);
+        sb_be16(out, (unsigned)sr);
+        sb_be16(out, (unsigned)es);
+        sb_be16(out, (unsigned)(cnt * 16 - sr));
+        off = 12 + 16L * cnt;
+        for (k = 0; k < 11; k++) {
+            if (!data[k] && k != 3) continue;
+            sb_add(out, keep[k], 4);
+            sb_be32(out, tt_sum((const unsigned char *)data[k], len[k]));
+            sb_be32(out, (unsigned long)off);
+            sb_be32(out, (unsigned long)len[k]);
+            off += (len[k] + 3) & ~3L;
+        }
+        for (k = 0; k < 11; k++) {
+            if (!data[k] && k != 3) continue;
+            if (len[k]) sb_add(out, data[k], (size_t)len[k]);
+            while ((out->n - start) & 3) sb_add(out, "", 1);
+        }
+        {
+            /* head-এর checkSumAdjustment */
+            unsigned long adj = (0xB1B0AFBAul - tt_sum((const unsigned char *)out->s + start, (long)(out->n - start))) & 0xFFFFFFFFul;
+            long hoff = -1, o2 = 12 + 16L * cnt;
+            for (k = 0; k < 11; k++) {
+                if (!data[k] && k != 3) continue;
+                if (k == 4) { hoff = o2; break; }
+                o2 += (len[k] + 3) & ~3L;
+            }
+            if (hoff > 0) {
+                unsigned char *h = (unsigned char *)out->s + start + hoff + 8;
+                h[0] = (unsigned char)(adj >> 24); h[1] = (unsigned char)(adj >> 16);
+                h[2] = (unsigned char)(adj >> 8); h[3] = (unsigned char)adj;
+            }
+        }
+    }
+    free(glyf.s);
+    free(loca.s);
+    free(head.s);
+    return 0;
+}
+
+/* ফন্টের সব object (Type0 → CIDFontType2 → FontDescriptor → FontFile2, ToUnicode) */
+static void pdf_write_font(int fi)
+{
+    PFont *F = &pfs[fi];
+    SB ff = { 0, 0, 0 }, w = { 0, 0, 0 }, tu = { 0, 0, 0 };
+    int cid = pw_alloc(), fd = pw_alloc(), file = pw_alloc(), tou = pw_alloc(), i, cnt, sub;
+    char name[80], extra[100], tag[8];
+    const char *fam = F->face->family_name ? F->face->family_name : "Font";
+    int o = 0;
+    double sc = 1000.0 / F->upem;
+    snprintf(tag, sizeof(tag), "RZW%c%c%c", 'A' + fi / 676 % 26, 'A' + fi / 26 % 26, 'A' + fi % 26);   /* subset-এর ৬ অক্ষর */
+    for (i = 0; fam[i] && o < 40; i++)
+        if (isalnum((unsigned char)fam[i])) name[o++] = fam[i];
+    name[o] = 0;
+    if (F->face->style_name && strcasecmp(F->face->style_name, "Regular")) {
+        size_t l = strlen(name);
+        snprintf(name + l, sizeof(name) - l, "-");
+        for (i = 0, o = (int)strlen(name); F->face->style_name[i] && o < 70; i++)
+            if (isalnum((unsigned char)F->face->style_name[i])) name[o++] = F->face->style_name[i];
+        name[o] = 0;
+    }
+    /* ফন্ট ফাইল */
+    sub = ttf_subset(F, &ff) == 0;
+    if (sub || be32(F->file) != 0x4F54544Ful) {
+        snprintf(extra, sizeof(extra), "/Length1 %ld ", sub ? (long)ff.n : F->flen);
+        pw_stream(file, extra, sub ? ff.s : (const char *)F->file, sub ? (long)ff.n : F->flen, 1);
+    } else pw_stream(file, "/Subtype /OpenType ", F->file, F->flen, 1);   /* CFF (OTF) — পুরোটা */
+    free(ff.s);
+    /* FontDescriptor */
+    pw_begin(fd);
+    sb_fmt(&pw.b, "<< /Type /FontDescriptor /FontName /%s+%s /Flags 32 /FontBBox [", tag, name);
+    pn(&pw.b, F->face->bbox.xMin * sc);
+    pn(&pw.b, F->face->bbox.yMin * sc);
+    pn(&pw.b, F->face->bbox.xMax * sc);
+    pn(&pw.b, F->face->bbox.yMax * sc);
+    sb_str(&pw.b, "] /ItalicAngle 0 /Ascent ");
+    pn(&pw.b, F->face->ascender * sc);
+    sb_str(&pw.b, "/Descent ");
+    pn(&pw.b, F->face->descender * sc);
+    sb_str(&pw.b, "/CapHeight ");
+    pn(&pw.b, F->face->ascender * sc * 0.72);
+    sb_fmt(&pw.b, "/StemV 80 %s %d 0 R >>", sub || be32(F->file) != 0x4F54544Ful ? "/FontFile2" : "/FontFile3", file);
+    pw_end();
+    /* চওড়া (W) */
+    sb_str(&w, "[");
+    for (i = 0, cnt = 0; i < F->ng; i++) {
+        if (!F->used[i]) continue;
+        if (FT_Load_Glyph(F->face, (FT_UInt)i, FT_LOAD_NO_SCALE) != 0) continue;
+        sb_fmt(&w, "%d [", i);
+        pn(&w, F->face->glyph->advance.x * sc);
+        sb_str(&w, "] ");
+        if (++cnt % 8 == 0) sb_str(&w, "\n");
+    }
+    sb_str(&w, "]");
+    pw_begin(cid);
+    sb_fmt(&pw.b, "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /%s+%s "
+           "/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> "
+           "/FontDescriptor %d 0 R /CIDToGIDMap /Identity /DW 1000 /W ", tag, name, fd);
+    sb_add(&pw.b, w.s, w.n);
+    sb_str(&pw.b, " >>");
+    pw_end();
+    free(w.s);
+    /* ToUnicode */
+    sb_str(&tu, "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
+           "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n"
+           "/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n"
+           "1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n");
+    {
+        int idx[100], m = 0, j;
+        for (i = 0; i <= F->ng; i++) {
+            if (i < F->ng && F->used[i] && F->uni[i]) idx[m++] = i;
+            if (m == 100 || (i == F->ng && m > 0)) {
+                sb_fmt(&tu, "%d beginbfchar\n", m);
+                for (j = 0; j < m; j++) {
+                    unsigned u = F->uni[idx[j]];
+                    if (u >= 0x10000) sb_fmt(&tu, "<%04X> <%04X%04X>\n", idx[j], 0xD800 + ((u - 0x10000) >> 10), 0xDC00 + ((u - 0x10000) & 0x3FF));
+                    else sb_fmt(&tu, "<%04X> <%04X>\n", idx[j], u);
+                }
+                sb_str(&tu, "endbfchar\n");
+                m = 0;
+            }
+        }
+    }
+    sb_str(&tu, "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n");
+    pw_stream(tou, NULL, tu.s, (long)tu.n, 1);
+    free(tu.s);
+    pw_begin(F->obj);
+    sb_fmt(&pw.b, "<< /Type /Font /Subtype /Type0 /BaseFont /%s+%s /Encoding /Identity-H "
+           "/DescendantFonts [%d 0 R] /ToUnicode %d 0 R >>", tag, name, cid, tou);
+    pw_end();
+}
+
+static void pdf_cleanup(void)
+{
+    int i;
+    for (i = 0; i < npfs; i++) {
+        if (pfs[i].shape) rozshape_close(pfs[i].shape);
+        if (pfs[i].face) FT_Done_Face(pfs[i].face);
+        free(pfs[i].file);
+        free(pfs[i].used);
+        free(pfs[i].uni);
+    }
+    free(pfs);
+    pfs = NULL;
+    npfs = 0;
+    free(pw.b.s);
+    free(pw.off);
+    memset(&pw, 0, sizeof(pw));
+    free(pc.s);
+    memset(&pc, 0, sizeof(pc));
+    free(pimg_obj);
+    pimg_obj = NULL;
+}
+
+/* পুরো দলিল PDF-এ; ফেরত পাতার সংখ্যা, -1 = ভুল */
+static int save_pdf(const char *p)
+{
+    int zsave = zoom, pg, g, c, i, *page_obj, pages;
+    int cat, pages_obj, info;
+    long xref;
+    FILE *f;
+    zoom = 100;                                        /* ১০০% zoom-এর লেআউট = পাতার আসল মাপ */
+    layout_all = 1;
+    paginate();
+    pdf_conf_bengali();
+    memset(&pw, 0, sizeof(pw));
+    sb_str(&pw.b, "%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
+    cat = pw_alloc();
+    pages_obj = pw_alloc();
+    info = pw_alloc();
+    pres_obj = pw_alloc();
+    pimg_obj = (int *)calloc((size_t)nimgs + 1, sizeof(int));
+    page_obj = (int *)calloc((size_t)npages + 1, sizeof(int));
+    if (!pimg_obj || !page_obj) { free(page_obj); pdf_cleanup(); zoom = zsave; layout_all = 1; paginate(); return -1; }
+    for (pg = 0; pg < npages; pg++) {
+        int content = pw_alloc();
+        pc.n = 0;
+        pdf_header_footer(pg);
+        for (c = 0; c < ncrects; c++) {                /* টেবিলের দাগ */
+            if (crects[c].page != pg) continue;
+            pdf_color(&pc, 0x5A5A5A, 1);
+            sb_str(&pc, "0.75 w ");
+            pn(&pc, PX(zpx(MARGIN) + crects[c].x + 0.5));
+            pn(&pc, PY(zpx(MARGIN) + crects[c].y + crects[c].h + 0.5));
+            pn(&pc, PX(crects[c].w));
+            pn(&pc, PX(crects[c].h));
+            sb_str(&pc, "re S\n");
+        }
+        for (g = 0; g < ngl; g++) {
+            Para *pp = &P[gl_p[g]];
+            Line *L = &pp->ln[gl_l[g]];
+            if (L->page != pg) continue;
+            pdf_line(gl_p[g], gl_l[g], zpx(MARGIN), zpx(MARGIN) + L->y);
+        }
+        pw_stream(content, NULL, pc.s ? pc.s : "", (long)pc.n, 1);
+        page_obj[pg] = pw_alloc();
+        pw_begin(page_obj[pg]);
+        sb_fmt(&pw.b, "<< /Type /Page /Parent %d 0 R /MediaBox [0 0 595.5 842.25] /Resources %d 0 R /Contents %d 0 R >>",
+               pages_obj, pres_obj, content);
+        pw_end();
+    }
+    pages = npages;
+    for (i = 0; i < npfs; i++) if (pfs[i].face && pfs[i].any) pdf_write_font(i);
+    pw_begin(pres_obj);
+    sb_str(&pw.b, "<< /ProcSet [/PDF /Text /ImageB /ImageC] /Font <<");
+    for (i = 0; i < npfs; i++) if (pfs[i].face && pfs[i].any) sb_fmt(&pw.b, " /F%d %d 0 R", i, pfs[i].obj);
+    sb_str(&pw.b, " >> /XObject <<");
+    for (i = 0; i < nimgs; i++) if (pimg_obj[i]) sb_fmt(&pw.b, " /Im%d %d 0 R", i, pimg_obj[i]);
+    sb_str(&pw.b, " >> >>");
+    pw_end();
+    pw_begin(pages_obj);
+    sb_fmt(&pw.b, "<< /Type /Pages /Count %d /Kids [", pages);
+    for (pg = 0; pg < pages; pg++) sb_fmt(&pw.b, "%d 0 R ", page_obj[pg]);
+    sb_str(&pw.b, "] >>");
+    pw_end();
+    pw_begin(cat);
+    sb_fmt(&pw.b, "<< /Type /Catalog /Pages %d 0 R >>", pages_obj);
+    pw_end();
+    pw_begin(info);
+    {
+        const char *t = untitled ? "Untitled" : base_name(path);
+        sb_str(&pw.b, "<< /Producer (rozword " RW_VERSION ") /Creator (rozword, rozOS) /Title ");
+        pdf_utf16(&pw.b, t, (int)strlen(t));
+        sb_str(&pw.b, " >>");
+    }
+    pw_end();
+    xref = (long)pw.b.n;
+    sb_fmt(&pw.b, "xref\n0 %d\n0000000000 65535 f \n", pw.nobj + 1);
+    for (i = 1; i <= pw.nobj; i++)                     /* লেখা হয়নি (ব্যবহার না হওয়া ফন্ট) = free */
+        if (pw.off[i]) sb_fmt(&pw.b, "%010ld 00000 n \n", pw.off[i]);
+        else sb_str(&pw.b, "0000000000 65535 f \n");
+    sb_fmt(&pw.b, "trailer\n<< /Size %d /Root %d 0 R /Info %d 0 R >>\nstartxref\n%ld\n%%%%EOF\n", pw.nobj + 1, cat, info, xref);
+    free(page_obj);
+    f = fopen(p, "wb");
+    if (!f || fwrite(pw.b.s, 1, pw.b.n, f) != pw.b.n) {
+        if (f) fclose(f);
+        pdf_cleanup();
+        zoom = zsave; layout_all = 1; paginate();
+        return -1;
+    }
+    fclose(f);
+    sync();
+    pdf_cleanup();
+    zoom = zsave;                                      /* পর্দার লেআউট ফেরত */
+    layout_all = 1;
+    paginate();
+    return pages;
+}
+
 static int load_doc(const char *p)
 {
     size_t len = 0;
@@ -3169,6 +4075,17 @@ static int save_doc(const char *p)
     SB b = { 0, 0, 0 };
     FILE *f;
     int as_text = has_ext(p, ".txt");
+    if (has_ext(p, ".pdf")) {                          /* ধাপ ২৬খ-৪: শুধু রপ্তানি — দলিলের নাম বদলায় না */
+        int pages = save_pdf(p);
+        if (pages < 0) {
+            char msg[700];
+            snprintf(msg, sizeof(msg), "Cannot save %s", p);
+            report_error(msg);
+            return -1;
+        }
+        snprintf(status_msg, sizeof(status_msg), "Exported as PDF: %s (%d page%s)", base_name(p), pages, pages == 1 ? "" : "s");
+        return 0;
+    }
     if (has_ext(p, ".docx")) {                         /* ধাপ ২৬খ-৩ */
         if (save_docx(p) < 0) {
             char msg[700];
@@ -3201,7 +4118,8 @@ static int save_doc(const char *p)
     return 0;
 }
 
-/* as_text: 0 = .rwd (বা নাম .docx/.txt দিলে সেটা), 1 = লেখা হিসেবে, 2 = Word (.docx) — ধাপ ২৬খ-৩ */
+/* as_text: 0 = .rwd (বা নাম .docx/.txt দিলে সেটা), 1 = লেখা হিসেবে, 2 = Word (.docx) — ধাপ ২৬খ-৩,
+ * 3 = PDF — ধাপ ২৬খ-৪ */
 static int save_as(int as_text)
 {
     char p[512];
@@ -3209,11 +4127,13 @@ static int save_as(int as_text)
     if (as_text) {
         char *dot = strrchr(p, '.');
         if (dot && dot > strrchr(p, '/')) *dot = '\0';
-        strncat(p, as_text == 2 ? ".docx" : ".txt", sizeof(p) - strlen(p) - 1);
+        strncat(p, as_text == 3 ? ".pdf" : as_text == 2 ? ".docx" : ".txt", sizeof(p) - strlen(p) - 1);
     }
-    if (!ui_filedlg(as_text == 1 ? "Export as text" : as_text == 2 ? "Save as Word document" : "Save document", p, sizeof(p), 1))
+    if (!ui_filedlg(as_text == 1 ? "Export as text" : as_text == 2 ? "Save as Word document" :
+                    as_text == 3 ? "Export as PDF" : "Save document", p, sizeof(p), 1))
         return -1;
     if (as_text == 2 && !has_ext(p, ".docx")) strncat(p, ".docx", sizeof(p) - strlen(p) - 1);
+    if (as_text == 3 && !has_ext(p, ".pdf")) strncat(p, ".pdf", sizeof(p) - strlen(p) - 1);
     if (!as_text && !has_ext(p, ".rwd") && !has_ext(p, ".txt") && !has_ext(p, ".docx")) strncat(p, ".rwd", sizeof(p) - strlen(p) - 1);
     return save_doc(p);
 }
@@ -3623,7 +4543,8 @@ enum {
     /* ধাপ ২৬খ-২ */
     M_TABLE, M_PICTURE, M_PICSIZE, M_HEADER, M_FOOTER, M_PAGENUM,
     M_ROWADD, M_COLADD, M_ROWDEL, M_COLDEL, M_TBLDEL, M_COLWIDER, M_COLNARROW,
-    M_SAVEDOCX                     /* ধাপ ২৬খ-৩ */
+    M_SAVEDOCX,                    /* ধাপ ২৬খ-৩ */
+    M_SAVEPDF                      /* ধাপ ২৬খ-৪ */
 };
 
 /* "Ctrl+I " (শেষে ফাঁকা) — শুধু দেখানোর জন্য: Ctrl+I/J/H-এর কোড Tab/Enter/Backspace-এর সমান,
@@ -3631,7 +4552,7 @@ enum {
 static const struct ui_menuitem file_items[] = {
     { "New", "Ctrl+N", M_NEW }, { "Open...", "Ctrl+O", M_OPEN }, { "Save", "Ctrl+S", M_SAVE },
     { "Save as...", "F12", M_SAVEAS }, { "Save as Word (.docx)...", NULL, M_SAVEDOCX },
-    { "Export as text...", NULL, M_EXPORT }, { "-", NULL, 0 },
+    { "Export as PDF...", NULL, M_SAVEPDF }, { "Export as text...", NULL, M_EXPORT }, { "-", NULL, 0 },
     { "Quit", "Ctrl+Q", M_QUIT },
 };
 static const struct ui_menuitem edit_items[] = {
@@ -3803,6 +4724,7 @@ static void do_action(int a)
     case M_SAVEAS: save_as(0); break;
     case M_EXPORT: save_as(1); break;
     case M_SAVEDOCX: save_as(2); break;
+    case M_SAVEPDF: save_as(3); break;
     case M_QUIT: if (confirm_discard()) ui_quit(&U); break;
     case M_UNDO: do_undo(0); break;
     case M_REDO: do_undo(1); break;
@@ -4320,7 +5242,7 @@ int main(int argc, char **argv)
     char was_path[512] = "";
     if (argc > 1 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))) {
         printf("usage: rozword [FILE.rwd | FILE.docx | FILE.txt]   - word processor (help rozword)\n"
-               "       rozword -c IN OUT    convert between .rwd, .docx and .txt (no window)\n");
+               "       rozword -c IN OUT    convert between .rwd, .docx and .txt, or OUT.pdf (no window)\n");
         return 0;
     }
     if (argc > 1 && !strcmp(argv[1], "-c")) {           /* ধাপ ২৬খ-৩: উইন্ডো ছাড়া রূপান্তর */
