@@ -330,13 +330,25 @@ static int64_t sys_fcntl(struct interrupt_frame *f, uint64_t fd, uint64_t cmd, u
     }
 }
 
-/* ধাপ ১৬ক: fsync/fdatasync — লেখা সরাসরি block layer-এ যায়, তাই শুধু fd যাচাই */
+/* ধাপ ১৬ক: fsync/fdatasync — fd যাচাই। ধাপ ২৫খ: block layer এখন write-back, তাই
+ * cache-এর জমা লেখাও ডিস্কে পাঠানো (সব ডিস্কের — সহজ ও নিরাপদ) */
 static int64_t sys_fsync(struct interrupt_frame *f, uint64_t fd, uint64_t a2, uint64_t a3,
                          uint64_t a4, uint64_t a5, uint64_t a6)
 {
     int fl = vfs_fd_flags((int)fd);
     (void)f; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
-    return fl < 0 ? fl : 0;
+    if (fl < 0) return fl;
+    block_sync(NULL);
+    return 0;
+}
+
+/* ধাপ ২৫খ: sync() — সব জমা লেখা ডিস্কে */
+static int64_t sys_sync(struct interrupt_frame *f, uint64_t a1, uint64_t a2, uint64_t a3,
+                        uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    (void)f; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+    block_sync(NULL);
+    return 0;
 }
 
 static int64_t sys_open(struct interrupt_frame *f, uint64_t upath, uint64_t flags, uint64_t mode,
@@ -1187,4 +1199,5 @@ void sys_fs_register(void)
     syscall_register(SYS_fcntl, sys_fcntl, "fcntl");
     syscall_register(SYS_fsync, sys_fsync, "fsync");
     syscall_register(SYS_fdatasync, sys_fsync, "fdatasync");
+    syscall_register(SYS_sync, sys_sync, "sync");          /* ধাপ ২৫খ */
 }

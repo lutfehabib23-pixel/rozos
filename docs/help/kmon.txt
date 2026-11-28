@@ -11,7 +11,8 @@ kmon runs as a kernel thread; programs keep running meanwhile.
   `run p args`      start a program and wait; `spawn p args` in background
   `mem`, `heap`     memory map and kernel heap
   `usbstat [reset]` speed of USB disks: commands, time, lock waits, errors;
-                   and the longest pause of the USB keyboard/mouse
+                   the longest pause of the USB keyboard/mouse; and the
+                   write cache (small writes cached, KiB per command)
   `bootlog`         everything the kernel printed while booting (the screen
                     only shows dots - phase 24a)
   `lspci`, `disks` (partitions + file system details), `df`, `mount`, `sync`, `net`

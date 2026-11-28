@@ -12,8 +12,9 @@
  *   ডিরেক্টরিতে লিখলে তার INDEX ফ্ল্যাগ মুছে দেওয়া হয় (e2fsck এটা মেনে নেয়)।
  * সীমা: ফাইল সর্বোচ্চ 4 GiB-1, symlink/hardlink/rename নেই (পরে)।
  *
- * প্রতিটি পরিবর্তন সাথে সাথে ডিস্কে লেখা হয় (bitmap → group descriptor → superblock),
- * ব্লক স্তরের cache write-through — তাই হঠাৎ বন্ধ হলেও e2fsck সাধারণত পরিষ্কার পায়।
+ * প্রতিটি পরিবর্তন সাথে সাথে block layer-এ লেখা হয় (bitmap → group descriptor → superblock)।
+ * ধাপ ২৫খ: block layer এখন write-back — ছোট লেখা ~২ সেকেন্ড cache-এ জমে একসাথে যায়;
+ * sync/umount/reboot সাথে সাথে লেখে। ফাইলের পুরো ব্লকগুলো পাশাপাশি হলে এক লেখায়।
  *
  * vnode cache: প্রতিটি inode-এর একটাই vnode (mount point ঠিক রাখতে জরুরি)।
  * মুছে না ফেলা পর্যন্ত vnode মেমোরিতে থাকে। */
@@ -33,6 +34,7 @@
 #define EXT2_MAGIC              0xEF53
 #define EXT2_ROOT_INO           2
 #define EXT2_NDIR_BLOCKS        12
+#define EXT2_RUN_BYTES          (256 * 1024)   /* ধাপ ২৫খ: এক লেখায় সর্বোচ্চ পাশাপাশি ব্লক */
 
 #define EXT2_INCOMPAT_FILETYPE  0x0002
 #define EXT2_INCOMPAT_FLEX_BG   0x0200   /* ধাপ ২৪ঘ: bitmap/inode table যেকোনো group-এ (আমরা শুধু ঠিকানা পড়ি) */
@@ -205,8 +207,9 @@ static uint32_t blocks_in_group(struct ext2_fs *fs, uint32_t g)
     return n < fs->sb->blocks_per_group ? n : fs->sb->blocks_per_group;
 }
 
-/* শূন্য-করা একটা নতুন ব্লক; ব্যর্থ হলে 0 */
-static uint32_t alloc_block(struct ext2_fs *fs, uint32_t goal_group)
+/* শূন্য-করা একটা নতুন ব্লক; ব্যর্থ হলে 0।
+ * ধাপ ২৫খ: zero = 0 হলে শূন্য লেখা বাদ — যে ডেটা-ব্লক এখনই পুরোটা নতুন ডেটায় ঢাকা পড়বে */
+static uint32_t alloc_block(struct ext2_fs *fs, uint32_t goal_group, int zero)
 {
     uint8_t *bm;
     uint32_t i, result = 0;
@@ -237,7 +240,7 @@ static uint32_t alloc_block(struct ext2_fs *fs, uint32_t goal_group)
         write_super(fs);
         result = fs->sb->first_data_block + g * fs->sb->blocks_per_group + (uint32_t)bit;
     }
-    if (result) {
+    if (result && zero) {
         memset(bm, 0, fs->block_size);
         write_block(fs, result, bm);
     }
@@ -341,11 +344,12 @@ static uint32_t group_of_inode(struct ext2_fs *fs, uint32_t ino)
     return (ino - 1) / fs->sb->inodes_per_group;
 }
 
-/* *slot শূন্য হলে create = 1 এ নতুন ব্লক বসায়; ফেরত ব্লক নম্বর (0 = নেই/ব্যর্থ) */
-static uint32_t ensure_slot(struct ext2_vnode *ev, uint32_t *slot, int create, int *dirty)
+/* *slot শূন্য হলে create = 1 এ নতুন ব্লক বসায়; ফেরত ব্লক নম্বর (0 = নেই/ব্যর্থ)।
+ * ধাপ ২৫খ: zero = 0 → নতুন ব্লক শূন্য করা হয় না (get_block-এর create = 2) */
+static uint32_t ensure_slot(struct ext2_vnode *ev, uint32_t *slot, int create, int *dirty, int zero)
 {
     if (*slot == 0 && create) {
-        uint32_t b = alloc_block(ev->fs, group_of_inode(ev->fs, ev->ino));
+        uint32_t b = alloc_block(ev->fs, group_of_inode(ev->fs, ev->ino), zero);
         if (b) {
             *slot = b;
             ev->inode.blocks += ev->fs->block_size / 512;
@@ -355,6 +359,8 @@ static uint32_t ensure_slot(struct ext2_vnode *ev, uint32_t *slot, int create, i
     return *slot;
 }
 
+/* create: 0 = শুধু খোঁজা, 1 = না থাকলে নতুন (শূন্য-করা), 2 = ধাপ ২৫খ: নতুন ডেটা-ব্লক
+ * শূন্য না করে (লেখক পুরো ব্লক এখনই লিখবে; indirect ব্লক সবসময় শূন্য) */
 static uint32_t get_block(struct ext2_vnode *ev, uint32_t lblock, int create)
 {
     struct ext2_fs *fs = ev->fs;
@@ -363,7 +369,7 @@ static uint32_t get_block(struct ext2_vnode *ev, uint32_t lblock, int create)
     int dirty = 0;
 
     if (lblock < EXT2_NDIR_BLOCKS) {
-        blk = ensure_slot(ev, &ev->inode.block[lblock], create, &dirty);
+        blk = ensure_slot(ev, &ev->inode.block[lblock], create, &dirty, create != 2);
         if (dirty) write_inode(ev);
         return blk;
     }
@@ -378,7 +384,7 @@ static uint32_t get_block(struct ext2_vnode *ev, uint32_t lblock, int create)
         depth = 3; top = 14; path[0] = lblock / (P * P); path[1] = (lblock / P) % P; path[2] = lblock % P;
     }
 
-    blk = ensure_slot(ev, &ev->inode.block[top], create, &dirty);
+    blk = ensure_slot(ev, &ev->inode.block[top], create, &dirty, 1);
     if (dirty) write_inode(ev);
     if (!blk) return 0;
 
@@ -387,7 +393,7 @@ static uint32_t get_block(struct ext2_vnode *ev, uint32_t lblock, int create)
     for (i = 0; i < depth; i++) {
         int bdirty = 0;
         if (read_block(fs, blk, buf) < 0) { blk = 0; break; }
-        ensure_slot(ev, &buf[path[i]], create, &bdirty);
+        ensure_slot(ev, &buf[path[i]], create, &bdirty, i + 1 < depth || create != 2);
         if (bdirty) {
             write_block(fs, blk, buf);
             write_inode(ev);
@@ -567,8 +573,27 @@ static int64_t ext2_write(struct vnode *vn, uint64_t off, const void *buf, size_
         uint32_t in = (uint32_t)((off + done) % fs->block_size);
         size_t n = fs->block_size - in;
         uint32_t pblk;
+        if (in == 0 && len - done >= 2 * (size_t)fs->block_size) {
+            /* ধাপ ২৫খ: পুরো ব্লকগুলো — ডিস্কে পাশাপাশি যতগুলো পড়ে (২৫৬ KiB পর্যন্ত) এক লেখায়,
+             * তাতে block layer এক USB কমান্ডে পাঠায়। আগে প্রতি ব্লক আলাদা লেখা ছিল।
+             * নতুন ব্লক শূন্য করা হয় না (create = 2) — এখনই পুরোটা লেখা হচ্ছে। */
+            uint32_t run_max = EXT2_RUN_BYTES / fs->block_size, cnt = 1;
+            pblk = get_block(ev, lblock, 2);
+            if (!pblk) break;                           /* ডিস্ক ভরা */
+            while (cnt < run_max && len - done >= (size_t)(cnt + 1) * fs->block_size) {
+                uint32_t nb = get_block(ev, lblock + cnt, 2);
+                if (nb != pblk + cnt) break;            /* পাশাপাশি নয় (বা ভরা) — পরের বারে */
+                cnt++;
+            }
+            if (block_write_bytes(fs->dev, (uint64_t)pblk * fs->block_size, in_buf + done,
+                                  (size_t)cnt * fs->block_size) < 0) {
+                break;
+            }
+            done += (size_t)cnt * fs->block_size;
+            continue;
+        }
         if (n > len - done) n = len - done;
-        pblk = get_block(ev, lblock, 1);
+        pblk = get_block(ev, lblock, (in == 0 && n == fs->block_size) ? 2 : 1);
         if (!pblk) break;                               /* ডিস্ক ভরা */
         if (block_write_bytes(fs->dev, (uint64_t)pblk * fs->block_size + in, in_buf + done, n) < 0) {
             break;

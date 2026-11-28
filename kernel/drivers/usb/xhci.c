@@ -259,13 +259,31 @@ static int command(struct xhci *hc, uint32_t d0, uint32_t d1, uint32_t d2, uint3
     return (int)hc->cmd_cc;
 }
 
+/* ধাপ ২৫খ: পেন ড্রাইভ একটা কমান্ডেই কখনো ২-৩ সেকেন্ড আটকে থাকে (ভেতরে flash মোছা)।
+ * তখনো কিবোর্ড/মাউস চলুক — scsi_rw চলাকালীন (msc_busy_hc) অপেক্ষার লুপেও HID সেবা,
+ * ৮ ms পরপর। hid_in_wait: HID সেবার ভেতরের control()/wait_ep আবার HID-এ না ঢোকে। */
+static void hid_service_hc(struct xhci *hc);
+static uint64_t hid_last_ms, hid_gap_max_ms;
+static struct xhci *msc_busy_hc;
+static int hid_in_wait;
+static uint64_t hid_wait_ms;
+
 static int wait_ep(struct xhci *hc, struct usb_ep *ep, uint64_t ms)
 {
     uint64_t end = timer_uptime_ms() + ms;
     while (!ep->done) {
+        uint64_t now;
         handle_events(hc);
         if (ep->done) break;
-        if (timer_uptime_ms() > end) return -ETIMEDOUT;
+        now = timer_uptime_ms();
+        if (now > end) return -ETIMEDOUT;
+        if (msc_busy_hc == hc && !hid_in_wait && now - hid_wait_ms >= 8) {
+            hid_wait_ms = now;
+            hid_in_wait = 1;
+            hid_service_hc(hc);
+            hid_in_wait = 0;
+            if (ep->done) break;
+        }
         idle_wait();
     }
     return (int)ep->cc;
@@ -438,7 +456,7 @@ static uint8_t *msc_data(struct usb_dev *d) { return d->buf + VMM_PAGE_SIZE; }
  * hc->lock হাতে থাকা অবস্থায় ডাকতে হয় (usbd আর scsi_rw দুজনেই ডাকে)।
  * hid_gap_max: দুই সেবার মাঝে সবচেয়ে বড় ফাঁক (kmon usbstat) — মাউস আটকালে এটা বড় হয়। */
 static void hid_service(struct usb_dev *d);
-static uint64_t hid_last_ms, hid_gap_max_ms;
+/* (hid_last_ms, hid_gap_max_ms ধাপ ২৫খ থেকে wait_ep-এর ওপরে) */
 static void hid_service_hc(struct xhci *hc)
 {
     int i, any = 0;
@@ -466,6 +484,7 @@ static int scsi_rw(struct usb_dev *d, int write, uint64_t lba, uint32_t count, u
     t1 = timer_uptime_ns();                      /* ধাপ ২৪ঘ: lock-এর জন্য কত অপেক্ষা */
     d->st_lock_ns += t1 - t0;
     if (t1 - t0 > d->st_lock_max_ns) d->st_lock_max_ns = t1 - t0;
+    msc_busy_hc = hc;                            /* ধাপ ২৫খ: wait_ep-এ HID সেবা চালু */
     while (count && !err) {
         uint32_t n = count < max ? count : max;
         uint8_t cdb[10];
@@ -493,6 +512,7 @@ static int scsi_rw(struct usb_dev *d, int write, uint64_t lba, uint32_t count, u
         count -= n;
         hid_service_hc(hc);                      /* ধাপ ২৫ক: কমান্ডের ফাঁকে মাউস/কিবোর্ড */
     }
+    msc_busy_hc = NULL;
     kmutex_unlock_yield(&hc->lock);              /* ধাপ ২৫ক: usbd অপেক্ষায় থাকলে তার পালা */
     return err;
 }
@@ -1049,6 +1069,24 @@ void usb_stat_dump(int reset)
     /* ধাপ ২৫ক: কিবোর্ড/মাউস কতক্ষণ সেবা পায়নি (বড় হলে = তখন মাউস আটকে ছিল) */
     if (reset) hid_gap_max_ms = 0;
     else if (hid_last_ms) kprintf("keyboard/mouse: longest pause %llu ms\n", (unsigned long long)hid_gap_max_ms);
+    /* ধাপ ২৫খ: write-back cache — কতগুলো ছোট লেখা জমে কয়টা বড় কমান্ড হলো */
+    if (reset) {
+        block_wb_reset_stats();
+    } else {
+        struct block_wb_stats w;
+        block_wb_get_stats(&w);
+        kprintf("write cache: %s, %llu small writes cached (%llu merged), not yet written %llu KiB\n",
+                w.enabled ? "on" : "off (early boot)", (unsigned long long)w.cached_writes,
+                (unsigned long long)w.absorbed, (unsigned long long)w.dirty_kib);
+        kprintf("  flushed %llu KiB in %llu commands (average %llu KiB), %llu flushes, %llu forced\n",
+                (unsigned long long)(w.chunks * 4), (unsigned long long)w.commands,
+                (unsigned long long)(w.commands ? w.chunks * 4 / w.commands : 0),
+                (unsigned long long)w.flushes, (unsigned long long)w.forced);
+        if (w.errors || w.lost_chunks) {
+            kprintf("  errors %llu, lost %llu KiB\n", (unsigned long long)w.errors,
+                    (unsigned long long)(w.lost_chunks * 4));
+        }
+    }
     if (reset) kprintf("usbstat: counters cleared\n");
     else if (!any) kprintf("no USB storage\n");
 }

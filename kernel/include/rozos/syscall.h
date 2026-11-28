@@ -101,6 +101,7 @@
 #define SYS_fcntl           72
 #define SYS_fsync           74
 #define SYS_fdatasync       75
+#define SYS_sync            162     /* ধাপ ২৫খ: Linux-এর নম্বর */
 
 #define SYSCALL_MAX         512
 

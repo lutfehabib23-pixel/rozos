@@ -42,6 +42,7 @@
 #define SYS_fcntl     72
 #define SYS_fsync     74
 #define SYS_fdatasync 75
+#define SYS_sync      162     /* ধাপ ২৫খ */
 
 #define SC(n, a, b, c, d, e) __syscall_ret(__syscall6((n), (long)(a), (long)(b), (long)(c), (long)(d), (long)(e), 0))
 
@@ -495,7 +496,7 @@ ssize_t pread(int fd, void *buf, size_t n, off_t off) { return SC(SYS_pread64, f
 ssize_t pwrite(int fd, const void *buf, size_t n, off_t off) { return SC(SYS_pwrite64, fd, buf, n, off, 0); }
 int fsync(int fd) { return (int)SC(SYS_fsync, fd, 0, 0, 0, 0); }
 int fdatasync(int fd) { return (int)SC(SYS_fdatasync, fd, 0, 0, 0, 0); }
-void sync(void) { }
+void sync(void) { (void)SC(SYS_sync, 0, 0, 0, 0, 0); }   /* ধাপ ২৫খ: আগে কিছু করত না */
 int getpagesize(void) { return 4096; }
 int getdtablesize(void) { return 256; }
 long gethostid(void) { return 0x7f0101; }

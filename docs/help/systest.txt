@@ -1,5 +1,5 @@
 # systest - self-test
-`systest` runs 242 checks and prints [ ok ] or [FAIL] for each:
+`systest` runs 245 checks and prints [ ok ] or [FAIL] for each:
   syscalls through `syscall` and `int 0x80`, bad addresses rejected,
   brk and mmap memory, the stack growing on demand, files in /tmp,
   chdir/getcwd, getdents64, fork/execve/wait, crashing children,
@@ -45,5 +45,7 @@
       fnmatch, the default program path ([[toolchain]]).
   17b) IPv6 types for GCC; socket(AF_INET6) refused ([[gcc]]).
   17c) C++ reference pages, Code's C++ template ([[cref]]).
+  25b) the write cache: small, large and in-place writes read back
+      the same at once; fsync() and sync(); 20 small files ([[disks]]).
 The exit code is the number of failures (0 = all good).
 Source: userland/tests/systest.c. See [[processes]], [[syscalls]].

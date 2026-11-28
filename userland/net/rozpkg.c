@@ -661,6 +661,7 @@ static int remove_pkg(const char *name, int verbose)
     unlink(path);
     snprintf(path, sizeof(path), DB_DIR "/%s.ver", name);
     unlink(path);
+    sync();                                      /* ধাপ ২৫খ: পেন ড্রাইভে সাথে সাথে */
     if (verbose) printf("removed %s %s (%d files)\n", name, ver, nfiles);
     return 0;
 }
@@ -715,6 +716,7 @@ static int install_one(const char *name, int force)
         dprintf(lfd, "%s\n", p->version);
         close(lfd);
     }
+    sync();                                      /* ধাপ ২৫খ: পেন ড্রাইভে সাথে সাথে */
     printf("installed %s %s (%d files) — see `rozpkg info %s`\n", p->name, p->version, nfiles, p->name);
     return 0;
 }

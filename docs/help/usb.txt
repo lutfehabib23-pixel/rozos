@@ -8,8 +8,10 @@ rozOS drives the xHCI USB controller (USB 3, 2 and 1.1 ports):
 Plug it in: rozOS finds the first FAT or ext2 partition and mounts it
 on /mnt/usb (a second drive goes to /mnt/usb2). Look in Files (Disks /mnt)
 or `ls /mnt/usb`. Before pulling it out:  `umount /mnt/usb`
-(everything is written at once anyway, but umount makes sure no file is
-open). Pulled out without umount: rozOS unmounts it if it can.
+(phase 25b: small writes wait about 2 seconds in the cache so they can go
+to the drive together - umount, or `sync`, writes them at once and makes
+sure no file is open). Pulled out without umount: rozOS unmounts it if it
+can; what was written in the last 2 seconds may be lost.
 NTFS and exFAT drives are not readable yet - format them as FAT32.
 
 == Try it in QEMU ==

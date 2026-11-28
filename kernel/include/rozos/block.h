@@ -4,8 +4,9 @@
  * শুধু "sector n থেকে count টা পড়ো/লেখো" দেয়; বাকিটা এই স্তরের:
  *   - নাম (sda, sdb ...) আর /dev-এ কাঁচা ডিভাইস ফাইল
  *   - বাইট-ভিত্তিক পড়া/লেখা (block_read_bytes) — sector-এর মাঝখান থেকেও
- *   - 4 KiB-এর write-through cache: পড়া দ্রুত, আর প্রতিটি লেখা সাথে সাথে ডিস্কে যায়
- *     (বিদ্যুৎ চলে গেলেও ফাইলসিস্টেম নষ্ট হওয়ার ঝুঁকি কম)
+ *   - 4 KiB-এর cache: পড়া দ্রুত। ধাপ ২৫খ থেকে write-back — ছোট লেখা cache-এ জমে,
+ *     "bflush" থ্রেড ~২ সেকেন্ডে ঠিকানার ক্রমে বড় কমান্ডে লেখে; sync/umount/reboot/
+ *     poweroff সাথে সাথে লেখে। বড় একটানা লেখা সরাসরি ডিস্কে।
  *   - ধাপ ১১খ: partition (sda1, sda2 ...) — নিজস্ব ড্রাইভার নেই, parent ডিস্কের একটা
  *     অংশ; পড়া/লেখা parent-এর cache দিয়েই যায়, তাই /dev/sda আর /dev/sda2 সবসময় এক। */
 #ifndef ROZOS_BLOCK_H
@@ -69,13 +70,28 @@ int block_write(struct block_device *dev, uint64_t lba, uint32_t count, const vo
 int block_read_bytes(struct block_device *dev, uint64_t offset, void *buf, size_t len);
 int block_write_bytes(struct block_device *dev, uint64_t offset, const void *buf, size_t len);
 /* ধাপ ২৪গ: cache এড়িয়ে বড় একটানা লেখা (sector-এর গুণিতক) */
-/* ধাপ ২৪ঘ-এর batch; ধাপ ২৪চ থেকে কিছু করে না (২৪গ-এর write-through) */
+/* ধাপ ২৪ঘ-এর batch; ধাপ ২৫খ: begin কিছু করে না, end সেই ডিস্কের জমা লেখা পাঠায় */
 void block_batch_begin(struct block_device *dev);
 int  block_batch_end(struct block_device *dev);
 int block_write_direct(struct block_device *dev, uint64_t offset, const void *buf, size_t len);
 /* ধাপ ১৫খ: ডিস্ক (বা partition-এর ডিস্ক) শুধু পড়া যায় কিনা */
 int block_is_read_only(struct block_device *dev);
 
-int block_sync(struct block_device *dev);           /* NULL = সব ডিভাইস */
+int block_sync(struct block_device *dev);           /* NULL = সব ডিভাইস; আগে cache-এর dirty অংশ */
+
+/* ধাপ ২৫খ: write-back cache-এর হিসাব (kmon usbstat) */
+struct block_wb_stats {
+    uint64_t cached_writes;      /* cache-এ জমা ছোট লেখা */
+    uint64_t absorbed;           /* আগে থেকেই dirty chunk-এ আবার লেখা (ডিস্কে একবারই যাবে) */
+    uint64_t commands;           /* flush-এ ডিস্ক কমান্ড */
+    uint64_t chunks;             /* flush-এ লেখা 4 KiB chunk */
+    uint64_t flushes;            /* bflush কতবার জেগে লিখল */
+    uint64_t forced;             /* অনেক জমায় লেখক নিজেই লিখল */
+    uint64_t errors, lost_chunks;
+    uint64_t dirty_kib;          /* এই মুহূর্তে না-লেখা */
+    int enabled;                 /* bflush চালু */
+};
+void block_wb_get_stats(struct block_wb_stats *out);
+void block_wb_reset_stats(void);
 
 #endif

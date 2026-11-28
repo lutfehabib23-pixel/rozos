@@ -45,7 +45,12 @@ own disk are writable. To allow writing anyway, add the word `diskwrite`
 to the kernel command line in the boot menu ([[boot-menu]]: press e).
 
 == Driver stack ==
-PCI scan -> AHCI (SATA), NVMe and USB (xHCI) drivers -> block layer with a 4 KiB write-through
-cache -> partitions (GPT/MBR) -> ext2 and [[fat]] -> VFS. Writes reach the disk at once; [[kmon]]'s `sync`
-flushes the disk's own cache. On the PC `make disk-check` runs e2fsck
-and fsck.fat. kmon's `disks` shows every file system in detail.
+PCI scan -> AHCI (SATA), NVMe and USB (xHCI) drivers -> block layer with a 16 MiB
+cache (4 KiB pieces) -> partitions (GPT/MBR) -> ext2 and [[fat]] -> VFS.
+Writing (phase 25b): small writes (folders, file details, small files) wait
+in the cache for about 2 seconds, then go to the disk together, sorted and
+joined into big commands - many times fewer commands, much faster on pen
+drives. Big files go straight to the disk. `sync` (or [[kmon]]'s `sync`)
+writes everything now; umount, reboot and poweroff do it by themselves.
+On the PC `make disk-check` runs e2fsck and fsck.fat. kmon's `disks` shows
+every file system in detail.

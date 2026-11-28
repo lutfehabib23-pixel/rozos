@@ -732,7 +732,7 @@ $(INITRD): $(SYSROOT_FILES) $(USER_STRIPPED) $(LIBC_A) $(LIBC_CRTS) $(TCC_EXTRA)
 # /etc/rozos.conf (mode=text) আর /etc/motd ("RESCUE MODE") আসে rescue/etc থেকে।
 RESCUE_PROGS := init rozsh sh ls cat cp mv rm mkdir rmdir touch wc echo clear sleep stty uname date \
                 mount umount lsusb kinstall reboot poweroff kmon edit rozhelp chattr lsattr \
-                tar find grep head tail
+                tar find grep head tail sync
 RESCUE_BINS  := $(addprefix $(USER_BUILD)/stripped/,$(filter $(RESCUE_PROGS),$(USER_PROGS)))
 RESCUE_HELP  := $(wildcard $(addprefix docs/help/,$(addsuffix .txt,rescue index help keys rozsh builtins redirect \
                 mount usb disks partitions fat kinstall boot-menu reboot edit sbase rozlock files)))

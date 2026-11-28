@@ -318,6 +318,7 @@ static int cmd_install(const char *src)
         printf("  removed old build %s\n", ids[nids]);
     }
     if (save_state() < 0 || write_menu() < 0) return 1;
+    sync();                                      /* ধাপ ২৫খ: cache-এর জমা লেখা এখনই ডিস্কে */
     printf("  %s\n  boot menu updated: build %s is the default. Now: reboot\n", path, t.id);
     printf("  (if it does not boot: choose an older entry in the menu, then kinstall -d ID)\n");
     return 0;
@@ -423,6 +424,7 @@ static int cmd_resolution(const char *r)
         fclose(f);
     }
     if (write_menu() < 0) return 1;
+    sync();                                      /* ধাপ ২৫খ */
     printf("screen resolution: %s - from the next boot (reboot). If the screen stays black,\n"
            "the firmware cannot do it: Limine then picks another mode by itself.\n",
            strcmp(r, "auto") ? r : "auto (Limine chooses)");

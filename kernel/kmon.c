@@ -1092,11 +1092,13 @@ static void run_command(int argc, char **argv)
         __asm__ __volatile__("ud2");
     } else if (!strcmp(cmd, "reboot")) {
         kprintf("rebooting...\n");
+        block_sync(NULL);                        /* ধাপ ২৫খ: cache-এর জমা লেখা আগে */
         cpu_cli();
         machine_restart();                       /* ধাপ ২৪ক */
         kprintf("reset failed - halting\n");
         cpu_halt_forever();
     } else if (!strcmp(cmd, "halt")) {
+        block_sync(NULL);                        /* ধাপ ২৫খ */
         kprintf("halted.\n");
         cpu_halt_forever();
     } else {

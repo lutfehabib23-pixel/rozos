@@ -2250,6 +2250,69 @@ static void test_phase17c(void)
     check(access("/usr/share/templates/hello.cpp", R_OK) == 0, "Code's C++ template (File > New C++ file)");
 }
 
+/* ধাপ ২৫খ: block layer write-back — ছোট/বড়/অসমান লেখা সাথে সাথে পড়া যায়, মাঝখানে বদল
+ * হারায় না, fsync()/sync() ডিস্কে পাঠায় (ext2-এ, /home) */
+static void test_phase25b(void)
+{
+    const char *path = "/home/.systest-25b";
+    size_t n = 600 * 1024, i, got = 0;
+    unsigned char *a = (unsigned char *)malloc(n), *b = (unsigned char *)malloc(n);
+    struct stat st;
+    int fd, ok = 0, same = 0, k;
+    if (!a || !b) {
+        check(0, "write cache test: memory");
+        free(a);
+        free(b);
+        return;
+    }
+    for (i = 0; i < n; i++) a[i] = (unsigned char)(i * 31 + (i >> 9));
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0) {
+        ok = write(fd, a, 5000) == 5000 &&                         /* ছোট, অসমান */
+             write(fd, a + 5000, n - 5000) == (ssize_t)(n - 5000) && /* বড় একটানা */
+             pwrite(fd, "XYZ", 3, 4093) == 3 &&                     /* দুই ব্লকের সীমায় বদল */
+             pwrite(fd, "Q", 1, 300000) == 1;
+        memcpy(a + 4093, "XYZ", 3);
+        a[300000] = 'Q';
+        close(fd);
+    }
+    fd = open(path, O_RDONLY);
+    if (fd >= 0) {
+        ssize_t r;
+        while (got < n && (r = read(fd, b + got, n - got)) > 0) got += (size_t)r;
+        same = got == n && !memcmp(a, b, n);
+        close(fd);
+    }
+    check(ok && same, "write cache: small, large and in-place writes read back the same at once");
+    fd = open(path, O_RDWR);
+    check(fd >= 0 && fsync(fd) == 0, "fsync() writes the cached data to the disk");
+    if (fd >= 0) close(fd);
+    for (k = 0; k < 20; k++) {                                     /* অনেক ছোট ফাইল */
+        char nm[64];
+        snprintf(nm, sizeof(nm), "%s.%d", path, k);
+        fd = open(nm, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd >= 0) {
+            if (write(fd, nm, strlen(nm)) != (ssize_t)strlen(nm)) ok = 0;
+            close(fd);
+        } else {
+            ok = 0;
+        }
+    }
+    sync();
+    for (k = 0; k < 20; k++) {
+        char nm[64], rd[64];
+        int m;
+        snprintf(nm, sizeof(nm), "%s.%d", path, k);
+        m = read_all(nm, rd, sizeof(rd));
+        if (m != (int)strlen(nm) || memcmp(rd, nm, (size_t)m)) ok = 0;
+        unlink(nm);
+    }
+    check(ok && stat(path, &st) == 0 && st.st_size == (off_t)n, "20 small files + sync(): all there");
+    unlink(path);
+    free(a);
+    free(b);
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -2287,6 +2350,7 @@ int main(int argc, char **argv)
     test_phase17a();
     test_phase17b();
     test_phase17c();
+    test_phase25b();
     printf("systest: %d passed, %d failed\n", passed, failed);
     return failed;
 }
